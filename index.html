@@ -86,6 +86,19 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
 .nav-btn:hover{color:#fff;background:rgba(255,255,255,.1)}
 .nav-btn.active{background:var(--gold);color:var(--navy);border-color:var(--gold);font-weight:600}
 .hdr-right{display:flex;gap:6px;align-items:center;flex-shrink:0}
+.hdr-search{position:relative;flex-shrink:0}
+.hdr-search input{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:99px;color:#fff;font-size:12px;font-family:inherit;padding:5px 14px 5px 30px;width:160px;outline:none;transition:all .2s}
+.hdr-search input::placeholder{color:rgba(255,255,255,.4)}
+.hdr-search input:focus{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.5);width:200px}
+.hdr-search .s-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:11px;pointer-events:none;opacity:.6}
+#searchDropdown{position:absolute;top:calc(100% + 8px);right:0;width:300px;background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.22);z-index:9999;max-height:300px;overflow-y:auto;display:none}
+.search-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;transition:background .1s}
+.search-item:last-child{border-bottom:none}
+.search-item:hover,.search-item:focus{background:#f0f4ff}
+.search-item-title{font-weight:600;color:var(--navy);font-size:12px;margin-bottom:1px}
+.search-item-sub{color:#888;font-size:11px}
+.search-item-badge{display:inline-block;font-size:10px;padding:0 5px;border-radius:99px;background:var(--navy);color:#FFC000;margin-left:5px;font-weight:600;vertical-align:middle}
+.search-empty{padding:18px;text-align:center;color:#aaa;font-size:12px}
 
 /* MONTH STRIP */
 .month-strip{background:var(--navy2);display:flex;align-items:stretch;padding:0 14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.1)}
@@ -597,6 +610,14 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
     <button class="nav-btn" id="navDash" onclick="showPage('dashboard')">📊 Dashboard</button>
     <button class="nav-btn" id="navStaff" onclick="showPage('staff')">👥 Nhân sự</button>
     <button class="nav-btn" id="navSettings" onclick="showPage('settings')">⚙ Cài đặt</button>
+  </div>
+  <div class="hdr-search">
+    <span class="s-icon">🔍</span>
+    <input type="text" id="searchInput" placeholder="Tìm dự án, nhân sự…"
+      oninput="handleSearch(this.value)" onkeydown="handleSearchKey(event)"
+      onfocus="if(this.value.trim().length>1)showSearchDropdown()"
+      onblur="setTimeout(hideSearchDropdown,200)">
+    <div id="searchDropdown"></div>
   </div>
   <div class="hdr-right">
     <button class="sync-btn" id="syncBtn" onclick="sbReloadData()" title="Realtime — bấm để tải lại dữ liệu từ Supabase">
@@ -4761,77 +4782,117 @@ function doExportTlPDF(pjId) {
     const barHTML = bw2>0?`<div style="position:absolute;left:${bx}px;top:${barY}px;width:${bw2}px;height:${barH}px;background:${barColor};border-radius:2px"></div>
       <span style="position:absolute;left:${bx+2}px;top:0;font-size:7pt;color:#fff;line-height:16px;font-weight:bold;white-space:nowrap">${t.start?t.start.slice(5).replace('-','/'):''}${bw2>60?'  →  '+t.end.slice(5).replace('-','/'):''}  </span>`:'';
 
-    return `<tr style="background:${bgRow};${borderTop}">
-      <td style="border:1px solid #bbb;padding:3px 4px;font-size:9pt;text-align:center;color:#555">${id}</td>
-      <td style="border:1px solid #bbb;padding:3px 6px;font-size:${fs};font-weight:${fw};padding-left:${indent+6}px">${x(t.name)}</td>
-      <td style="border:1px solid #bbb;padding:3px 4px;font-size:8pt;text-align:center;color:#555">${t.content||''}</td>
-      <td style="border:1px solid #bbb;padding:3px 4px;font-size:8pt;text-align:center;font-weight:bold">${wds?wds+' ngày':''}</td>
-      <td style="border:1px solid #bbb;padding:3px 4px;font-size:8pt;text-align:center">${t.start?t.start.slice(5).replace('-','/'):''}</td>
-      <td style="border:1px solid #bbb;padding:3px 4px;font-size:8pt;text-align:center">${t.end?t.end.slice(5).replace('-','/'):''}</td>
-      <td style="border:1px solid #bbb;padding:0;position:relative;min-width:${totalDays*DAY_W}px;height:16px">
-        <div style="position:relative;height:16px;width:${totalDays*DAY_W}px">
+    const rowClass = t.lv==='group'?'grp-row':t.lv==='subtask'?'sub-row':'task-row';
+    return `<tr class="${rowClass}">
+      <td style="text-align:center;color:#777;width:26px">${id}</td>
+      <td style="padding-left:${indent+6}px;font-size:${fs};font-weight:${fw}">${x(t.name)}</td>
+      <td style="text-align:center;color:#555">${t.content||''}</td>
+      <td style="text-align:center;font-weight:600;color:#1F3864">${wds?wds+' ngày':''}</td>
+      <td style="text-align:center">${t.start?t.start.slice(5).replace('-','/'):''}</td>
+      <td style="text-align:center">${t.end?t.end.slice(5).replace('-','/'):''}</td>
+      <td class="gantt-bar-cell" style="min-width:${totalDays*DAY_W}px;height:18px">
+        <div style="position:relative;height:18px;width:${totalDays*DAY_W}px">
           ${barHTML}
-          ${weeks.map((w,wi)=>`<div style="position:absolute;left:${wi*7*DAY_W}px;top:0;bottom:0;width:1px;background:#ddd"></div>`).join('')}
+          ${weeks.map((w,wi)=>`<div style="position:absolute;left:${wi*7*DAY_W}px;top:0;bottom:0;width:1px;background:#e0e0e0"></div>`).join('')}
         </div>
       </td>
     </tr>`;
   }).join('');
 
   const weekHeadersHTML = weeks.map((w,wi)=>`
-    <th style="border:1px solid #bbb;padding:2px;font-size:7.5pt;text-align:center;font-weight:normal;width:${COL_W}px;background:#E8EAF6;color:#1F3864">
+    <th style="border:1px solid #354f8a;padding:2px;font-size:7.5pt;text-align:center;font-weight:500;width:${COL_W}px;background:#2a4f88;color:rgba(255,255,255,.85)">
       ${w.getMonth()+1}/${w.getDate()}
     </th>`).join('');
 
   const noteLines = note.split('\n').filter(Boolean).map(l=>`<li style="margin:2px 0">${x(l.replace(/^-\s*/,''))}</li>`).join('');
 
+  const printDate = new Date().toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'});
   const html = `<!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
 <title>${x(title)} — ${x(pjName)}</title>
 <style>
-  body{font-family:Arial,sans-serif;font-size:10pt;margin:16mm;color:#111}
+  *{box-sizing:border-box}
+  body{font-family:'Segoe UI',Arial,sans-serif;font-size:9pt;margin:12mm;color:#1a1a2e;background:#fff}
   table{border-collapse:collapse;width:100%}
   th,td{vertical-align:middle}
-  h1{font-size:14pt;text-align:center;text-transform:uppercase;margin:4px 0}
-  h2{font-size:12pt;text-align:center;text-transform:uppercase;margin:2px 0 8px}
-  .info-line{font-size:9pt;margin:1px 0}
+  /* Company header */
+  .co-header{background:#1F3864;color:#fff;padding:10px 16px;border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:space-between;margin-bottom:0}
+  .co-name{font-size:13pt;font-weight:700;letter-spacing:.5px}
+  .co-sub{font-size:8pt;opacity:.75;margin-top:2px}
+  .co-logo{font-size:22pt;font-weight:900;color:#FFC000;letter-spacing:-1px;line-height:1}
+  /* Title bar */
+  .title-bar{background:#FFC000;color:#1F3864;text-align:center;padding:7px 16px;font-size:13pt;font-weight:800;text-transform:uppercase;letter-spacing:.8px;border-bottom:3px solid #1F3864}
+  .pj-name-bar{background:#E8EAF6;text-align:center;padding:5px 16px;font-size:11pt;font-weight:700;color:#1F3864;border-bottom:1px solid #c5cae9}
+  /* Info table */
+  .info-tbl{width:100%;border:1px solid #c5cae9;margin:10px 0;font-size:8.5pt}
+  .info-tbl td{padding:4px 10px;border:1px solid #c5cae9}
+  .info-tbl .lbl{background:#E8EAF6;font-weight:600;color:#1F3864;width:130px;white-space:nowrap}
+  /* Gantt table */
+  .gantt-tbl{font-size:8.5pt;margin-top:8px;width:100%}
+  .gantt-tbl th{background:#1F3864;color:#FFC000;padding:4px 6px;border:1px solid #354f8a;font-weight:600;white-space:nowrap}
+  .gantt-tbl td{border:1px solid #c5cae9;padding:2px 4px}
+  .grp-row td{background:#dde3f5;font-weight:700;color:#1F3864;border-top:2px solid #1F3864}
+  .task-row td{background:#fff}
+  .sub-row td{background:#f8f9fd}
+  .done-bar{background:#22c55e}
+  .gantt-bar-cell{padding:0;position:relative}
+  /* Footer */
+  .doc-footer{margin-top:14px;display:flex;justify-content:space-between;font-size:8pt;color:#888;border-top:1px solid #ddd;padding-top:7px}
+  .sig-block{text-align:center;font-size:8.5pt}
+  .sig-block .sig-title{font-weight:600;color:#1F3864;margin-bottom:40px}
+  .sig-block .sig-line{border-top:1px solid #555;width:160px;margin:0 auto;padding-top:4px;font-size:8pt;color:#555}
+  .note-box{margin-top:10px;border:1px solid #c5cae9;border-radius:4px;padding:8px 12px;background:#f8f9fd;font-size:8.5pt;color:#333}
+  .note-box b{color:#1F3864}
   @media print{
-    body{margin:10mm}
-    @page{size:A3 landscape;margin:10mm}
+    body{margin:8mm}
+    @page{size:A3 landscape;margin:8mm}
+    .no-print{display:none}
   }
 </style>
 </head>
 <body>
-<table style="margin-bottom:10px;border:none">
+<div class="co-header">
+  <div>
+    <div class="co-name">GENDAI SOUGO VIỆT NAM</div>
+    <div class="co-sub">Studio Phối Cảnh Kiến Trúc — Architecture Visualization</div>
+  </div>
+  <div class="co-logo">GS</div>
+</div>
+<div class="title-bar">${x(title)}</div>
+<div class="pj-name-bar">${x(pjName)}</div>
+
+<table class="info-tbl">
   <tr>
-    <td style="border:none;vertical-align:top;width:40%">
-      <div class="info-line"><b>Địa chỉ:</b> ${x(addr)}</div>
-      <div class="info-line"><b>Chủ đầu tư:</b> ${x(cdt)}</div>
-      <div class="info-line"><b>Tư vấn thiết kế:</b> ${x(tvtk)}</div>
-    </td>
-    <td style="border:none;text-align:center;width:60%">
-      <h1>${x(title)}</h1>
-      <h2>${x(pjName)}</h2>
-    </td>
+    <td class="lbl">Địa chỉ công trình</td>
+    <td>${x(addr)||'—'}</td>
+    <td class="lbl">Ngày lập</td>
+    <td>${printDate}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Chủ đầu tư</td>
+    <td>${x(cdt)||'—'}</td>
+    <td class="lbl">Tư vấn thiết kế</td>
+    <td>${x(tvtk)||'—'}</td>
   </tr>
 </table>
 
-<table style="font-size:9pt">
+<table class="gantt-tbl">
   <thead>
-    <tr style="background:#1F3864;color:#FFC000">
-      <th style="border:1px solid #bbb;padding:4px;width:28px">ID</th>
-      <th style="border:1px solid #bbb;padding:4px;text-align:left;min-width:200px">CÔNG VIỆC</th>
-      <th style="border:1px solid #bbb;padding:4px;width:70px">NỘI DUNG</th>
-      <th style="border:1px solid #bbb;padding:4px;width:60px">NGÀY LÀM VIỆC</th>
-      <th style="border:1px solid #bbb;padding:4px;width:54px">BẮT ĐẦU</th>
-      <th style="border:1px solid #bbb;padding:4px;width:54px">BÁO CÁO & XUẤT HỒ SƠ</th>
-      <th style="border:1px solid #bbb;padding:4px">
+    <tr>
+      <th style="width:26px">ID</th>
+      <th style="text-align:left;min-width:190px">CÔNG VIỆC / HẠNG MỤC</th>
+      <th style="width:65px">NỘI DUNG</th>
+      <th style="width:55px">SỐ NGÀY</th>
+      <th style="width:52px">BẮT ĐẦU</th>
+      <th style="width:52px">KẾT THÚC</th>
+      <th>
         <table style="width:100%;border:none">
           <tr>
             ${weeks.map(w=>{
-              const mo = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-              return `<th style="border:none;width:${COL_W}px;text-align:center;font-size:8pt;padding:1px;border-right:1px solid rgba(255,255,255,.3)">${mo[w.getMonth()+1]} '${String(w.getFullYear()).slice(2)}</th>`;
+              const mo = ['','T1','T2','T3','T4','T5','T6','T7','T8','T9','T10','T11','T12'];
+              return `<th style="border:none;width:${COL_W}px;text-align:center;font-size:7.5pt;padding:1px;border-right:1px solid rgba(255,192,0,.3);font-weight:700">${mo[w.getMonth()+1]}/${String(w.getFullYear()).slice(2)}</th>`;
             }).join('')}
           </tr>
           <tr>${weekHeadersHTML}</tr>
@@ -4842,11 +4903,25 @@ function doExportTlPDF(pjId) {
   <tbody>${rowsHTML}</tbody>
 </table>
 
-${noteLines?`<div style="margin-top:14px;font-size:8.5pt;color:#444;border-top:1px solid #ccc;padding-top:8px">
-  <b>Lưu ý:</b>
-  <ul style="margin:4px 0 0 16px;padding:0">${noteLines}</ul>
-</div>`:''}
+${noteLines?`<div class="note-box"><b>Lưu ý:</b><ul style="margin:5px 0 0 18px;padding:0">${noteLines}</ul></div>`:''}
 
+<div class="doc-footer">
+  <div style="flex:1">
+    <div class="sig-block">
+      <div class="sig-title">Người lập biểu</div>
+      <div class="sig-line">Ký tên & đóng dấu</div>
+    </div>
+  </div>
+  <div style="flex:1;text-align:center;color:#aaa;font-size:7.5pt;align-self:flex-end">
+    Gendai Sougo Việt Nam — Tài liệu nội bộ — ${printDate}
+  </div>
+  <div style="flex:1">
+    <div class="sig-block">
+      <div class="sig-title">Kiểm tra & Phê duyệt</div>
+      <div class="sig-line">Ký tên & đóng dấu</div>
+    </div>
+  </div>
+</div>
 </body>
 </html>`;
 
@@ -6678,37 +6753,171 @@ async function sbReloadData() {
 }
 
 function checkMorningNotification() {
-  var today = new Date().toISOString().slice(0,10);
+  var now = new Date();
+  var today = now.toISOString().slice(0,10);
   if (localStorage.getItem('morning_notif_date') === today) return;
-  var hour = new Date().getHours();
+  var hour = now.getHours();
   if (hour < 7 || hour >= 12) return;
   localStorage.setItem('morning_notif_date', today);
-  var ups = [], leaves = [];
+
+  var day3 = new Date(now); day3.setDate(day3.getDate()+3);
+  var day3Str = day3.toISOString().slice(0,10);
+
+  var ups = [], leaves = [], deadlines = [];
+
   Object.values(D.months||{}).forEach(function(m) {
     [].concat(m.projects||[], m.projectsVN||[]).forEach(function(p) {
+      var pName = p.nameVN || p.nameJP || p.id;
       (p.groups||[]).forEach(function(g) {
         (g.rows||[]).forEach(function(r) {
           if (r.upTime && r.upTime.slice(0,10) === today && !r.doneAt)
-            ups.push((p.nameVN||p.nameJP||p.id) + (r.staff ? ' — ' + r.staff : ''));
+            ups.push({pj: pName, staff: r.staff||''});
+          if (r.dateTo && !r.doneAt && r.dateTo >= today && r.dateTo <= day3Str) {
+            var daysLeft = Math.round((new Date(r.dateTo)-now)/(1000*60*60*24));
+            deadlines.push({pj: pName, staff: r.staff||'', date: r.dateTo, days: daysLeft});
+          }
         });
       });
     });
   });
-  Object.entries(D.settings&&D.settings.staffProfiles||{}).forEach(function(entry) {
+
+  Object.entries((D.settings&&D.settings.staffProfiles)||{}).forEach(function(entry) {
     var name = entry[0], prof = entry[1];
     (prof.leaves||[]).forEach(function(l) {
       if (l.from <= today && (!l.to || l.to >= today))
-        leaves.push(name + ' (' + (l.session==='morning'?'Sáng':l.session==='afternoon'?'Chiều':'Cả ngày') + ')');
+        leaves.push({name: name, session: l.session==='morning'?'Sáng':l.session==='afternoon'?'Chiều':'Cả ngày'});
     });
   });
-  if (ups.length === 0 && leaves.length === 0) return;
-  var html = '<div style="max-width:420px"><h3 style="color:var(--navy);margin-bottom:12px">🌅 Thông báo buổi sáng — ' + today + '</h3>'
-    + (ups.length ? '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:#c0392b;margin-bottom:6px">⏰ UP hôm nay (' + ups.length + ')</div>'
-      + ups.map(function(u){ return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f0f0f0">' + u + '</div>'; }).join('') + '</div>' : '')
-    + (leaves.length ? '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:#7d6608;margin-bottom:6px">🏖 Nghỉ hôm nay (' + leaves.length + ')</div>'
-      + leaves.map(function(l){ return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f0f0f0">' + l + '</div>'; }).join('') + '</div>' : '')
-    + '<div class="modal-ft"><button class="btn btn-gold" onclick="closeModal()">OK</button></div></div>';
+
+  if (ups.length === 0 && leaves.length === 0 && deadlines.length === 0) return;
+
+  var todayFmt = today.split('-').reverse().join('/');
+  var secStyle = 'margin-bottom:14px';
+  var hdrStyle = function(color){ return 'font-weight:700;font-size:12px;color:'+color+';margin-bottom:7px;display:flex;align-items:center;gap:6px;padding-bottom:4px;border-bottom:1px solid #e8e8e8'; };
+  var rowStyle = 'font-size:11px;padding:4px 0;border-bottom:1px solid #f5f5f5;display:flex;align-items:baseline;gap:6px';
+  var dotStyle = function(c){ return 'width:7px;height:7px;border-radius:50%;background:'+c+';flex-shrink:0;margin-top:3px'; };
+
+  var html = '<div style="max-width:440px">'
+    + '<div style="background:var(--navy);color:#fff;margin:-16px -16px 14px;padding:12px 16px;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:10px">'
+    + '<span style="font-size:18px">🌅</span>'
+    + '<div><div style="font-weight:700;font-size:13px">Báo cáo ngày ' + todayFmt + '</div>'
+    + '<div style="font-size:10px;opacity:.75;margin-top:1px">Cập nhật buổi sáng</div></div></div>';
+
+  if (ups.length) {
+    html += '<div style="' + secStyle + '">'
+      + '<div style="' + hdrStyle('#c0392b') + '"><span>⏰</span> UP hôm nay <span style="background:#c0392b;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + ups.length + '</span></div>'
+      + ups.map(function(u){ return '<div style="' + rowStyle + '"><span style="' + dotStyle('#ef4444') + '"></span><span><b>' + u.pj + '</b>' + (u.staff?' · '+u.staff:'') + '</span></div>'; }).join('')
+      + '</div>';
+  }
+
+  if (deadlines.length) {
+    deadlines.sort(function(a,b){ return a.date.localeCompare(b.date); });
+    html += '<div style="' + secStyle + '">'
+      + '<div style="' + hdrStyle('#d97706') + '"><span>🔔</span> Deadline trong 3 ngày <span style="background:#d97706;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + deadlines.length + '</span></div>'
+      + deadlines.map(function(d){
+          var urgColor = d.days===0?'#ef4444':d.days===1?'#f97316':'#f59e0b';
+          var urgText = d.days===0?'Hôm nay!':d.days===1?'Ngày mai':'Còn '+d.days+' ngày';
+          return '<div style="' + rowStyle + '"><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + d.pj + '</b>' + (d.staff?' · '+d.staff:'') + '</span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
+        }).join('')
+      + '</div>';
+  }
+
+  if (leaves.length) {
+    html += '<div style="' + secStyle + '">'
+      + '<div style="' + hdrStyle('#7d6608') + '"><span>🏖</span> Nhân sự nghỉ hôm nay <span style="background:#7d6608;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + leaves.length + '</span></div>'
+      + leaves.map(function(l){ return '<div style="' + rowStyle + '"><span style="' + dotStyle('#eab308') + '"></span><span><b>' + l.name + '</b> · ' + l.session + '</span></div>'; }).join('')
+      + '</div>';
+  }
+
+  html += '<div class="modal-ft"><button class="btn btn-gold" onclick="closeModal()">Đã xem</button></div></div>';
   setTimeout(function(){ try { showModal(html); } catch(e) {} }, 2500);
+}
+
+/* ── Search ── */
+var _searchTimer = null;
+function handleSearch(val) {
+  clearTimeout(_searchTimer);
+  if (!val || val.trim().length < 2) { hideSearchDropdown(); return; }
+  _searchTimer = setTimeout(function(){ _doSearch(val.trim()); }, 180);
+}
+function _doSearch(q) {
+  var ql = q.toLowerCase();
+  var results = [];
+  var months = D.months || {};
+  Object.keys(months).forEach(function(mid) {
+    if (results.length >= 10) return;
+    var m = months[mid];
+    var jp = m.projects || [], vn = m.projectsVN || [];
+    [].concat(jp.map(function(p){ return {p:p,s:'jp'}; }), vn.map(function(p){ return {p:p,s:'vn'}; })).forEach(function(item) {
+      if (results.length >= 10) return;
+      var p = item.p, section = item.s;
+      var matched = (p.nameVN||'').toLowerCase().includes(ql)
+        || (p.nameJP||'').toLowerCase().includes(ql)
+        || (p.mainStaff||'').toLowerCase().includes(ql)
+        || (p.contact||'').toLowerCase().includes(ql);
+      if (!matched) {
+        (p.groups||[]).forEach(function(g) {
+          if ((g.type||'').toLowerCase().includes(ql)) matched = true;
+          (g.rows||[]).forEach(function(r) {
+            if ((r.staff||'').toLowerCase().includes(ql)) matched = true;
+          });
+        });
+      }
+      if (matched) results.push({
+        mid: mid, pjId: p.id, section: section,
+        title: p.nameVN || p.nameJP || p.id,
+        sub: mid + (p.mainStaff ? ' · ' + p.mainStaff : ''),
+        badge: section === 'jp' ? '🇯🇵 JP' : '🇻🇳 VN'
+      });
+    });
+  });
+  renderSearchResults(results);
+  showSearchDropdown();
+}
+function renderSearchResults(results) {
+  var dd = document.getElementById('searchDropdown');
+  if (!dd) return;
+  if (!results.length) {
+    dd.innerHTML = '<div class="search-empty">Không tìm thấy kết quả</div>';
+    return;
+  }
+  dd.innerHTML = results.map(function(r) {
+    return '<div class="search-item" onmousedown="navigateToResult(\'' + r.mid + '\',\'' + r.pjId + '\',\'' + r.section + '\')">'
+      + '<div class="search-item-title">' + r.title + '<span class="search-item-badge">' + r.badge + '</span></div>'
+      + '<div class="search-item-sub">' + r.sub + '</div></div>';
+  }).join('');
+}
+function navigateToResult(mid, pjId, section) {
+  hideSearchDropdown();
+  var inp = document.getElementById('searchInput');
+  if (inp) inp.value = '';
+  if (D.activeMonth !== mid) { D.activeMonth = mid; save(); }
+  showPage('main');
+  setSection(section);
+  setTimeout(function() {
+    var el = document.getElementById('pj-' + pjId) || document.querySelector('[data-pjid="' + pjId + '"]');
+    if (el) {
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+      el.style.outline = '2px solid var(--gold)';
+      el.style.transition = 'outline .3s';
+      setTimeout(function(){ el.style.outline = ''; }, 2000);
+    }
+  }, 250);
+}
+function showSearchDropdown() {
+  var dd = document.getElementById('searchDropdown');
+  if (dd && dd.innerHTML.trim()) dd.style.display = 'block';
+}
+function hideSearchDropdown() {
+  var dd = document.getElementById('searchDropdown');
+  if (dd) dd.style.display = 'none';
+}
+function handleSearchKey(e) {
+  if (e.key === 'Escape') { hideSearchDropdown(); e.target.blur(); }
+  if (e.key === 'Enter') {
+    var first = document.querySelector('#searchDropdown .search-item');
+    if (first) first.dispatchEvent(new MouseEvent('mousedown'));
+  }
 }
 
 /* ── Local backup: export data as JSON file ── */

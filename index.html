@@ -844,15 +844,66 @@ async function sbLoadAll() {
   return result;
 }
 
+// sbPushAll — push toàn bộ D lên Supabase (dùng cho import backup hoặc force-sync)
+async function sbPushAll() {
+  if (!window._sbReady) throw new Error('Supabase không sẵn sàng');
+  var _errs = [];
+  // 1. Settings
+  if (window._sbSettingsId) {
+    try {
+      await _sb.from('settings').update({
+        staff_list: D.settings.staffList||[], type_list: D.settings.typeList||[],
+        type_list_vn: D.settings.typeListVN||[], contact_list: D.settings.contactList||[],
+        contact_list_vn: D.settings.contactListVN||[], holidays: D.settings.holidays||[],
+        active_month: D.activeMonth,
+      }).eq('id', window._sbSettingsId);
+    } catch(e) { _errs.push('settings: '+e.message); }
+  }
+  // 2. Months
+  var _mRecs = Object.entries(D.months||{}).map(function(kv){ return { id:kv[0], target_new:kv[1].targetNew||0, target_rev:kv[1].targetRev||0 }; });
+  if (_mRecs.length) try { await _sb.from('months').upsert(_mRecs, {onConflict:'id'}); } catch(e) { _errs.push('months: '+e.message); }
+  // 3. Projects
+  var _pRecs = []; var _si = 0;
+  Object.entries(D.months||{}).forEach(function(kv){ var mid=kv[0],m=kv[1];
+    [['jp',m.projects||[]],['vn',m.projectsVN||[]]].forEach(function(sv){ var sec=sv[0],pjs=sv[1];
+      pjs.forEach(function(p){ _pRecs.push({ id:p.id, month_id:mid, section:sec, name_vn:p.nameVN||'', name_jp:p.nameJP||'', office:p.office||'', contact:p.contact||'', main_staff:p.mainStaff||'', notes:p.notes||'', is_carryover:!!p._carryover, sort_order:_si++ }); });
+    });
+  });
+  if (_pRecs.length) try { await _sb.from('projects').upsert(_pRecs, {onConflict:'id'}); } catch(e) { _errs.push('projects: '+e.message); }
+  // 4. Groups + Rows (batch 100)
+  var _gRecs=[], _rRecs=[], _sg=0, _sr=0;
+  Object.values(D.months||{}).forEach(function(m){
+    [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
+      (p.groups||[]).forEach(function(g){
+        _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++ });
+        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0, sort_order:_sr++ }); });
+      });
+    });
+  });
+  for (var _bi=0; _bi<_gRecs.length; _bi+=100) { try { await _sb.from('groups').upsert(_gRecs.slice(_bi,_bi+100), {onConflict:'id'}); } catch(e) { _errs.push('groups@'+_bi+': '+e.message); } }
+  for (var _bj=0; _bj<_rRecs.length; _bj+=100) { try { await _sb.from('rows').upsert(_rRecs.slice(_bj,_bj+100), {onConflict:'id'}); } catch(e) { _errs.push('rows@'+_bj+': '+e.message); } }
+  // 5. Staff profiles
+  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||'', sort_order:prof.order||0 }; });
+  if (_stRecs.length) try { await _sb.from('staff').upsert(_stRecs, {onConflict:'full_name'}); } catch(e) { _errs.push('staff: '+e.message); }
+  if (_errs.length) console.warn('[sbPushAll] lỗi:', _errs);
+  return _errs;
+}
+
 // Phase 5: Row debounce helper + column map
 const _sbRowDebounce = {};
+const _sbRowPending = {}; // merge mọi field change của 1 row trước khi ghi Supabase
 function _sbSaveRowDebounced(groupId, rowId, colData) {
   if (!window._sbReady) return;
+  // Tích lũy tất cả field thay đổi cho row này (fix: không bị mất field khi debounce)
+  if (!_sbRowPending[rowId]) _sbRowPending[rowId] = { groupId: groupId, cols: {} };
+  Object.assign(_sbRowPending[rowId].cols, colData);
   clearTimeout(_sbRowDebounce[rowId]);
   _sbRowDebounce[rowId] = setTimeout(async () => {
+    const _p = _sbRowPending[rowId]; if (!_p) return;
+    delete _sbRowPending[rowId]; delete _sbRowDebounce[rowId];
     try {
       await _sb.from('rows').upsert(
-        { id: rowId, group_id: groupId, ...colData },
+        { id: rowId, group_id: _p.groupId, ..._p.cols },
         { onConflict: 'id' }
       );
     } catch(e) { console.warn('[Phase 5] row upsert failed:', e.message); }
@@ -7258,13 +7309,38 @@ function exportBackup() {
 function importBackup(input) {
   const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async function(e) {
     try {
       const data = JSON.parse(e.target.result);
       if (!data.months || !data.settings) { alert('File backup không hợp lệ'); return; }
       if (!confirm('Khôi phục từ file backup? Dữ liệu hiện tại sẽ bị thay thế.')) return;
+      // Loại bỏ base64 cũ khỏi JSON (ảnh lưu Supabase Storage, sẽ tải lại sau)
+      Object.values(data.months||{}).forEach(function(m){
+        [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
+          if (p.photos) p.photos = p.photos.filter(function(ph){ return ph && !ph.startsWith('data:'); });
+        });
+      });
       D = data; save(); renderAll();
-      toast('✓ Đã khôi phục từ backup thành công');
+      toast('✓ Đã tải backup. Đang sync lên Supabase…', 3000);
+      if (window._sbReady) {
+        try {
+          setSyncStatus('syncing', '⏳ Đang push…');
+          const _pushErrs = await sbPushAll();
+          setSyncStatus('syncing', '⏳ Đang tải ảnh…');
+          const sbData = await sbLoadAll();
+          if (sbData) {
+            D = sbData; injectSyncHashes();
+            try { localStorage.setItem(SK, JSON.stringify(D)); } catch(e2) {}
+            renderAll();
+          }
+          setSyncStatus('synced', '🟢 Live');
+          toast(_pushErrs && _pushErrs.length ? '⚠ Sync có lỗi nhỏ — xem console' : '✓ Backup đã sync Supabase. Ảnh từ Storage đã tải về.', 4000);
+        } catch(e2) {
+          setSyncStatus('error', '🔴');
+          console.error('[importBackup] sync thất bại:', e2);
+          toast('⚠ Backup lưu cục bộ OK nhưng chưa sync Supabase: ' + (e2.message||'').slice(0,40), 6000);
+        }
+      }
     } catch(err) { alert('Lỗi đọc file: ' + err.message); }
   };
   reader.readAsText(file);
@@ -7800,9 +7876,42 @@ function applyRoleUI(role) {
   }
 }
 
-// Kết thúc session khi đóng/reload tab
+// Flush pending row debounces khi page bị ẩn (chuyển tab, minimize)
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState !== 'hidden' || !window._sbReady) return;
+  var _ids = Object.keys(_sbRowPending || {});
+  if (!_ids.length) return;
+  console.log('[flush] visibilitychange — flush', _ids.length, 'pending rows');
+  _ids.forEach(function(rowId) {
+    clearTimeout(_sbRowDebounce[rowId]); delete _sbRowDebounce[rowId];
+    var _pp = _sbRowPending[rowId]; if (!_pp) return;
+    delete _sbRowPending[rowId];
+    _sb.from('rows').upsert({ id: rowId, group_id: _pp.groupId, ..._pp.cols }, { onConflict: 'id' })
+      .catch(function(e) { console.warn('[flush] row', rowId, e.message); });
+  });
+});
+
+// Kết thúc session khi đóng/reload tab + flush pending writes
 window.addEventListener('beforeunload', function() {
   try { _sbSessionEnd(); } catch(e) {}
+  // Best-effort: ghi pending rows qua REST keepalive (không cần await)
+  var _ids = Object.keys(_sbRowPending || {});
+  _ids.forEach(function(rowId) {
+    clearTimeout(_sbRowDebounce[rowId]);
+    var _pp = _sbRowPending[rowId]; if (!_pp) return;
+    delete _sbRowPending[rowId];
+    try {
+      fetch('https://kefwrfxeneropihedght.supabase.co/rest/v1/rows?id=eq.' + rowId, {
+        method: 'PATCH', keepalive: true,
+        headers: {
+          'apikey': 'sb_publishable__B9f2R2Y1JMsvQ2NkmTU9Q_T8f4McGZ',
+          'Authorization': 'Bearer sb_publishable__B9f2R2Y1JMsvQ2NkmTU9Q_T8f4McGZ',
+          'Content-Type': 'application/json', 'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify(_pp.cols),
+      });
+    } catch(e2) {}
+  });
 });
 
 // Passwords — plain text comparison (works on file:// and https://)

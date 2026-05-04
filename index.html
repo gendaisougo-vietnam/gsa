@@ -1577,7 +1577,16 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
         );
         if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
         if (!window._sbPhotosByProjectId[pair.newId]) window._sbPhotosByProjectId[pair.newId] = {};
-        window._sbPhotosByProjectId[pair.newId][0] = BASE + dstPath;
+        var _copiedUrl = BASE + dstPath;
+        window._sbPhotosByProjectId[pair.newId][0] = _copiedUrl;
+        // Cập nhật D ngay để ảnh hiện mà không cần sbLoadAll
+        var _copiedPj = getPj(pair.newId);
+        if (_copiedPj) {
+          if (!_copiedPj.photos) _copiedPj.photos = [];
+          _copiedPj.photos[0] = _copiedUrl;
+          var _grid = document.getElementById('photoGrid-' + pair.newId);
+          if (_grid) _grid.innerHTML = renderPhotoSlots(_copiedPj);
+        }
       }
     } catch(e) { console.warn('[Photo] copy slot_0 failed:', pair.prevId, e.message); }
   }
@@ -3532,9 +3541,13 @@ function getMonthForPj(pjId) {
   return D.activeMonth;
 }
 function renderPhotoSlots(p) {
-  const photos=p.photos||[]; let html='';
+  const photos=p.photos||[];
+  // Ưu tiên URL từ _sbPhotosByProjectId (luôn cập nhật sau upload/copy)
+  // Fallback sang p.photos (base64 khi upload, URL sau sbLoadAll)
+  const sbPhotos=(window._sbPhotosByProjectId||{})[p.id]||{};
+  let html='';
   for(let i=0;i<6;i++){
-    const ph=photos[i];
+    const ph=sbPhotos[i]||photos[i];
     if(ph) html+=`<div class="photo-slot filled"><img src="${ph}" alt="Photo ${i+1}"><button class="ph-del" onclick="delPhoto('${p.id}',${i})">✕</button></div>`;
     else html+=`<label class="photo-slot"><span class="ph-ico">🖼</span><span class="ph-txt">Thêm ảnh</span><input type="file" accept="image/*" onchange="uploadPhoto('${p.id}',${i},this)"></label>`;
   }
@@ -3577,7 +3590,11 @@ function uploadPhoto(pjId, slot, input) {
               await _sb.from('project_photos').upsert({ project_id: pjId, slot: slot, storage_path: sp, month_id: _upMid }, { onConflict: 'project_id,slot' });
               if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
               if (!window._sbPhotosByProjectId[pjId]) window._sbPhotosByProjectId[pjId] = {};
-              window._sbPhotosByProjectId[pjId][slot] = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/' + sp;
+              var _newUrl = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/' + sp;
+              window._sbPhotosByProjectId[pjId][slot] = _newUrl;
+              // Thay base64 trong D bằng URL thực để localStorage không chứa base64 lớn
+              var _pRef = getPj(pjId);
+              if (_pRef) { if (!_pRef.photos) _pRef.photos = []; _pRef.photos[slot] = _newUrl; persistD(); }
             }
           } catch(e) { console.warn('[Photo] Storage upload failed:', e.message); }
         })();

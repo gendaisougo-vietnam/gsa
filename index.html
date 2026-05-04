@@ -2907,6 +2907,16 @@ function saveTlTask(pjId, task) {
     p.tlTasks.push(task);
   }
   save();
+  if (window._sbReady) {
+    _sb.from('tl_tasks').upsert({
+      id:task.id, project_id:pjId, lv:task.lv||'task', name:task.name||'',
+      start_date:task.start||null, end_date:task.end||null,
+      up_date:task.upDate||null, actual_date:task.actual||null,
+      content:task.content||'', progress:task.progress||0,
+      status:task.status||'', dep:task.dep||'',
+      staff:task.staff||[], note:task.note||'', parent_group:task.parentGroup||null
+    }, { onConflict:'id' }).catch(function(e){ console.warn('[saveTlTask] Supabase upsert failed:', e.message); });
+  }
 }
 
 function deleteTlTask(pjId, taskId) {
@@ -3128,7 +3138,14 @@ function cascadeTlTaskDeps(pjId, changedTaskId) {
     if (!p) p = (m.projectsVN||[]).find(function(q){ return q.id===pjId; });
     if (!p) p = (m.projects||[]).find(function(q){ return q.id===pjId; });
   });
-  if (!p || !(p.tlTasks||[]).length) return 0;
+  if (!p || !(p.tlTasks||[]).length) {
+    console.log('[cascade] không tìm thấy project hoặc không có tasks — pjId:', pjId);
+    return 0;
+  }
+  console.log('[cascade] start — changedTaskId:', changedTaskId, '| tổng tasks:', p.tlTasks.length);
+  p.tlTasks.forEach(function(t) {
+    if (t.dep) console.log('[cascade]   task dep map:', t.name, '→ dep:', t.dep);
+  });
   var updated = 0;
   var queue = [changedTaskId];
   var visited = new Set();
@@ -3139,17 +3156,38 @@ function cascadeTlTaskDeps(pjId, changedTaskId) {
     visited.add(srcId);
     steps++;
     var src = p.tlTasks.find(function(t){ return t.id === srcId; });
-    if (!src || !src.end) continue;
+    if (!src || !src.end) {
+      console.log('[cascade] bỏ qua srcId:', srcId, '— không có task hoặc thiếu end date');
+      continue;
+    }
     // Ngày bắt đầu mới = ngày làm việc đầu tiên SAU src.end
     var dNext = new Date(src.end);
     dNext.setDate(dNext.getDate() + 1);
     var newStart = addWorkDays(localDateStr(dNext), 1);
-    p.tlTasks.forEach(function(dep) {
-      if (dep.dep !== srcId || visited.has(dep.id)) return;
+    var depsFound = p.tlTasks.filter(function(t){ return t.dep === srcId && !visited.has(t.id); });
+    console.log('[cascade] src:', src.name, '(end:', src.end, ') → newStart:', newStart, '| deps tìm được:', depsFound.length);
+    depsFound.forEach(function(dep) {
       var dur = (dep.start && dep.end) ? calcWorkDays(dep.start, dep.end) : 1;
+      var newEnd = addWorkDays(newStart, Math.max(1, dur));
+      console.log('[cascade]   update:', dep.name, '|', dep.start, '→', newStart, '|', dep.end, '→', newEnd, '| dur:', dur);
       dep.start = newStart;
-      dep.end = addWorkDays(newStart, Math.max(1, dur));
+      dep.end = newEnd;
       updated++;
+      // Sync xuống groups/rows
+      if (dep.staff && dep.staff.length > 0 && dep.lv !== 'group') {
+        syncTlTaskToGroup(pjId, dep);
+      }
+      // Supabase write (fire and forget)
+      if (window._sbReady) {
+        _sb.from('tl_tasks').upsert({
+          id:dep.id, project_id:pjId, lv:dep.lv||'task', name:dep.name||'',
+          start_date:dep.start||null, end_date:dep.end||null,
+          up_date:dep.upDate||null, actual_date:dep.actual||null,
+          content:dep.content||'', progress:dep.progress||0,
+          status:dep.status||'', dep:dep.dep||'',
+          staff:dep.staff||[], note:dep.note||'', parent_group:dep.parentGroup||null
+        }, { onConflict:'id' }).catch(function(e){ console.warn('[cascade] Supabase upsert failed:', dep.name, e.message); });
+      }
       queue.push(dep.id);
     });
   }

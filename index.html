@@ -2907,16 +2907,34 @@ function saveTlTask(pjId, task) {
     p.tlTasks.push(task);
   }
   save();
-  if (window._sbReady) {
-    _sb.from('tl_tasks').upsert({
-      id:task.id, project_id:pjId, lv:task.lv||'task', name:task.name||'',
-      start_date:task.start||null, end_date:task.end||null,
-      up_date:task.upDate||null, actual_date:task.actual||null,
-      content:task.content||'', progress:task.progress||0,
-      status:task.status||'', dep:task.dep||'',
-      staff:task.staff||[], note:task.note||'', parent_group:task.parentGroup||null
-    }, { onConflict:'id' }).catch(function(e){ console.warn('[saveTlTask] Supabase upsert failed:', e.message); });
-  }
+}
+
+// ── Supabase upsert cho 1 tl_task (fire-and-forget với verify log) ───────
+function _sbUpsertTlTask(pjId, task) {
+  if (!window._sbReady) return;
+  var rec = {
+    id:task.id, project_id:pjId, lv:task.lv||'task', name:task.name||'',
+    start_date:task.start||null, end_date:task.end||null,
+    up_date:task.upDate||null, actual_date:task.actual||null,
+    content:task.content||'', progress:task.progress||0,
+    status:task.status||'', dep:task.dep||'',
+    staff:task.staff||[], note:task.note||'', parent_group:task.parentGroup||null
+  };
+  console.log('[tl upsert] →', task.name, '| dep:', task.dep||'(none)', '| start:', task.start, '| end:', task.end, '| rec:', rec);
+  _sb.from('tl_tasks').upsert(rec, { onConflict:'id' })
+    .then(function(res) {
+      if (res.error) {
+        console.error('[tl upsert] FAIL:', task.name, '|', res.error.message, res.error);
+      } else {
+        console.log('[tl upsert] OK:', task.name);
+        return _sb.from('tl_tasks').select('id,name,dep,start_date,end_date').eq('id', task.id).single();
+      }
+    })
+    .then(function(v) {
+      if (v && v.data) console.log('[tl verify] Supabase row:', v.data);
+      else if (v && v.error) console.warn('[tl verify] error:', v.error.message);
+    })
+    .catch(function(e) { console.warn('[tl upsert] exception:', task.name, e.message); });
 }
 
 function deleteTlTask(pjId, taskId) {
@@ -3131,7 +3149,8 @@ function addWorkDays(startStr, days) {
 }
 
 // ── Auto-cascade dependencies khi thay đổi ngày 1 task ──────────────────
-// Trả về số task đã được cập nhật
+// Trả về MẢNG các task đã được cập nhật (để caller xử lý tiếp)
+// Chỉ cập nhật D — KHÔNG save, KHÔNG gọi Supabase, KHÔNG syncTlTaskToGroup
 function cascadeTlTaskDeps(pjId, changedTaskId) {
   var p = null;
   Object.values(D.months).forEach(function(m) {
@@ -3140,13 +3159,14 @@ function cascadeTlTaskDeps(pjId, changedTaskId) {
   });
   if (!p || !(p.tlTasks||[]).length) {
     console.log('[cascade] không tìm thấy project hoặc không có tasks — pjId:', pjId);
-    return 0;
+    return [];
   }
+  // Log toàn bộ dep map để debug
   console.log('[cascade] start — changedTaskId:', changedTaskId, '| tổng tasks:', p.tlTasks.length);
-  p.tlTasks.forEach(function(t) {
-    if (t.dep) console.log('[cascade]   task dep map:', t.name, '→ dep:', t.dep);
-  });
-  var updated = 0;
+  var depMap = p.tlTasks.filter(function(t){ return t.dep; }).map(function(t){ return t.name + ' → dep:' + t.dep; });
+  console.log('[cascade] dep map:', depMap.length ? depMap : '(không có task nào có dep)');
+
+  var updatedTasks = [];
   var queue = [changedTaskId];
   var visited = new Set();
   var steps = 0;
@@ -3157,7 +3177,7 @@ function cascadeTlTaskDeps(pjId, changedTaskId) {
     steps++;
     var src = p.tlTasks.find(function(t){ return t.id === srcId; });
     if (!src || !src.end) {
-      console.log('[cascade] bỏ qua srcId:', srcId, '— không có task hoặc thiếu end date');
+      console.log('[cascade] bỏ qua srcId:', srcId, '— task:', src ? '"'+src.name+'"' : 'NOT FOUND', '| end:', src ? src.end : 'N/A');
       continue;
     }
     // Ngày bắt đầu mới = ngày làm việc đầu tiên SAU src.end
@@ -3165,34 +3185,19 @@ function cascadeTlTaskDeps(pjId, changedTaskId) {
     dNext.setDate(dNext.getDate() + 1);
     var newStart = addWorkDays(localDateStr(dNext), 1);
     var depsFound = p.tlTasks.filter(function(t){ return t.dep === srcId && !visited.has(t.id); });
-    console.log('[cascade] src:', src.name, '(end:', src.end, ') → newStart:', newStart, '| deps tìm được:', depsFound.length);
+    console.log('[cascade] src "' + src.name + '" end:' + src.end + ' → newStart:' + newStart + ' | deps tìm được:', depsFound.length);
     depsFound.forEach(function(dep) {
       var dur = (dep.start && dep.end) ? calcWorkDays(dep.start, dep.end) : 1;
       var newEnd = addWorkDays(newStart, Math.max(1, dur));
-      console.log('[cascade]   update:', dep.name, '|', dep.start, '→', newStart, '|', dep.end, '→', newEnd, '| dur:', dur);
+      console.log('[cascade]   "' + dep.name + '" ' + dep.start + '→' + newStart + ' / ' + dep.end + '→' + newEnd + ' (dur:' + dur + ')');
       dep.start = newStart;
       dep.end = newEnd;
-      updated++;
-      // Sync xuống groups/rows
-      if (dep.staff && dep.staff.length > 0 && dep.lv !== 'group') {
-        syncTlTaskToGroup(pjId, dep);
-      }
-      // Supabase write (fire and forget)
-      if (window._sbReady) {
-        _sb.from('tl_tasks').upsert({
-          id:dep.id, project_id:pjId, lv:dep.lv||'task', name:dep.name||'',
-          start_date:dep.start||null, end_date:dep.end||null,
-          up_date:dep.upDate||null, actual_date:dep.actual||null,
-          content:dep.content||'', progress:dep.progress||0,
-          status:dep.status||'', dep:dep.dep||'',
-          staff:dep.staff||[], note:dep.note||'', parent_group:dep.parentGroup||null
-        }, { onConflict:'id' }).catch(function(e){ console.warn('[cascade] Supabase upsert failed:', dep.name, e.message); });
-      }
+      updatedTasks.push(dep);
       queue.push(dep.id);
     });
   }
-  if (updated > 0) save();
-  return updated;
+  console.log('[cascade] kết quả: cập nhật', updatedTasks.length, 'tasks');
+  return updatedTasks;
 }
 
 function tlCalcEnd() {
@@ -3239,22 +3244,41 @@ function confirmSaveTlTask(pjId, taskId) {
     note:     document.getElementById('tl-note').value.trim(),
   };
   if (!task.name) { toast('Vui lòng nhập tên công việc'); return; }
+
+  // Log D state trước khi save để debug dep field
+  const _dbgPj = allCurProjects().find(q=>q.id===pjId)
+              || Object.values(D.months).flatMap(m=>[...(m.projectsVN||[])]).find(q=>q.id===pjId);
+  if (_dbgPj) console.log('[confirmSave] D.tlTasks trước save:', (_dbgPj.tlTasks||[]).map(t=>({name:t.name,dep:t.dep,start:t.start,end:t.end})));
+
+  // 1. Lưu vào D (localStorage only — không Supabase)
   saveTlTask(pjId, task);
 
-  // ── Cascade ngày cho task phụ thuộc ──────────────────────────────────
-  const _cascadeCount = cascadeTlTaskDeps(pjId, task.id);
+  // 2. Cascade trong D — trả về mảng task đã cập nhật
+  const cascadedTasks = cascadeTlTaskDeps(pjId, task.id);
+  if (cascadedTasks.length > 0) save(); // lưu cascade changes vào localStorage
 
-  // ── Tự động đồng bộ xuống Hạng mục phối cảnh nếu có nhân sự ──────────
+  // 3. Sync cascaded tasks xuống groups/rows
+  cascadedTasks.forEach(function(dep) {
+    if (dep.staff && dep.staff.length > 0 && dep.lv !== 'group') {
+      syncTlTaskToGroup(pjId, dep);
+    }
+  });
+
+  // 4. Sync main task xuống groups/rows nếu có nhân sự
   if (staff.length > 0 && task.lv !== 'group') {
     syncTlTaskToGroup(pjId, task);
   }
+
+  // 5. Upsert lên Supabase: task chính + tất cả cascaded
+  _sbUpsertTlTask(pjId, task);
+  cascadedTasks.forEach(function(dep) { _sbUpsertTlTask(pjId, dep); });
 
   closeModal();
   const p = allCurProjects().find(q=>q.id===pjId)
          || Object.values(D.months).flatMap(m=>[...(m.projectsVN||[])]).find(q=>q.id===pjId);
   const ci = document.getElementById('content-inner') || document.querySelector('.content-inner');
   if(ci && p) renderProjectDetail(ci, p);
-  const _cascadeMsg = _cascadeCount > 0 ? ` — Đã cập nhật ${_cascadeCount} hạng mục phụ thuộc` : '';
+  const _cascadeMsg = cascadedTasks.length > 0 ? ` — Đã cập nhật ${cascadedTasks.length} hạng mục phụ thuộc` : '';
   toast('✓ Đã lưu task tiến độ' + (staff.length>0&&task.lv!=='group' ? ' & đồng bộ hạng mục' : '') + _cascadeMsg);
 }
 

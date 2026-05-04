@@ -3120,6 +3120,43 @@ function addWorkDays(startStr, days) {
   return localDateStr(d);
 }
 
+// ── Auto-cascade dependencies khi thay đổi ngày 1 task ──────────────────
+// Trả về số task đã được cập nhật
+function cascadeTlTaskDeps(pjId, changedTaskId) {
+  var p = null;
+  Object.values(D.months).forEach(function(m) {
+    if (!p) p = (m.projectsVN||[]).find(function(q){ return q.id===pjId; });
+    if (!p) p = (m.projects||[]).find(function(q){ return q.id===pjId; });
+  });
+  if (!p || !(p.tlTasks||[]).length) return 0;
+  var updated = 0;
+  var queue = [changedTaskId];
+  var visited = new Set();
+  var steps = 0;
+  while (queue.length && steps < 50) {
+    var srcId = queue.shift();
+    if (visited.has(srcId)) continue;
+    visited.add(srcId);
+    steps++;
+    var src = p.tlTasks.find(function(t){ return t.id === srcId; });
+    if (!src || !src.end) continue;
+    // Ngày bắt đầu mới = ngày làm việc đầu tiên SAU src.end
+    var dNext = new Date(src.end);
+    dNext.setDate(dNext.getDate() + 1);
+    var newStart = addWorkDays(localDateStr(dNext), 1);
+    p.tlTasks.forEach(function(dep) {
+      if (dep.dep !== srcId || visited.has(dep.id)) return;
+      var dur = (dep.start && dep.end) ? calcWorkDays(dep.start, dep.end) : 1;
+      dep.start = newStart;
+      dep.end = addWorkDays(newStart, Math.max(1, dur));
+      updated++;
+      queue.push(dep.id);
+    });
+  }
+  if (updated > 0) save();
+  return updated;
+}
+
 function tlCalcEnd() {
   const start = document.getElementById('tl-start')?.value;
   const days  = +document.getElementById('tl-days')?.value;
@@ -3166,6 +3203,9 @@ function confirmSaveTlTask(pjId, taskId) {
   if (!task.name) { toast('Vui lòng nhập tên công việc'); return; }
   saveTlTask(pjId, task);
 
+  // ── Cascade ngày cho task phụ thuộc ──────────────────────────────────
+  const _cascadeCount = cascadeTlTaskDeps(pjId, task.id);
+
   // ── Tự động đồng bộ xuống Hạng mục phối cảnh nếu có nhân sự ──────────
   if (staff.length > 0 && task.lv !== 'group') {
     syncTlTaskToGroup(pjId, task);
@@ -3176,7 +3216,8 @@ function confirmSaveTlTask(pjId, taskId) {
          || Object.values(D.months).flatMap(m=>[...(m.projectsVN||[])]).find(q=>q.id===pjId);
   const ci = document.getElementById('content-inner') || document.querySelector('.content-inner');
   if(ci && p) renderProjectDetail(ci, p);
-  toast('✓ Đã lưu task tiến độ' + (staff.length>0&&task.lv!=='group' ? ' & đồng bộ hạng mục' : ''));
+  const _cascadeMsg = _cascadeCount > 0 ? ` — Đã cập nhật ${_cascadeCount} hạng mục phụ thuộc` : '';
+  toast('✓ Đã lưu task tiến độ' + (staff.length>0&&task.lv!=='group' ? ' & đồng bộ hạng mục' : '') + _cascadeMsg);
 }
 
 // ── Đồng bộ 1 tlTask → group + rows trong Hạng mục phối cảnh ─────────────

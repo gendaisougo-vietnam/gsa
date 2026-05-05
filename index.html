@@ -3501,8 +3501,14 @@ function renderVNInfoPanel(p) {
     ${row('Phạm vi TK', inp('scope', p.scope))}
     ${row('Diện tích', inp('area', p.area))}
     <div style="border-top:1px dashed #c7d2fe;margin:3px 0 4px"></div>
-    ${row('↗ Kickoff', `<span style="font-size:10px;font-weight:600;color:#3b82f6">${kd}</span>`)}
-    ${row('↗ Hoàn thành TK', `<span style="font-size:10px;font-weight:600;color:#3b82f6">${cd}</span>`)}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+      <span style="font-size:9px;font-weight:500;color:#64748b;white-space:nowrap;flex-shrink:0">↗ Kickoff</span>
+      <span style="font-size:10px;font-weight:600;color:#3b82f6;white-space:nowrap">${kd}</span>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+      <span style="font-size:9px;font-weight:500;color:#64748b;white-space:nowrap;flex-shrink:0">↗ Hoàn thành TK</span>
+      <span style="font-size:10px;font-weight:600;color:#3b82f6;white-space:nowrap">${cd}</span>
+    </div>
   </div>`;
 }
 

@@ -7885,10 +7885,15 @@ function importBackup(input) {
       toast('✓ Đã tải backup. Đang sync lên Supabase…', 3000);
       if (window._sbReady) {
         window._isSyncing = true;
+        // Tắt Realtime tạm thời — tránh late WebSocket events ghi đè data vừa import
+        if (startRealtimeSync._channel) {
+          try { _sb.removeChannel(startRealtimeSync._channel); } catch(e3) {}
+          startRealtimeSync._channel = null;
+        }
         try {
           setSyncStatus('syncing', '⏳ Đang push…');
           const _pushErrs = await sbPushAll();
-          setSyncStatus('syncing', '⏳ Đang tải ảnh…');
+          setSyncStatus('syncing', '⏳ Đang tải lại…');
           const sbData = await sbLoadAll();
           if (sbData) {
             D = sbData; injectSyncHashes();
@@ -7896,13 +7901,15 @@ function importBackup(input) {
             renderAll();
           }
           setSyncStatus('synced', '🟢 Live');
-          toast(_pushErrs && _pushErrs.length ? '⚠ Sync có lỗi nhỏ — xem console' : '✓ Backup đã sync Supabase. Ảnh từ Storage đã tải về.', 4000);
+          toast(_pushErrs && _pushErrs.length ? '⚠ Sync có lỗi nhỏ — xem console' : '✓ Đã import và đồng bộ lên cloud', 4000);
         } catch(e2) {
           setSyncStatus('error', '🔴');
           console.error('[importBackup] sync thất bại:', e2);
           toast('⚠ Backup lưu cục bộ OK nhưng chưa sync Supabase: ' + (e2.message||'').slice(0,40), 6000);
         } finally {
           window._isSyncing = false;
+          // Bật lại Realtime sau khi toàn bộ push + reload hoàn tất
+          startRealtimeSync();
         }
       }
     } catch(err) { alert('Lỗi đọc file: ' + err.message); }

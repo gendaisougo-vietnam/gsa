@@ -227,6 +227,10 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
 .tbl-input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 2px rgba(255,192,0,.15)}
 .tbl-input-dark{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:var(--r);padding:4px 8px;color:#fff;font-family:inherit;font-size:12px;font-weight:600;width:100%;min-width:0}
 .tbl-input-dark:focus{outline:none;border-color:var(--gold)}
+.vn-info-input{border:none;border-bottom:1px solid transparent;background:transparent;font-size:10px;outline:none;width:100%;padding:0 2px;color:var(--navy);font-family:inherit;box-sizing:border-box}
+.vn-info-input:hover,.vn-info-input:focus{border-bottom:1px dashed #94a3b8}
+.vn-info-input::placeholder{color:#94a3b8}
+.vn-info-input[type="date"]{color-scheme:light}
 .qty-inp{width:54px;padding:4px 5px;text-align:center;border:1px solid var(--gray2);border-radius:var(--r);font-family:inherit;font-size:13px;font-weight:700;background:var(--table-bg)}
 .qty-inp:focus{outline:none;border-color:var(--gold)}
 .sel-sm{padding:4px 8px;border:1px solid var(--gray2);border-radius:var(--r);font-family:inherit;font-size:12px;background:#fff;cursor:pointer;width:100%}
@@ -931,13 +935,22 @@ const _COL_MAP = {
 async function _sbSaveProject(p, monthId, section) {
   if (!window._sbReady) return;
   try {
-    await _sb.from('projects').upsert({
+    const _pjRow = {
       id: p.id, month_id: monthId, section,
       name_vn: p.nameVN || '', name_jp: p.nameJP || '',
       office: p.office || '', contact: p.contact || '',
       main_staff: p.mainStaff || '', notes: p.notes || '',
       is_carryover: !!p._carryover,
-    }, { onConflict: 'id' });
+    };
+    if (section === 'vn') {
+      _pjRow.client            = p.client            || null;
+      _pjRow.building_type     = p.buildingType      || null;
+      _pjRow.scope             = p.scope             || null;
+      _pjRow.area              = p.area              || null;
+      _pjRow.construction_start= p.constructionStart || null;
+      _pjRow.construction_end  = p.constructionEnd   || null;
+    }
+    await _sb.from('projects').upsert(_pjRow, { onConflict: 'id' });
   } catch(e) { console.warn('[Phase 4] saveProject failed:', e.message); }
 }
 
@@ -3441,6 +3454,46 @@ function syncTlTaskToGroup(pjId, task) {
   console.log(`✓ Sync tlTask "${task.name}" → group trong "${p.nameVN||p.nameJP}", ${newRows.length} rows${removedRows.length?' (-'+removedRows.length+' removed)':''}`);
 }
 
+function renderVNInfoPanel(p) {
+  const tlTasks    = p.tlTasks || [];
+  const kickoffDate    = tlTasks.map(t=>t.start).filter(Boolean).sort()[0] || '';
+  const completionDate = tlTasks.map(t=>t.end||t.upDate).filter(Boolean).sort().slice(-1)[0] || '';
+  const offBg = (p.office==='Hà Nội'||p.office==='HAN'||p.office==='ハノイ') ? '#1a5276' : '#196f3d';
+
+  function inp(label, field, val, type, ph) {
+    ph = ph || 'nhập...';
+    type = type || 'text';
+    return `<div style="margin-bottom:5px">
+      <div style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">${label}</div>
+      <input type="${type}" class="vn-info-input" value="${x(val||'')}" placeholder="${ph}"
+        onblur="savePjDetailField('${p.id}','${field}',this.value)">
+    </div>`;
+  }
+
+  return `<div style="width:170px;min-width:150px;flex-shrink:0;padding:10px 8px;background:#f8faff;border-right:2px solid #c7d2fe;line-height:1.5">
+    <div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="background:${offBg};color:#fff;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;flex-shrink:0">${x(p.office||'VP')}</span>
+      <span style="font-size:11px;font-weight:600;color:var(--navy);line-height:1.3;word-break:break-word">${x(p.nameVN||p.nameJP||'—')}</span>
+    </div>
+    <div style="border-top:1px dashed #c7d2fe;margin:0 0 8px"></div>
+    ${inp('CĐT', 'client', p.client||p.contact)}
+    ${inp('Loại CT', 'buildingType', p.buildingType)}
+    ${inp('Phạm vi TK', 'scope', p.scope)}
+    ${inp('Diện tích', 'area', p.area, 'text', 'm²')}
+    <div style="border-top:1px dashed #c7d2fe;margin:6px 0"></div>
+    <div style="margin-bottom:4px">
+      <div style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em">↗ Kickoff TK</div>
+      <div style="font-weight:600;color:#3b82f6;font-size:10px">${kickoffDate?kickoffDate.replace(/-/g,'/'):'—'}</div>
+    </div>
+    <div style="margin-bottom:6px">
+      <div style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em">↗ Hoàn thành TK</div>
+      <div style="font-weight:600;color:#3b82f6;font-size:10px">${completionDate?completionDate.replace(/-/g,'/'):'—'}</div>
+    </div>
+    ${inp('Khởi công', 'constructionStart', p.constructionStart, 'date')}
+    ${inp('Hoàn công', 'constructionEnd', p.constructionEnd, 'date')}
+  </div>`;
+}
+
 function renderProjectTimeline_VN(p) {
   const allTasks = getTlTasks(p);
   const today = localDateStr(new Date());
@@ -3503,43 +3556,9 @@ function renderProjectTimeline_VN(p) {
   const SL = {none:'Chưa',ip:'Đang làm',done:'Xong',late:'Trễ'};
 
   // ── Project info panel (spans all rows) ─────────────────────────────
-  const kickoffDate     = allTasks.map(t=>t.start).filter(Boolean).sort()[0] || '';
-  const completionDate  = allTasks.map(t=>t.end||t.upDate).filter(Boolean).sort().slice(-1)[0] || '';
-  const totalBodyRows   = allTasks.length * 2; // each task → 1 task row + 1 insert row
-
-  const officeColor = p.office==='Hà Nội'||p.office==='HAN'||p.office==='ハノイ' ? '#1a5276' : '#196f3d';
-
-  const pjInfoCell = `<td rowspan="${totalBodyRows}" style="vertical-align:top;width:165px;min-width:140px;max-width:165px;padding:10px 8px;background:#f8faff;border-right:2px solid #c7d2fe;font-size:10px;line-height:1.7">
-    <div style="display:flex;align-items:flex-start;gap:5px;margin-bottom:6px;flex-wrap:wrap">
-      <span style="background:${officeColor};color:#fff;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700;flex-shrink:0">${x(p.office||'VP')}</span>
-      <span style="font-size:11px;font-weight:600;color:var(--navy);line-height:1.3;word-break:break-word">${x(p.nameVN||p.nameJP||'—')}</span>
-    </div>
-    <div style="border-top:1px dashed #c7d2fe;margin:4px 0 6px"></div>
-    <div style="color:#64748b;margin-bottom:1px">CĐT:</div>
-    <div style="color:var(--navy);font-weight:500;margin-bottom:4px;padding-left:4px">${x(p.client||p.contact||'—')}</div>
-    <div style="color:#64748b;margin-bottom:1px">Loại CT:</div>
-    <div style="color:var(--navy);margin-bottom:4px;padding-left:4px">${x(p.buildingType||'—')}</div>
-    <div style="color:#64748b;margin-bottom:1px">Phạm vi TK:</div>
-    <div style="color:var(--navy);margin-bottom:4px;padding-left:4px">${x(p.scope||'—')}</div>
-    <div style="color:#64748b;display:flex;align-items:center;gap:3px;margin-bottom:4px">
-      Diện tích:&nbsp;<input type="text" value="${x(p.area||'')}" placeholder="m²"
-        style="width:60px;border:none;border-bottom:1px dashed #94a3b8;background:transparent;font-size:10px;color:var(--navy);outline:none;padding:0 2px"
-        onblur="savePjDetailField('${p.id}','area',this.value)">
-    </div>
-    <div style="border-top:1px dashed #c7d2fe;margin:4px 0 6px"></div>
-    <div style="color:#64748b;margin-bottom:2px">↗ Kickoff TK:</div>
-    <div style="color:#3b82f6;font-weight:600;padding-left:4px;margin-bottom:4px">${kickoffDate ? kickoffDate.replace(/-/g,'/') : '—'}</div>
-    <div style="color:#64748b;margin-bottom:2px">↗ Hoàn thành TK:</div>
-    <div style="color:#3b82f6;font-weight:600;padding-left:4px;margin-bottom:6px">${completionDate ? completionDate.replace(/-/g,'/') : '—'}</div>
-    <div style="color:#64748b;margin-bottom:2px">Khởi công:</div>
-    <input type="date" value="${p.constructionStart||''}"
-      style="width:100%;border:none;border-bottom:1px dashed #94a3b8;background:transparent;font-size:9px;color:var(--navy);outline:none;padding:0 2px;margin-bottom:4px;display:block"
-      onblur="savePjDetailField('${p.id}','constructionStart',this.value)">
-    <div style="color:#64748b;margin-bottom:2px">Hoàn công:</div>
-    <input type="date" value="${p.constructionEnd||''}"
-      style="width:100%;border:none;border-bottom:1px dashed #94a3b8;background:transparent;font-size:9px;color:var(--navy);outline:none;padding:0 2px;display:block"
-      onblur="savePjDetailField('${p.id}','constructionEnd',this.value)">
-  </td>`;
+  const totalBodyRows = allTasks.length * 2; // each task → 1 task row + 1 insert row
+  const _infoPanelHTML = renderVNInfoPanel(p);
+  const pjInfoCell = `<td rowspan="${totalBodyRows}" style="vertical-align:top;padding:0;border-right:none">${_infoPanelHTML}</td>`;
 
   // ── Render 1 dòng task ───────────────────────────────────────────────
   function renderTaskRow(t, idx, isChild, groupId, prependCell) {
@@ -3786,7 +3805,9 @@ function renderProjectDetail(ci, p) {
       <span class="card-hd-title">${activeSection==='vn' ? '👥 Tiến độ nhân sự' : '🎨 Hạng mục phối cảnh'}</span>
       <button class="btn btn-gold btn-sm" onclick="addGroup('${p.id}')">＋ Thêm hạng mục</button>
     </div>
-    <div style="overflow-x:auto">
+    <div style="display:flex;align-items:stretch">
+    ${activeSection==='vn' ? `<div id="vn-side-${p.id}">${renderVNInfoPanel(p)}</div>` : ''}
+    <div style="flex:1;overflow-x:auto;min-width:0">
     <table class="rtbl" id="rtbl-${p.id}">
       <thead><tr>
         <th style="width:18%">Hạng mục</th>
@@ -3830,6 +3851,7 @@ function renderProjectDetail(ci, p) {
         </tr>
       </tfoot>
     </table>
+    </div>
     </div>
   </div>
 
@@ -5197,19 +5219,16 @@ function updPj(pjId,field,val) { const p=getPj(pjId); if(!p) return; p[field]=va
 function openAddProject() {
   const hist = getPjHistory();
   const histOptions = hist.map(h=>`<option value="${x(h.nameVN||h.nameJP)}">`).join('');
-  showModal(`<h3>＋ Thêm dự án mới</h3>
-    ${hist.length>0?`<div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#1a5276">
-      💡 <strong>Tip:</strong> Nhập tên dự án cũ → bấm <strong>Tải từ lịch sử</strong> để load lại toàn bộ thông tin
-    </div>`:''}
+  const isVN = activeSection === 'vn';
+
+  const jpForm = `
     <div class="info-grid c3" style="gap:10px">
       <div class="field"><label>Tên dự án (VN)</label>
-        <input id="ap-nVN" list="ap-hist" placeholder="Tên gợi nhớ…"
-          oninput="apTryLoadHistory()">
+        <input id="ap-nVN" list="ap-hist" placeholder="Tên gợi nhớ…" oninput="apTryLoadHistory()">
         <datalist id="ap-hist">${histOptions}</datalist>
       </div>
       <div class="field"><label>Tên dự án (JP)</label>
-        <input id="ap-nJP" list="ap-hist-jp" placeholder="例：吹田市計画"
-          oninput="apTryLoadHistory()">
+        <input id="ap-nJP" list="ap-hist-jp" placeholder="例：吹田市計画" oninput="apTryLoadHistory()">
         <datalist id="ap-hist-jp">${hist.map(h=>`<option value="${x(h.nameJP||h.nameVN)}">`).join('')}</datalist>
       </div>
       <div class="field"><label>Văn phòng</label>
@@ -5226,7 +5245,59 @@ function openAddProject() {
           ${sortedStaffList().map(s=>`<option>${s}</option>`).join('')}
         </select>
       </div>
+    </div>`;
+
+  const vnForm = `
+    <div style="font-size:11px;font-weight:700;color:#196f3d;margin-bottom:8px;padding:4px 8px;background:#f0fdf4;border-radius:4px">📋 Nhóm 1 — Thông tin cơ bản</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field" style="grid-column:1/-1"><label>Tên dự án <span style="color:#e74c3c">*</span></label>
+        <input id="ap-nVN" list="ap-hist" placeholder="VD: Nhà hàng ABC Hoàn Kiếm" oninput="apTryLoadHistory()">
+        <datalist id="ap-hist">${histOptions}</datalist>
+      </div>
+      <div class="field"><label>Văn phòng</label>
+        <select id="ap-off"><option value="Hà Nội">Hà Nội</option><option value="HCM">HCM</option><option value="Đà Nẵng">Đà Nẵng</option></select>
+      </div>
+      <div class="field"><label>CĐT (Chủ đầu tư)</label>
+        <input id="ap-client" placeholder="Tên chủ đầu tư…">
+      </div>
+      <div class="field"><label>Loại công trình</label>
+        <input id="ap-buildingType" placeholder="Nhà hàng / Khách sạn / Căn hộ…">
+      </div>
+      <div class="field"><label>Phạm vi thiết kế</label>
+        <input id="ap-scope" placeholder="Nội thất toàn bộ / Phần thô…">
+      </div>
+      <div class="field"><label>Diện tích</label>
+        <input id="ap-area" placeholder="VD: 1.200 m²">
+      </div>
     </div>
+    <div style="font-size:11px;font-weight:700;color:#1a5276;margin:12px 0 8px;padding:4px 8px;background:#f0f7ff;border-radius:4px">📅 Nhóm 2 — Tiến độ tổng thể</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>Ngày Khởi công</label>
+        <input id="ap-constructionStart" type="date">
+      </div>
+      <div class="field"><label>Ngày Hoàn công</label>
+        <input id="ap-constructionEnd" type="date">
+      </div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>Người liên hệ</label>
+        <input id="ap-ct" list="ap-cl" placeholder="Tên liên hệ…">
+        <datalist id="ap-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist>
+      </div>
+      <div class="field"><label>Người triển khai chính</label>
+        <select id="ap-st"><option value="">— Chọn —</option>
+          ${sortedStaffList().map(s=>`<option>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <input type="hidden" id="ap-nJP" value="">`;
+
+  showModal(`<h3>${isVN ? '🇻🇳 Thêm dự án VN' : '🇯🇵 Thêm dự án JP'}</h3>
+    ${hist.length>0 && !isVN ? `<div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#1a5276">
+      💡 <strong>Tip:</strong> Nhập tên dự án cũ → bấm <strong>Tải từ lịch sử</strong> để load lại toàn bộ thông tin
+    </div>` : ''}
+    ${isVN ? vnForm : jpForm}
     <!-- Preview khi load từ history -->
     <div id="ap-hist-preview" style="display:none;margin-top:10px;padding:10px;background:#f8fff8;border:1px solid #a9dfbf;border-radius:6px">
       <div style="font-size:11px;font-weight:700;color:#1e8449;margin-bottom:6px">✅ Đã tìm thấy trong lịch sử</div>
@@ -5234,7 +5305,7 @@ function openAddProject() {
     </div>
     <div class="modal-ft" style="gap:8px">
       <button class="btn" onclick="closeModal()">Hủy</button>
-      ${hist.length>0?`<button class="btn" style="background:#e8f4fd;color:#1a5276;border:1px solid #b3d4f5" onclick="apLoadHistory()">📂 Tải từ lịch sử</button>`:''}
+      ${hist.length>0 && !isVN ? `<button class="btn" style="background:#e8f4fd;color:#1a5276;border:1px solid #b3d4f5" onclick="apLoadHistory()">📂 Tải từ lịch sử</button>` : ''}
       <button class="btn btn-gold" onclick="confirmAddPj()">＋ Thêm dự án</button>
     </div>`);
 }
@@ -5277,17 +5348,26 @@ function apLoadHistory() {
 }
 function confirmAddPj() {
   const nVN=document.getElementById('ap-nVN').value.trim();
-  const nJP=document.getElementById('ap-nJP').value.trim();
+  const nJP=(document.getElementById('ap-nJP')?.value||'').trim();
   if(!nVN&&!nJP){alert('Vui lòng nhập tên dự án');return;}
   // Tìm history để restore ảnh
   const hist = loadPjFromHistory(nVN, nJP);
+  const isVN = activeSection === 'vn';
   const pj={id:gid(),nameVN:nVN,nameJP:nJP,
     office:document.getElementById('ap-off').value,
-    contact:document.getElementById('ap-ct').value.trim(),
-    mainStaff:document.getElementById('ap-st').value,
+    contact:(document.getElementById('ap-ct')?.value||'').trim(),
+    mainStaff:(document.getElementById('ap-st')?.value||''),
     groups:[],
-    photos: hist?.photo ? [hist.photo] : [],  // restore ảnh đầu tiên từ history
+    photos: hist?.photo ? [hist.photo] : [],
     otLog:[],notes:''};
+  if (isVN) {
+    pj.client           = (document.getElementById('ap-client')?.value||'').trim();
+    pj.buildingType     = (document.getElementById('ap-buildingType')?.value||'').trim();
+    pj.scope            = (document.getElementById('ap-scope')?.value||'').trim();
+    pj.area             = (document.getElementById('ap-area')?.value||'').trim();
+    pj.constructionStart= (document.getElementById('ap-constructionStart')?.value||'');
+    pj.constructionEnd  = (document.getElementById('ap-constructionEnd')?.value||'');
+  }
   if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
   if(activeSection==='vn'){
     if(!D.months[D.activeMonth].projectsVN) D.months[D.activeMonth].projectsVN=[];
@@ -5311,12 +5391,18 @@ function confirmAddPj() {
 }
 function openEditProject(id) {
   const p=getPj(id); if(!p) return;
-  showModal(`<h3>✏ Sửa thông tin dự án</h3>
+  const isVN = activeSection === 'vn';
+
+  function sel(opts, val) {
+    return opts.map(o=>`<option value="${o}"${o===val?' selected':''}>${o}</option>`).join('');
+  }
+
+  const jpForm = `
     <div class="info-grid c3" style="gap:10px">
       <div class="field"><label>Tên dự án (VN)</label><input id="ep-nVN" value="${x(p.nameVN||'')}"></div>
       <div class="field"><label>Tên dự án (JP)</label><input id="ep-nJP" value="${x(p.nameJP||'')}"></div>
       <div class="field"><label>Văn phòng</label>
-        <select id="ep-off"><option ${p.office==='大阪'?'selected':''}>大阪</option><option ${p.office==='東京'?'selected':''}>東京</option><option ${p.office==='ハノイ'?'selected':''}>ハノイ</option><option ${p.office==='HCM'?'selected':''}>HCM</option></select></div>
+        <select id="ep-off">${sel(['大阪','東京','ハノイ','HCM'],p.office)}</select></div>
     </div>
     <div class="info-grid c2" style="gap:10px;margin-top:10px">
       <div class="field"><label>Người liên hệ JP</label>
@@ -5326,18 +5412,72 @@ function openEditProject(id) {
         <select id="ep-st"><option value="">— Chọn —</option>
           ${sortedStaffList().map(s=>`<option ${p.mainStaff===s?'selected':''}>${s}</option>`).join('')}</select></div>
     </div>
+    <input type="hidden" id="ep-nJP-hidden" value="">`;
+
+  const vnForm = `
+    <div style="font-size:11px;font-weight:700;color:#196f3d;margin-bottom:8px;padding:4px 8px;background:#f0fdf4;border-radius:4px">📋 Nhóm 1 — Thông tin cơ bản</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field" style="grid-column:1/-1"><label>Tên dự án <span style="color:#e74c3c">*</span></label>
+        <input id="ep-nVN" value="${x(p.nameVN||'')}">
+      </div>
+      <div class="field"><label>Văn phòng</label>
+        <select id="ep-off">${sel(['Hà Nội','HCM','Đà Nẵng'],p.office)}</select></div>
+      <div class="field"><label>CĐT</label>
+        <input id="ep-client" value="${x(p.client||'')}"></div>
+      <div class="field"><label>Loại công trình</label>
+        <input id="ep-buildingType" value="${x(p.buildingType||'')}"></div>
+      <div class="field"><label>Phạm vi TK</label>
+        <input id="ep-scope" value="${x(p.scope||'')}"></div>
+      <div class="field"><label>Diện tích</label>
+        <input id="ep-area" value="${x(p.area||'')}"></div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#1a5276;margin:12px 0 8px;padding:4px 8px;background:#f0f7ff;border-radius:4px">📅 Nhóm 2 — Tiến độ tổng thể</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>Kickoff TK <span style="font-size:9px;color:#94a3b8">(tự tính từ tasks)</span></label>
+        <input type="text" disabled value="${(()=>{const tl=p.tlTasks||[];const k=tl.map(t=>t.start).filter(Boolean).sort()[0];return k?k.replace(/-/g,'/'):'—';})()}"
+          style="background:#f4f4f4;color:#888;font-size:11px"></div>
+      <div class="field"><label>Hoàn thành TK <span style="font-size:9px;color:#94a3b8">(tự tính)</span></label>
+        <input type="text" disabled value="${(()=>{const tl=p.tlTasks||[];const c=tl.map(t=>t.end||t.upDate).filter(Boolean).sort().slice(-1)[0];return c?c.replace(/-/g,'/'):'—';})()}"
+          style="background:#f4f4f4;color:#888;font-size:11px"></div>
+      <div class="field"><label>Ngày Khởi công</label>
+        <input id="ep-constructionStart" type="date" value="${x(p.constructionStart||'')}"></div>
+      <div class="field"><label>Ngày Hoàn công</label>
+        <input id="ep-constructionEnd" type="date" value="${x(p.constructionEnd||'')}"></div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>Người liên hệ</label>
+        <input id="ep-ct" list="ep-cl" value="${x(p.contact||'')}">
+        <datalist id="ep-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist></div>
+      <div class="field"><label>Người triển khai chính</label>
+        <select id="ep-st"><option value="">— Chọn —</option>
+          ${sortedStaffList().map(s=>`<option ${p.mainStaff===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    </div>
+    <input type="hidden" id="ep-nJP" value="${x(p.nameJP||'')}">`;
+
+  showModal(`<h3>${isVN ? '🇻🇳 Sửa dự án VN' : '✏ Sửa thông tin dự án'}</h3>
+    ${isVN ? vnForm : jpForm}
     <div class="modal-ft">
       <button class="btn" onclick="closeModal()">Hủy</button>
-      <button class="btn btn-gold" onclick="confirmEditPj('${id}')">Lưu</button>
+      <button class="btn btn-gold" onclick="confirmEditPj('${id}')">💾 Lưu</button>
     </div>`);
 }
 function confirmEditPj(id) {
   const p=getPj(id); if(!p) return;
-  p.nameVN=document.getElementById('ep-nVN').value.trim();
-  p.nameJP=document.getElementById('ep-nJP').value.trim();
-  p.office=document.getElementById('ep-off').value;
-  p.contact=document.getElementById('ep-ct').value.trim();
-  p.mainStaff=document.getElementById('ep-st').value;
+  const isVN = activeSection === 'vn';
+  p.nameVN=(document.getElementById('ep-nVN')?.value||'').trim();
+  p.nameJP=(document.getElementById('ep-nJP')?.value||'').trim();
+  p.office=(document.getElementById('ep-off')?.value||'');
+  p.contact=(document.getElementById('ep-ct')?.value||'').trim();
+  p.mainStaff=(document.getElementById('ep-st')?.value||'');
+  if (isVN) {
+    p.client           = (document.getElementById('ep-client')?.value||'').trim();
+    p.buildingType     = (document.getElementById('ep-buildingType')?.value||'').trim();
+    p.scope            = (document.getElementById('ep-scope')?.value||'').trim();
+    p.area             = (document.getElementById('ep-area')?.value||'').trim();
+    p.constructionStart= (document.getElementById('ep-constructionStart')?.value||'');
+    p.constructionEnd  = (document.getElementById('ep-constructionEnd')?.value||'');
+  }
   save(); closeModal(); renderSidebar(); renderContent(); toast('✓ Đã lưu');
   _sbAuditLog('update', 'projects', id, 'Sửa dự án: "' + (p.nameVN || p.nameJP || id) + '"');
   if (_needsApproval()) {

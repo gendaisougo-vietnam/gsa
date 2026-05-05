@@ -969,8 +969,9 @@ function savePjDetailField(pjId, field, val) {
                      client:'client' };
     const col = colMap[field];
     if (col) {
+      console.log('[savePjDetailField]', field, '→', col, '=', val);
       _sb.from('projects').update({ [col]: val||null }).eq('id', pjId)
-        .then(r=>{ if(r.error) console.warn('[savePjDetailField]', r.error.message); });
+        .then(r=>{ if(r.error) console.warn('[savePjDetailField]', r.error.message); else toast('✓ Đã lưu'); });
     }
   }
 }

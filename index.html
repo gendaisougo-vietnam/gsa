@@ -3809,9 +3809,7 @@ function renderProjectDetail(ci, p) {
       <span class="card-hd-title">${activeSection==='vn' ? '👥 Tiến độ nhân sự' : '🎨 Hạng mục phối cảnh'}</span>
       <button class="btn btn-gold btn-sm" onclick="addGroup('${p.id}')">＋ Thêm hạng mục</button>
     </div>
-    <div style="display:flex;align-items:stretch">
-    ${activeSection==='vn' ? `<div id="vn-side-${p.id}">${renderVNInfoPanel(p)}</div>` : ''}
-    <div style="flex:1;overflow-x:auto;min-width:0">
+    <div style="overflow-x:auto">
     <table class="rtbl" id="rtbl-${p.id}">
       <thead><tr>
         <th style="width:18%">Hạng mục</th>
@@ -3855,7 +3853,6 @@ function renderProjectDetail(ci, p) {
         </tr>
       </tfoot>
     </table>
-    </div>
     </div>
   </div>
 

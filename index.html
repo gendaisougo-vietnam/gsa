@@ -906,6 +906,7 @@ async function sbPushAll() {
 
 // Phase 5: Row debounce helper + column map
 const _sbRowDebounce = {};
+const _ovTlRefreshTimer = {};
 const _sbRowPending = {}; // merge mọi field change của 1 row trước khi ghi Supabase
 window._isSyncing = false; // ngăn Realtime ghi đè khi đang push/import
 function _sbSaveRowDebounced(groupId, rowId, colData) {
@@ -2412,7 +2413,7 @@ function renderMonthOverview(ci) {
 
   <div class="card">
     <div class="card-hd"><span class="card-hd-title">${activeSection==="vn"?"🇻🇳":"🇯🇵"} Chi tiết dự án — ${monthLabel(D.activeMonth)}</span></div>
-    <div style="overflow-x:auto">${renderProjectTimeline(pjsTimeline)}</div>
+    <div id="overviewTlInner" style="overflow-x:auto">${renderProjectTimeline(pjsTimeline)}</div>
   </div>
 
   <div id="pjDetailArea"></div>
@@ -3044,8 +3045,7 @@ function deleteTlTask(pjId, taskId) {
     relinkTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
     cascadedTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
   }
-  const ci = document.getElementById('content-inner') || document.getElementById('main-content');
-  if(ci) renderProjectDetail(ci, p);
+  try { renderContent(); } catch(e) {}
   var _delMsg = (relinkTasks.length>0||cascadedTasks.length>0)
     ? ` — Đã nối lại ${relinkTasks.length} task, cập nhật ${cascadedTasks.length} task phụ thuộc` : '';
   if (deletedGroup) _delMsg += ' — Đã xóa hạng mục "'+deletedGroup.type+'"';
@@ -3400,10 +3400,7 @@ function confirmSaveTlTask(pjId, taskId) {
   relinkTasks.forEach(function(t) { _sbUpsertTlTask(pjId, t); });
 
   closeModal();
-  const p = allCurProjects().find(q=>q.id===pjId)
-         || Object.values(D.months).flatMap(m=>[...(m.projectsVN||[])]).find(q=>q.id===pjId);
-  const ci = document.getElementById('content-inner') || document.querySelector('.content-inner');
-  if(ci && p) renderProjectDetail(ci, p);
+  try { renderContent(); } catch(e) {}
   const _insertMsg = insertAfterTaskId ? ' (chèn vào giữa)' : '';
   const _cascadeMsg = cascadedTasks.length > 0 ? ` — Cập nhật ${cascadedTasks.length} task phụ thuộc` : '';
   toast('✓ Đã lưu task tiến độ' + (staff.length>0&&task.lv!=='group' ? ' & đồng bộ hạng mục' : '') + _insertMsg + _cascadeMsg);
@@ -3820,7 +3817,7 @@ function renderProjectDetail(ci, p) {
     </div>
   </div>
 
-  ${activeSection==='vn' ? renderProjectTimeline_VN(p) : ''}
+  <div id="vn-tl-wrap-${p.id}">${activeSection==='vn' ? renderProjectTimeline_VN(p) : ''}</div>
 
   <div class="card">
     <div class="card-hd">
@@ -4641,6 +4638,7 @@ async function markRowDone(pjId, gId, rId) {
   refreshPjTotals(pjId);
   try { refreshStaffSched(pjId); } catch(e) {}
   try { renderSidebar(); } catch(e) {}
+  _refreshVnTimeline(pjId);
 
   openUpRatingModal(pjId, gId, rId, label, timeStr);
 }
@@ -5101,7 +5099,7 @@ async function addGroup(pjId) {
   const p=getPj(pjId); if(!p) return;
   if(!p.groups) p.groups=[];
   p.groups.push({id:gid(),type:'',rows:[{id:gid(),status:'new',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
-  save(); rebuildGroups(pjId); refreshPjTotals(pjId);
+  save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId);
   _sbAuditLog('create', 'groups', p.groups[p.groups.length-1] && p.groups[p.groups.length-1].id || '', 'Thêm hạng mục cho "' + (p.nameVN||p.nameJP||pjId) + '"');
   setTimeout(()=>{ const inputs=document.querySelectorAll(`#rbody-${pjId} .grp-hd .tbl-input-dark`); if(inputs.length) inputs[inputs.length-1].focus(); },50);
   if (window._sbReady) {
@@ -5125,7 +5123,7 @@ async function addRow(pjId,gid2) {
   const p=getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
   g.rows.push({id:gid(),status:'new',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0});
-  save(); rebuildGroups(pjId); refreshPjTotals(pjId);
+  save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId);
   if (window._sbReady) {
     const r = g.rows[g.rows.length - 1];
     if (_needsApproval()) {
@@ -5153,7 +5151,7 @@ async function delGroup(pjId,gid2) {
     }
   }
   p.groups=(p.groups||[]).filter(g=>g.id!==gid2);
-  save(); rebuildGroups(pjId); refreshPjTotals(pjId);
+  save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId);
   _sbAuditLog('delete', 'groups', gid2, 'Xóa hạng mục trong "' + (p.nameVN||p.nameJP||pjId) + '"');
 }
 async function delRow(pjId,gid2,rid) {
@@ -5170,7 +5168,7 @@ async function delRow(pjId,gid2,rid) {
     }
   }
   g.rows=g.rows.filter(r=>r.id!==rid);
-  save(); rebuildGroups(pjId); refreshPjTotals(pjId);
+  save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId);
 }
 function rebuildGroups(pjId) {
   const p = getPj(pjId); if(!p) return;
@@ -5201,6 +5199,16 @@ function updRow(pjId,gid2,rid,field,val) {
   const r=g.rows.find(r=>r.id===rid); if(!r) return;
   r[field]=val;
   persistD();
+  if (['dateFrom','dateTo','doneAt','status','qty'].includes(field)) {
+    clearTimeout(_ovTlRefreshTimer[pjId]);
+    _ovTlRefreshTimer[pjId] = setTimeout(function() {
+      const tlDiv = document.getElementById('overviewTlInner');
+      if (!activePjId && tlDiv) {
+        const csIds = new Set(activeSection==='vn'?(curMonth().projectsVN||[]).map(q=>q.id):(curMonth().projects||[]).map(q=>q.id));
+        tlDiv.innerHTML = renderProjectTimeline(allActiveProjects().filter(q=>csIds.has(q.id)));
+      }
+    }, 1000);
+  }
   // Leave conflict check when staff, dateFrom or dateTo changes
   if(['staff','dateFrom','dateTo'].includes(field) && r.staff && (r.dateFrom||r.dateTo)) {
     const conflicts = checkLeaveConflict(r.staff, r.dateFrom||r.dateTo, r.dateTo||r.dateFrom);
@@ -5230,6 +5238,12 @@ function refreshPjTotals(pjId) {
   refreshHeroTargetDisplay();
   refreshStaffSched(pjId);
   renderSidebar();
+}
+function _refreshVnTimeline(pjId) {
+  if (activeSection !== 'vn') return;
+  const p = getPj(pjId); if (!p) return;
+  const wrap = document.getElementById('vn-tl-wrap-' + pjId);
+  if (wrap) wrap.innerHTML = renderProjectTimeline_VN(p);
 }
 
 /* PROJECT CRUD */

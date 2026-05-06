@@ -810,10 +810,12 @@ async function sbLoadAll() {
   }
   for (const p of (projectRows || [])) {
     if (!result.months[p.month_id]) continue;
+    const _pTlList = tlByProject[p.id] || [];
+    const _pTlIdxMap = new Map(_pTlList.map(function(t,i){ return [t.id, i]; }));
     const groups = (groupsByProject[p.id] || []).map(g => {
       // Tìm TL task tương ứng để mark _fromTlTask trên các rows (phục vụ sync remove staff)
       const tlTaskRaw = g.tl_task_id
-        ? (tlByProject[p.id] || []).find(t => t.id === g.tl_task_id)
+        ? _pTlList.find(t => t.id === g.tl_task_id)
         : null;
       const tlStaffSet = new Set(Array.isArray(tlTaskRaw?.staff) ? tlTaskRaw.staff : []);
       return {
@@ -830,6 +832,12 @@ async function sbLoadAll() {
           _fromTlTask: tlStaffSet.size > 0 && r.staff && tlStaffSet.has(r.staff) ? true : undefined,
         }))
       };
+    });
+    // Sort groups theo thứ tự tl_tasks từ Supabase (đã load theo sort_order)
+    groups.sort(function(a,b) {
+      const ai = (a.tlTaskId != null && _pTlIdxMap.has(a.tlTaskId)) ? _pTlIdxMap.get(a.tlTaskId) : Infinity;
+      const bi = (b.tlTaskId != null && _pTlIdxMap.has(b.tlTaskId)) ? _pTlIdxMap.get(b.tlTaskId) : Infinity;
+      return ai - bi;
     });
     const pObj = {
       id: p.id, nameVN: p.name_vn, nameJP: p.name_jp,
@@ -4729,7 +4737,13 @@ function ratingColor(v) {
 
 /* GROUPS — per-group gray shading for easy visual separation */
 function renderGroups(p) {
-  const groups = p.groups||[];
+  // Sort groups theo thứ tự p.tlTasks để luôn khớp với bảng Tiến độ dự án
+  const _tlIdxRG = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
+  const groups = [...(p.groups||[])].sort(function(a,b) {
+    const ai = (a.tlTaskId != null && _tlIdxRG.has(a.tlTaskId)) ? _tlIdxRG.get(a.tlTaskId) : Infinity;
+    const bi = (b.tlTaskId != null && _tlIdxRG.has(b.tlTaskId)) ? _tlIdxRG.get(b.tlTaskId) : Infinity;
+    return ai - bi;
+  });
   if (!groups.length) return `<tr><td colspan="${(sessionStorage.getItem('splash_role')||'admin')==='edit' ? 9 : 12}" style="text-align:center;padding:20px;color:var(--gray4)">
     Chưa có hạng mục — bấm <strong style="color:var(--navy)">＋ Thêm hạng mục</strong> ở trên</td></tr>`;
 
@@ -4937,7 +4951,14 @@ function renderStaffSchedule(p) {
   days.forEach((d,i)=>{ if(i===0||(d.getDay()===1)){weekStarts.push(i);} });
 
   // Collect ALL tasks from this project (bao gồm cả ngoài 3 tuần)
-  const allTasks = (p.groups||[]).flatMap(g=>
+  // Sort groups theo thứ tự tlTasks để taskSummary cũng đúng thứ tự
+  const _tlIdxSS = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
+  const _sortedGroupsSS = [...(p.groups||[])].sort(function(a,b) {
+    const ai = (a.tlTaskId != null && _tlIdxSS.has(a.tlTaskId)) ? _tlIdxSS.get(a.tlTaskId) : Infinity;
+    const bi = (b.tlTaskId != null && _tlIdxSS.has(b.tlTaskId)) ? _tlIdxSS.get(b.tlTaskId) : Infinity;
+    return ai - bi;
+  });
+  const allTasks = _sortedGroupsSS.flatMap(g=>
     (g.rows||[]).filter(r=>r.staff&&(r.dateFrom||r.dateTo)).map(r=>({
       ...r,
       pjName: p.nameVN||p.nameJP||'Dự án',

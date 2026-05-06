@@ -3493,9 +3493,20 @@ function syncTlTaskToGroup(pjId, task) {
   });
 
   grp.rows = newRows;
+
+  // Sắp xếp p.groups theo thứ tự p.tlTasks (groups có tlTaskId theo vị trí task tương ứng)
+  // Groups không có tlTaskId (thêm thủ công) giữ sau các groups TL-synced
+  const _tlOrder = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
+  p.groups.sort(function(a, b) {
+    const ai = (a.tlTaskId != null && _tlOrder.has(a.tlTaskId)) ? _tlOrder.get(a.tlTaskId) : Infinity;
+    const bi = (b.tlTaskId != null && _tlOrder.has(b.tlTaskId)) ? _tlOrder.get(b.tlTaskId) : Infinity;
+    return ai - bi;
+  });
+
   save();
 
   // Upsert group + rows lên Supabase để sbLoadAll() trả về dữ liệu mới nhất trên mọi thiết bị
+  // sort_order dùng vị trí sau khi đã sort để Supabase cũng đúng thứ tự
   if (window._sbReady) {
     _sb.from('groups').upsert(
       { id: grp.id, project_id: pjId, type: grp.type||'', tl_task_id: task.id, sort_order: p.groups.indexOf(grp) },

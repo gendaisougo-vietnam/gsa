@@ -7072,16 +7072,16 @@ function renderStaffPage() {
             <div id="sal-${si}" style="display:none">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <div class="field"><label>Gross</label>
-                  <input type="number" value="${prof.salaryGross||''}" placeholder="0"
-                    style="font-family:inherit;font-size:12px"
-                    onchange="saveStaffProfile('${s}','salaryGross',+this.value)">
-                  <div style="font-size:9px;color:var(--gray4)">¥ / tháng</div>
+                  <input type="text" value="${prof.salaryGross ? Number(prof.salaryGross).toLocaleString('vi-VN') : ''}" placeholder="0"
+                    style="font-family:inherit;font-size:12px;text-align:right"
+                    onchange="saveStaffProfile('${s}','salaryGross',+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))||0);this.value=this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,'')?Number(+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))).toLocaleString('vi-VN'):''">
+                  <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
                 <div class="field"><label>Net</label>
-                  <input type="number" value="${prof.salaryNet||''}" placeholder="0"
-                    style="font-family:inherit;font-size:12px"
-                    onchange="saveStaffProfile('${s}','salaryNet',+this.value)">
-                  <div style="font-size:9px;color:var(--gray4)">¥ / tháng</div>
+                  <input type="text" value="${prof.salaryNet ? Number(prof.salaryNet).toLocaleString('vi-VN') : ''}" placeholder="0"
+                    style="font-family:inherit;font-size:12px;text-align:right"
+                    onchange="saveStaffProfile('${s}','salaryNet',+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))||0);this.value=this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,'')?Number(+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))).toLocaleString('vi-VN'):''">
+                  <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
               </div>
             </div>

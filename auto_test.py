@@ -276,6 +276,34 @@ if sec_missing:
         print(f"         >> Missing: {m}")
 
 # ─────────────────────────────────────────────────────────────
+# TEST 11 — Photo Storage Restructure
+# ─────────────────────────────────────────────────────────────
+photo_checks = {
+    "getMonthForPj func"       : "function getMonthForPj" in html,
+    "_sbCopyMonthPhotos func"  : "_sbCopyMonthPhotos" in html,
+    "uploadPhoto new path"     : "getMonthForPj(pjId)" in html and "month_id: _upMid" in html,
+    "delPhoto smart path"      : "_cached.startsWith(_BASE)" in html,
+    "_pjIdMap capture"         : "_pjIdMap.push" in html and "prevId: p.id" in html,
+    "copy slot_0 only"         : "slot_0.jpg" in html and "download(srcPath)" in html,
+    "cleanup >2 months"        : "(nY - mY) * 12 + (nM - mM) <= 2" in html,
+    "PHOTO_MIGRATION.sql"      : os.path.exists(r"E:\Dropbox\Bảng kết quả (Selective Sync Conflict)\PHOTO_MIGRATION.sql"),
+    "migrate_photos.js"        : os.path.exists(r"E:\Dropbox\Bảng kết quả (Selective Sync Conflict)\migrate_photos.js"),
+}
+
+photo_done    = [k for k, v in photo_checks.items() if v]
+photo_missing = [k for k, v in photo_checks.items() if not v]
+
+check(
+    "Photo Storage Restructure",
+    len(photo_missing) == 0,
+    f"{len(photo_done)}/{len(photo_checks)} checks OK" if not photo_missing
+    else f"THIEU: {', '.join(photo_missing)}"
+)
+if photo_missing:
+    for m in photo_missing:
+        print(f"         >> Missing: {m}")
+
+# ─────────────────────────────────────────────────────────────
 # IN KET QUA
 # ─────────────────────────────────────────────────────────────
 print()

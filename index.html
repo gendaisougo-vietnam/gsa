@@ -3017,13 +3017,13 @@ function deleteTlTask(pjId, taskId) {
   relinkTasks.forEach(t=>{ t.dep = deletedTask.dep || ''; });
   p.tlTasks = p.tlTasks.filter(t=>t.id!==taskId);
 
-  // Xóa group phối cảnh tương ứng (group có tlTaskId = taskId)
-  var deletedGroup = null;
-  if (p.groups) {
-    deletedGroup = p.groups.find(g=>g.tlTaskId===taskId);
-    if (deletedGroup) {
-      p.groups = p.groups.filter(g=>g.tlTaskId!==taskId);
-    }
+  // Tìm TẤT CẢ groups liên quan: theo tlTaskId, hoặc fallback theo type (data cũ không có tl_task_id)
+  var deletedGroups = (p.groups||[]).filter(function(g) {
+    return g.tlTaskId === taskId || (!g.tlTaskId && g.type === deletedTask.name);
+  });
+  var deletedGroupIds = new Set(deletedGroups.map(function(g){ return g.id; }));
+  if (deletedGroupIds.size > 0) {
+    p.groups = (p.groups||[]).filter(function(g){ return !deletedGroupIds.has(g.id); });
   }
 
   save();
@@ -3033,14 +3033,16 @@ function deleteTlTask(pjId, taskId) {
     cascadedTasks = cascadeTlTaskDeps(pjId, deletedTask.dep);
     if (cascadedTasks.length > 0) save();
   }
-  // Supabase: xóa task, xóa group tương ứng, upsert relinked + cascaded
+  // Supabase: xóa task, xóa groups + rows tương ứng (rows auto-cascade nhưng xóa explicit để chắc)
   if (window._sbReady) {
     _sb.from('tl_tasks').delete().eq('id', taskId)
       .then(function(r){ if(r.error) console.warn('[tl delete]', r.error.message); else console.log('[tl delete] OK:', taskId); });
-    if (deletedGroup) {
-      _sb.from('groups').delete().eq('id', deletedGroup.id)
+    deletedGroups.forEach(function(g) {
+      _sb.from('rows').delete().eq('group_id', g.id)
+        .then(function(r){ if(r.error) console.warn('[tl del rows]', r.error.message); });
+      _sb.from('groups').delete().eq('id', g.id)
         .then(function(r){ if(r.error) console.warn('[tl del group]', r.error.message); });
-    }
+    });
     relinkTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
     cascadedTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
   }
@@ -3048,7 +3050,7 @@ function deleteTlTask(pjId, taskId) {
   _refreshOverviewParts();
   var _delMsg = (relinkTasks.length>0||cascadedTasks.length>0)
     ? ` — Đã nối lại ${relinkTasks.length} task, cập nhật ${cascadedTasks.length} task phụ thuộc` : '';
-  if (deletedGroup) _delMsg += ' — Đã xóa hạng mục "'+deletedGroup.type+'"';
+  if (deletedGroups.length > 0) _delMsg += ' — Đã xóa ' + deletedGroups.length + ' hạng mục';
   toast('✓ Đã xóa task'+_delMsg);
 }
 

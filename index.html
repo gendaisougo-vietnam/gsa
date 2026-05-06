@@ -3420,6 +3420,12 @@ function syncTlTaskToGroup(pjId, task) {
   // Tìm group hiện có theo tlTaskId
   let grp = p.groups.find(g=>g.tlTaskId===task.id);
 
+  // Fallback: group cùng tên chưa được link (data cũ không có tl_task_id)
+  if (!grp) {
+    const orphan = p.groups.find(g=>!g.tlTaskId && g.type===task.name);
+    if (orphan) { orphan.tlTaskId = task.id; grp = orphan; }
+  }
+
   if (!grp) {
     grp = {
       id:       gid(),
@@ -3431,6 +3437,9 @@ function syncTlTaskToGroup(pjId, task) {
   } else {
     grp.type = task.name;
   }
+
+  // Xóa khỏi D các group trùng lặp cho cùng task (có cùng tlTaskId nhưng khác id)
+  p.groups = p.groups.filter(g => g === grp || g.tlTaskId !== task.id);
 
   const existingRows = grp.rows || [];
   const newRows = [];

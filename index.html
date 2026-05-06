@@ -3469,6 +3469,22 @@ function syncTlTaskToGroup(pjId, task) {
   grp.rows = newRows;
   save();
 
+  // Upsert group + rows lên Supabase để sbLoadAll() trả về dữ liệu mới nhất trên mọi thiết bị
+  if (window._sbReady) {
+    _sb.from('groups').upsert(
+      { id: grp.id, project_id: pjId, type: grp.type||'', tl_task_id: task.id, sort_order: p.groups.indexOf(grp) },
+      { onConflict: 'id' }
+    ).then(function(res){ if(res.error) console.warn('[syncTl] upsert group:', res.error.message); });
+    newRows.forEach(function(r) {
+      _sb.from('rows').upsert(
+        { id: r.id, group_id: grp.id, staff: r.staff||null, status: r.status||'new',
+          qty: r.qty||0, date_from: r.dateFrom||null, date_to: r.dateTo||null,
+          done_at: r.doneAt||null, up_time: r.upTime||null, note: r.note||'', ot: r.ot||0 },
+        { onConflict: 'id' }
+      ).then(function(res){ if(res.error) console.warn('[syncTl] upsert row:', res.error.message); });
+    });
+  }
+
   // Xóa rows bị remove khỏi Supabase
   if (window._sbReady && removedRows.length > 0) {
     removedRows.forEach(r => {

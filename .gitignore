@@ -2,3 +2,23 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Backup data files
+phoicanh_backup_*.json
+
+# Sensitive config
+supabase_config.js
+
+# Migration / upload scripts
+upload_photos.js
+migrate_*.js
+diag_*.mjs
+
+# Binaries & Office files
+*.msi
+*.xlsx
+*.xls
+*.dwg
+
+# Lock files
+package-lock.json

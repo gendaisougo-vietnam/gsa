@@ -836,16 +836,29 @@ async function sbLoadAll() {
       };
     });
 
-    // Lọc orphaned groups: có tl_task_id không còn tồn tại, hoặc không có tl_task_id
-    // mà type không khớp TL task nào (chỉ áp dụng cho project có TL tasks)
+    // TL task IDs/names already covered by a properly-linked group
+    // → null-id groups with same type are duplicate orphans
+    const _linkedTlTaskIds = new Set(
+      allMappedGroups.filter(function(g){ return g.tlTaskId && _pTlIdSet.has(g.tlTaskId); }).map(function(g){ return g.tlTaskId; })
+    );
+    const _linkedTlTaskNames = new Set(
+      _pTlList.filter(function(t){ return _linkedTlTaskIds.has(t.id); }).map(function(t){ return t.name; })
+    );
+
+    // Lọc orphaned groups: bad tlTaskId, hoặc null-id không khớp TL task, hoặc trùng lặp
     const groups = allMappedGroups.filter(function(g) {
       if (g.tlTaskId) {
         if (_pTlIdSet.has(g.tlTaskId)) return true;
         _orphanedGroupIds.push(g.id); return false;  // bad tlTaskId → orphaned
       }
       if (!_hasPjTl) return true;  // JP project (no TL tasks) → keep all
-      if (_pTlNameSet.has(g.type)) return true;  // name match → keep (data cũ)
-      _orphanedGroupIds.push(g.id); return false; // null tlTaskId + no name match → orphaned
+      if (!_pTlNameSet.has(g.type)) {
+        _orphanedGroupIds.push(g.id); return false;  // type không khớp TL task nào → orphaned
+      }
+      if (_linkedTlTaskNames.has(g.type)) {
+        _orphanedGroupIds.push(g.id); return false;  // trùng lặp: proper group đã có → orphaned
+      }
+      return true;  // data cũ chưa có tlTaskId, chưa có proper group → keep
     });
 
     // Xóa orphaned groups khỏi Supabase (fire-and-forget)
@@ -4769,22 +4782,24 @@ function ratingColor(v) {
 /* GROUPS — per-group gray shading for easy visual separation */
 function renderGroups(p) {
   // Filter + sort groups theo p.tlTasks
-  const _tlIdxRG   = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
-  const _tlIdRGSet  = new Set((p.tlTasks||[]).map(function(t){ return t.id; }));
+  const _tlIdxRG    = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
+  const _tlIdRGSet   = new Set((p.tlTasks||[]).map(function(t){ return t.id; }));
   const _tlNameRGSet = new Set((p.tlTasks||[]).map(function(t){ return t.name; }));
   const _hasTl = (p.tlTasks||[]).length > 0;
+
+  // TL task names already covered by a properly-linked group (has valid tlTaskId)
+  // → any null-id group with same type is a duplicate orphan
+  const _linkedTlIdsRG   = new Set((p.groups||[]).filter(function(g){ return g.tlTaskId && _tlIdRGSet.has(g.tlTaskId); }).map(function(g){ return g.tlTaskId; }));
+  const _linkedTlNamesRG = new Set((p.tlTasks||[]).filter(function(t){ return _linkedTlIdsRG.has(t.id); }).map(function(t){ return t.name; }));
 
   const groups = [...(p.groups||[])]
     .filter(function(g) {
       if (g.tlTaskId) {
-        // Có tlTaskId → chỉ giữ nếu task đó còn tồn tại
         return _tlIdRGSet.has(g.tlTaskId);
       }
-      // Không có tlTaskId:
-      // - Nếu project không có TL task nào → đây là JP project, giữ tất cả
       if (!_hasTl) return true;
-      // - Nếu project có TL tasks → chỉ giữ nếu type khớp tên 1 TL task (data cũ chưa có tlTaskId)
-      return _tlNameRGSet.has(g.type);
+      if (!_tlNameRGSet.has(g.type)) return false;   // type không khớp TL task nào → orphan
+      return !_linkedTlNamesRG.has(g.type);           // trùng lặp: proper group đã có → orphan
     })
     .sort(function(a,b) {
       const ai = (a.tlTaskId != null && _tlIdxRG.has(a.tlTaskId)) ? _tlIdxRG.get(a.tlTaskId) : Infinity;
@@ -4998,13 +5013,25 @@ function renderStaffSchedule(p) {
   days.forEach((d,i)=>{ if(i===0||(d.getDay()===1)){weekStarts.push(i);} });
 
   // Collect ALL tasks from this project (bao gồm cả ngoài 3 tuần)
-  // Sort groups theo thứ tự tlTasks để taskSummary cũng đúng thứ tự
-  const _tlIdxSS = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
-  const _sortedGroupsSS = [...(p.groups||[])].sort(function(a,b) {
-    const ai = (a.tlTaskId != null && _tlIdxSS.has(a.tlTaskId)) ? _tlIdxSS.get(a.tlTaskId) : Infinity;
-    const bi = (b.tlTaskId != null && _tlIdxSS.has(b.tlTaskId)) ? _tlIdxSS.get(b.tlTaskId) : Infinity;
-    return ai - bi;
-  });
+  // Filter + sort groups theo thứ tự tlTasks (same logic as renderGroups)
+  const _tlIdxSS    = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
+  const _tlIdSSSet   = new Set((p.tlTasks||[]).map(function(t){ return t.id; }));
+  const _tlNameSSSet = new Set((p.tlTasks||[]).map(function(t){ return t.name; }));
+  const _hasTlSS = (p.tlTasks||[]).length > 0;
+  const _linkedTlIdsSS   = new Set((p.groups||[]).filter(function(g){ return g.tlTaskId && _tlIdSSSet.has(g.tlTaskId); }).map(function(g){ return g.tlTaskId; }));
+  const _linkedTlNamesSS = new Set((p.tlTasks||[]).filter(function(t){ return _linkedTlIdsSS.has(t.id); }).map(function(t){ return t.name; }));
+  const _sortedGroupsSS = [...(p.groups||[])]
+    .filter(function(g) {
+      if (g.tlTaskId) return _tlIdSSSet.has(g.tlTaskId);
+      if (!_hasTlSS) return true;
+      if (!_tlNameSSSet.has(g.type)) return false;
+      return !_linkedTlNamesSS.has(g.type);
+    })
+    .sort(function(a,b) {
+      const ai = (a.tlTaskId != null && _tlIdxSS.has(a.tlTaskId)) ? _tlIdxSS.get(a.tlTaskId) : Infinity;
+      const bi = (b.tlTaskId != null && _tlIdxSS.has(b.tlTaskId)) ? _tlIdxSS.get(b.tlTaskId) : Infinity;
+      return ai - bi;
+    });
   const allTasks = _sortedGroupsSS.flatMap(g=>
     (g.rows||[]).filter(r=>r.staff&&(r.dateFrom||r.dateTo)).map(r=>({
       ...r,

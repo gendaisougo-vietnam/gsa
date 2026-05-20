@@ -4244,7 +4244,10 @@ function getStaffMonthlyKPIs(staffName, section) {
     let otH = 0;
     pjs.forEach(p => {
       (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r => {
-        if (r.staff === staffName) rows.push(r);
+        if (r.staff === staffName) {
+          rows.push(r);
+          otH += (r.ot || 0);
+        }
       });
       (p.otLog||[]).forEach(e => { if (e.staff===staffName) otH += (e.hours||0); });
     });
@@ -8360,14 +8363,47 @@ function updateColorInputs() {
 /* ══════════════════════════════════════════════════════
    EXPORT / REPORT — simplified: name + items + counts only
 ══════════════════════════════════════════════════════ */
+function _collectOTEntries(pjs) {
+  const entries = [];
+  (pjs||[]).forEach(p => {
+    const pjName = p.nameVN || p.nameJP || '?';
+    const pjOffice = p.office || '';
+    (p.groups||[]).forEach(g => {
+      (g.rows||[]).forEach(r => {
+        if (r && r.staff && (r.ot||0) > 0) {
+          entries.push({
+            staff: r.staff,
+            hours: r.ot || 0,
+            date: r.doneAt || r.dateTo || '',
+            note: r.otNote || '',
+            pjName, pjOffice,
+            source: 'row'
+          });
+        }
+      });
+    });
+    (p.otLog||[]).forEach(e => {
+      entries.push({
+        staff: e.staff,
+        hours: e.hours || 0,
+        date: e.date || '',
+        note: e.note || '',
+        pjName, pjOffice,
+        source: 'otlog'
+      });
+    });
+  });
+  return entries;
+}
+
 function openExportMenu() {
   const ml = monthLabel(D.activeMonth);
   const pjsJP = D.months[D.activeMonth]?.projects    || [];
   const pjsVN = D.months[D.activeMonth]?.projectsVN  || [];
   const cntJP = pjsJP.filter(p=>totalNew(p)+totalRev(p)>0).length;
   const cntVN = pjsVN.filter(p=>totalNew(p)+totalRev(p)>0).length;
-  const otJP  = pjsJP.reduce((s,p)=>(p.otLog||[]).reduce((ss,e)=>ss+(e.hours||0),0)+s,0);
-  const otVN  = pjsVN.reduce((s,p)=>(p.otLog||[]).reduce((ss,e)=>ss+(e.hours||0),0)+s,0);
+  const otJP  = _collectOTEntries(pjsJP).reduce((s,e)=>s+(e.hours||0), 0);
+  const otVN  = _collectOTEntries(pjsVN).reduce((s,e)=>s+(e.hours||0), 0);
 
   function card(icon, title, sub, badge, color, bg, fn) {
     return `<div style="border:1.5px solid #eee;border-radius:12px;padding:18px;text-align:center;cursor:pointer;transition:all .15s"
@@ -8501,13 +8537,12 @@ function exportOTReport(section) {
   const headerColor  = isVN ? '#C55A11' : '#ED7D31';
   const staffOT = {};
   D.settings.staffList.forEach(s=>staffOT[s]={total:0,entries:[]});
-  pjs.forEach(p=>{
-    (p.otLog||[]).forEach(e=>{
-      if(e.staff&&staffOT[e.staff]){
-        staffOT[e.staff].total+=(e.hours||0);
-        staffOT[e.staff].entries.push({...e,pjName:p.nameVN||p.nameJP||'?',pjOffice:p.office||''});
-      }
-    });
+  const allEntries = _collectOTEntries(pjs);
+  allEntries.forEach(e=>{
+    if(e.staff && staffOT[e.staff]){
+      staffOT[e.staff].total += (e.hours||0);
+      staffOT[e.staff].entries.push(e);
+    }
   });
   const activeStaff = D.settings.staffList.filter(s=>staffOT[s].total>0);
   if(!activeStaff.length){ toast('Tháng này chưa có nhân sự nào phát sinh OT'); return; }

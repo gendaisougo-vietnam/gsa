@@ -4195,7 +4195,7 @@ function calcKPI(rows, section, totalOTHours, totalQty, onTimeRate) {
   let weightedSum = 0, totalWeight = 0;
   const groups = [[A,0.35],[B,0.25],[C,0.15],[D,0.10],[E,0.10],[F,0.05]];
   groups.forEach(([val, w]) => { if (val > 0) { weightedSum += val * w; totalWeight += w; } });
-  let kpi = totalWeight > 0 ? weightedSum / totalWeight * 10 : 0;
+  let kpi = totalWeight > 0 ? weightedSum / totalWeight : 0;
 
   // OT bonus: tiered by hours
   if (totalOTHours > 30) kpi *= 1.20;

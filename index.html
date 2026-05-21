@@ -571,6 +571,45 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
 /* ── Trạng thái "Đã UP / Hoàn thành" — gray gần đen, KHÔNG opacity, KHÔNG line-through ── */
 .is-done, .is-done td, .is-done .gantt-text { color:#374151; font-style:normal; }
 
+/* ── Báo cáo đánh giá năm — Print PDF ── */
+.sr-print-footer { display: none; }
+@media print {
+  /* Ẩn mọi thứ ngoài modal báo cáo */
+  body > *:not(#staffReviewOverlay) { display: none !important; }
+  /* Overlay: chuyển từ fixed sang static, nền trắng */
+  #staffReviewOverlay {
+    position: static !important;
+    inset: auto !important;
+    background: #fff !important;
+    backdrop-filter: none !important;
+    display: block !important;
+    height: auto !important;
+  }
+  /* Ẩn header navy + toolbar date picker (2 div đầu tiên) */
+  #staffReviewOverlay > div:nth-child(1),
+  #staffReviewOverlay > div:nth-child(2) { display: none !important; }
+  /* Body: bỏ scroll, padding nhẹ */
+  #srBody {
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+    flex: none !important;
+    height: auto !important;
+  }
+  /* Tránh page break giữa các section */
+  #srBody > div { break-inside: avoid; page-break-inside: avoid; margin-bottom: 8px !important; }
+  /* Compact font 90% để vừa A4 */
+  #staffReviewOverlay, #staffReviewOverlay * { font-size: 92% !important; line-height: 1.4 !important; }
+  /* Chart canvas vừa khổ */
+  #staffReviewOverlay canvas { max-width: 100% !important; height: auto !important; }
+  /* Hiện print footer */
+  .sr-print-footer { display: block !important; }
+  /* Color preserve cho charts/badges */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  /* Page setup A4 margin 1cm */
+  @page { size: A4; margin: 1cm; }
+}
+
 </style>
 </head>
 <body>
@@ -7703,6 +7742,169 @@ function _srKpiColor(pct) {
   return { c:'#ef4444', dot:'🔴' };
 }
 
+// ── GĐ3: Generators cho Highlights / Concerns / Suggestions ──
+const _SR_GRP_NAMES = { A:'Chuyên môn', B:'Tiến độ', C:'Phối hợp', D:'Thái độ', E:'Phát triển', F:'Ngoại ngữ' };
+
+function _srGenHighlights(stats, breakdown, selfRates, teamRates) {
+  const items = [];
+  if (stats.productivityPct >= 100) {
+    const excess = stats.productivityPct - 100;
+    items.push({ pri: 10, text: `Năng suất <strong>${stats.productivityPct}%</strong> — vượt mục tiêu ${excess}%` });
+  }
+  if (stats.avgKPI >= 8.0) {
+    items.push({ pri: 9, text: `KPI tổng <strong>${stats.avgKPI.toFixed(2)}/10</strong> — Xuất sắc` });
+  }
+  if (stats.upRate >= 90 && stats.upTotal > 0) {
+    items.push({ pri: 8, text: `Đúng hạn <strong>${stats.upRate}%</strong> — rất ổn định` });
+  }
+  if (stats.upTotal > 0) {
+    const earlyPct = stats.upEarly / stats.upTotal * 100;
+    if (earlyPct > 20) {
+      items.push({ pri: 7, text: `UP sớm ${stats.upEarly} lần (${earlyPct.toFixed(0)}%) — chủ động` });
+    }
+  }
+  if (stats.unpaidLeaveDays === 0 && stats.workingDays > 0) {
+    items.push({ pri: 6, text: `Không nghỉ không phép trong kỳ` });
+  }
+  if (stats.lateCount === 0 && stats.workingDays > 0) {
+    items.push({ pri: 5, text: `Đúng giờ tuyệt đối — 0 lần đi muộn` });
+  }
+  const validRates = Object.entries(selfRates).filter(([k,v]) => v > 0);
+  if (validRates.length > 0) {
+    const top = validRates.reduce((a,b) => a[1] > b[1] ? a : b);
+    if (top[1] >= 8.0) {
+      items.push({ pri: 8, text: `Chấm điểm <strong>${_SR_GRP_NAMES[top[0]]}</strong> ${top[1].toFixed(2)}/10 — mạnh nhất` });
+    }
+  }
+  if (teamRates) {
+    Object.entries(selfRates).forEach(([k, v]) => {
+      const tv = teamRates[k] || 0;
+      if (v > 0 && tv > 0 && (v - tv) >= 1.0) {
+        items.push({ pri: 6, text: `Vượt team <strong>${_SR_GRP_NAMES[k]}</strong> +${(v-tv).toFixed(2)} điểm` });
+      }
+    });
+  }
+  items.sort((a,b) => b.pri - a.pri);
+  return items.slice(0, 3).map(x => x.text);
+}
+
+function _srGenConcerns(stats, breakdown, selfRates, teamRates) {
+  const items = [];
+  if (stats.productivityPct < 80 && (stats.targetNewTotal + stats.targetRevTotal) > 0) {
+    items.push({ pri: 10, text: `Năng suất chỉ <strong>${stats.productivityPct}%</strong> — dưới mục tiêu` });
+  }
+  if (stats.avgKPI > 0 && stats.avgKPI < 6.0) {
+    items.push({ pri: 9, text: `KPI tổng <strong>${stats.avgKPI.toFixed(2)}/10</strong> — thấp` });
+  }
+  if (stats.upTotal > 0) {
+    const latePct = stats.upLate / stats.upTotal * 100;
+    if (latePct > 5) {
+      items.push({ pri: 8, text: `UP muộn ${latePct.toFixed(0)}% (${stats.upLate} lần) — cần cải thiện` });
+    }
+  }
+  if (stats.unpaidLeaveDays > 3) {
+    items.push({ pri: 9, text: `Nghỉ không phép <strong>${stats.unpaidLeaveDays} ngày</strong>` });
+  }
+  if (stats.lateCount > 10) {
+    const avgMin = Math.round(stats.lateMinutesTotal / stats.lateCount);
+    items.push({ pri: 7, text: `Đi muộn ${stats.lateCount} lần (TB ${avgMin} phút/lần)` });
+  }
+  if (breakdown && breakdown.length > 0) {
+    const maxOT = breakdown.reduce((a,b) => a.ot > b.ot ? a : b);
+    if (maxOT.ot > 30) {
+      const yr2 = maxOT.mid.slice(2,4);
+      const mo = maxOT.mid.slice(5);
+      items.push({ pri: 7, text: `OT tháng ${mo}/${yr2} cao (<strong>${maxOT.ot.toFixed(1)}h</strong>) — risk burnout` });
+    }
+  }
+  const validRates = Object.entries(selfRates).filter(([k,v]) => v > 0);
+  if (validRates.length > 0) {
+    const bottom = validRates.reduce((a,b) => a[1] < b[1] ? a : b);
+    if (bottom[1] < 5.0) {
+      items.push({ pri: 8, text: `Chấm điểm <strong>${_SR_GRP_NAMES[bottom[0]]}</strong> ${bottom[1].toFixed(2)}/10 — yếu nhất` });
+    }
+  }
+  if (teamRates) {
+    Object.entries(selfRates).forEach(([k, v]) => {
+      const tv = teamRates[k] || 0;
+      if (tv > 0 && (tv - v) >= 1.5) {
+        items.push({ pri: 7, text: `Thua team <strong>${_SR_GRP_NAMES[k]}</strong> -${(tv-v).toFixed(2)} điểm` });
+      }
+    });
+  }
+  items.sort((a,b) => b.pri - a.pri);
+  return items.slice(0, 3).map(x => x.text);
+}
+
+function _srGenSuggestions(stats, breakdown, concerns) {
+  // A. Salary
+  let salaryRec, salaryColor, salaryReasons = [];
+  if (stats.avgKPI >= 8.5 && stats.productivityPct >= 110 && stats.unpaidLeaveDays === 0) {
+    salaryRec = 'Tăng 15–20%'; salaryColor = '#10b981';
+    salaryReasons = [
+      `KPI tổng ${stats.avgKPI.toFixed(2)}/10 (xuất sắc)`,
+      `Năng suất ${stats.productivityPct}% (vượt mục tiêu)`,
+      `Không vi phạm nặng — 0 nghỉ không phép`,
+    ];
+  } else if (stats.avgKPI >= 7.5 && stats.productivityPct >= 100) {
+    salaryRec = 'Tăng 10–15%'; salaryColor = '#3b82f6';
+    salaryReasons = [
+      `KPI tổng ${stats.avgKPI.toFixed(2)}/10 (tốt)`,
+      `Năng suất ${stats.productivityPct}% (đạt mục tiêu)`,
+    ];
+  } else if (stats.avgKPI >= 6.5 && stats.productivityPct >= 90) {
+    salaryRec = 'Tăng 5–10%'; salaryColor = '#eab308';
+    salaryReasons = [
+      `KPI tổng ${stats.avgKPI.toFixed(2)}/10 (khá)`,
+      `Năng suất ${stats.productivityPct}%`,
+    ];
+  } else if (stats.avgKPI >= 5.5 && stats.productivityPct >= 80) {
+    salaryRec = 'Giữ nguyên'; salaryColor = '#6b7280';
+    salaryReasons = [
+      `KPI tổng ${stats.avgKPI.toFixed(2)}/10 (đạt mức tối thiểu)`,
+      `Năng suất ${stats.productivityPct}%`,
+    ];
+  } else {
+    salaryRec = 'Cảnh báo — cần review kỹ'; salaryColor = '#ef4444';
+    salaryReasons = [
+      stats.avgKPI > 0 ? `KPI tổng ${stats.avgKPI.toFixed(2)}/10 (dưới ngưỡng)` : `Chưa có data KPI trong kỳ`,
+      stats.productivityPct < 80 ? `Năng suất ${stats.productivityPct}% (thấp)` : `Năng suất ${stats.productivityPct}%`,
+    ];
+  }
+
+  // B. Contract
+  let contractRec, contractColor;
+  if (stats.avgKPI >= 8.0 && stats.unpaidLeaveDays === 0 && stats.workingDays > 200) {
+    contractRec = 'Tái ký 2 năm'; contractColor = '#10b981';
+  } else if (stats.avgKPI >= 6.5) {
+    contractRec = 'Tái ký 1 năm'; contractColor = '#3b82f6';
+  } else if (stats.avgKPI >= 5.0) {
+    contractRec = 'Tái ký 6 tháng + theo dõi'; contractColor = '#eab308';
+  } else {
+    contractRec = 'Cần cân nhắc / thảo luận'; contractColor = '#ef4444';
+  }
+
+  // C. Review notes từ concerns
+  const reviewNotes = [];
+  concerns.forEach(c => {
+    if (c.includes('Năng suất')) reviewNotes.push('Đánh giá lại workload và mục tiêu tháng để cải thiện năng suất');
+    else if (c.includes('UP muộn')) reviewNotes.push('Hỗ trợ quản lý timeline / milestone — review weekly');
+    else if (c.includes('Đi muộn')) reviewNotes.push('Trao đổi về kỷ luật giờ làm việc');
+    else if (c.includes('Nghỉ không phép')) reviewNotes.push('Trao đổi về quy trình thông báo nghỉ phép');
+    else if (c.includes('OT') && c.includes('burnout')) reviewNotes.push('Cân bằng workload — tránh tập trung OT 1 tháng');
+    else if (c.includes('yếu nhất')) {
+      const grp = c.match(/<strong>(.+?)<\/strong>/);
+      if (grp) reviewNotes.push(`Hỗ trợ đào tạo nhóm "${grp[1]}"`);
+    } else if (c.includes('Thua team')) {
+      const grp = c.match(/<strong>(.+?)<\/strong>/);
+      if (grp) reviewNotes.push(`Học hỏi đồng nghiệp ở mảng "${grp[1]}"`);
+    } else if (c.includes('KPI tổng')) reviewNotes.push('Tổng KPI thấp — cần kế hoạch cải thiện cụ thể');
+  });
+  if (reviewNotes.length === 0) reviewNotes.push('Duy trì phong độ hiện tại, đặt mục tiêu cao hơn cho kỳ tới');
+
+  return { salaryRec, salaryColor, salaryReasons, contractRec, contractColor, reviewNotes: reviewNotes.slice(0, 5) };
+}
+
 function _renderStaffReview(staffName, fromDate, toDate) {
   const body = document.getElementById('srBody');
   if (!body) return;
@@ -7730,6 +7932,14 @@ function _renderStaffReview(staffName, fromDate, toDate) {
   const noDataNotice = !hasData
     ? `<div style="background:#fff8e7;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:16px;color:#92400e;font-size:12px;text-align:center">⚠️ Chưa có dữ liệu trong kỳ này (${fromDate} → ${toDate})</div>`
     : '';
+
+  // Pre-compute data cho PHẦN 6 + PHẦN 7 (cần trước khi build body.innerHTML)
+  const _srBreakdownEarly = getStaffMonthBreakdown(staffName, fromDate, toDate);
+  const _srSelfRatesEarly = getStaffRateBreakdown(staffName, fromDate, toDate);
+  const _srTeamRatesEarly = getTeamAvgRateBreakdown(prof.role, staffName, fromDate, toDate);
+  const _srHighlights = _srGenHighlights(stats, _srBreakdownEarly, _srSelfRatesEarly, _srTeamRatesEarly);
+  const _srConcerns   = _srGenConcerns(stats, _srBreakdownEarly, _srSelfRatesEarly, _srTeamRatesEarly);
+  const _srSuggest    = _srGenSuggestions(stats, _srBreakdownEarly, _srConcerns);
 
   const rows = [
     ['📅 Tổng phối cảnh', `<strong>${stats.totalQty}</strong> (Mới: ${stats.totalNew} · Sửa: ${stats.totalRev})`],
@@ -7820,7 +8030,7 @@ function _renderStaffReview(staffName, fromDate, toDate) {
     </div>
 
     <!-- PHẦN 5: STATS CHI TIẾT -->
-    <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden">
+    <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden;margin-bottom:18px">
       <div style="background:#1F3864;color:#fff;padding:10px 16px;font-size:13px;font-weight:700">📋 Thống kê chi tiết</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <tbody>
@@ -7833,32 +8043,78 @@ function _renderStaffReview(staffName, fromDate, toDate) {
         </tbody>
       </table>
     </div>
+
+    <!-- PHẦN 6: HIGHLIGHTS & CONCERNS -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
+      <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden">
+        <div style="background:#10b981;color:#fff;padding:10px 14px;font-size:13px;font-weight:700">🌟 Điểm sáng</div>
+        <div style="padding:12px 16px">
+          ${_srHighlights.length > 0
+            ? `<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.8;color:#222">${_srHighlights.map(h=>`<li>${h}</li>`).join('')}</ul>`
+            : `<div style="color:#888;font-size:12px;font-style:italic;text-align:center;padding:14px">Chưa có điểm sáng nổi bật trong kỳ này</div>`}
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden">
+        <div style="background:#ef4444;color:#fff;padding:10px 14px;font-size:13px;font-weight:700">⚠️ Cần cải thiện</div>
+        <div style="padding:12px 16px">
+          ${_srConcerns.length > 0
+            ? `<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.8;color:#222">${_srConcerns.map(c=>`<li>${c}</li>`).join('')}</ul>`
+            : `<div style="color:#15803d;font-size:13px;text-align:center;padding:14px;font-weight:600">✅ Không có vấn đề đáng lo ngại trong kỳ</div>`}
+        </div>
+      </div>
+    </div>
+
+    <!-- PHẦN 7: GỢI Ý QUYẾT ĐỊNH -->
+    <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden;margin-bottom:18px">
+      <div style="background:#1F3864;color:#fff;padding:10px 16px;font-size:13px;font-weight:700">💼 Gợi ý quyết định (rule-based)</div>
+      <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <!-- A. Salary -->
+        <div style="border:2px solid ${_srSuggest.salaryColor};border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">💰 Đề xuất tăng lương</div>
+          <div style="font-size:18px;font-weight:800;color:${_srSuggest.salaryColor};margin-bottom:8px">${_srSuggest.salaryRec}</div>
+          <ul style="margin:0;padding-left:18px;font-size:11px;color:#555;line-height:1.6">${_srSuggest.salaryReasons.map(r=>`<li>${r}</li>`).join('')}</ul>
+        </div>
+        <!-- B. Contract -->
+        <div style="border:2px solid ${_srSuggest.contractColor};border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">📜 Đề xuất tái ký HĐ</div>
+          <div style="font-size:18px;font-weight:800;color:${_srSuggest.contractColor};margin-bottom:8px">${_srSuggest.contractRec}</div>
+          <div style="font-size:11px;color:#555;line-height:1.6">Dựa trên KPI ${stats.avgKPI.toFixed(2)}/10, ${stats.unpaidLeaveDays} nghỉ KP, ${stats.workingDays} ngày làm việc.</div>
+        </div>
+      </div>
+      <!-- C. Review notes -->
+      <div style="padding:0 16px 14px">
+        <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:8px">📝 Lưu ý khi review</div>
+        <ol style="margin:0;padding-left:20px;font-size:12px;color:#333;line-height:1.7">${_srSuggest.reviewNotes.map(n=>`<li>${n}</li>`).join('')}</ol>
+      </div>
+      <!-- D. Disclaimer -->
+      <div style="padding:10px 16px;background:#f9fafb;border-top:1px solid #eee;font-size:11px;color:#666;font-style:italic">
+        💡 Đây là gợi ý tự động dựa trên số liệu. Quyết định cuối cùng nên kết hợp đánh giá định tính từ quản lý trực tiếp.
+      </div>
+    </div>
+
+    <!-- Print footer (chỉ hiện khi in) -->
+    <div class="sr-print-footer" style="margin-top:20px;padding:10px;border-top:1px solid #ddd;font-size:10px;color:#666;text-align:center;font-style:italic">
+      Báo cáo tạo lúc ${new Date().toLocaleString('vi-VN')} — Studio Design / Gendai Sougo Việt Nam
+    </div>
   `;
 
-  // ── PHẦN 3: render 3 trend charts ──
-  const breakdown = getStaffMonthBreakdown(staffName, fromDate, toDate);
+  // ── PHẦN 3: render 3 trend charts (reuse data đã compute ở trên) ──
   const noDataMsg = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#aaa;font-size:11px;font-style:italic">Chưa có dữ liệu</div>';
-  if (breakdown.length > 0) {
-    const labels = breakdown.map(b => {
-      const yr2 = b.mid.slice(2, 4);
-      const mo = b.mid.slice(5);
-      return `${mo}/${yr2}`;
-    });
-    try { _srRenderKPIChart(breakdown, labels); } catch(e) { console.warn('[SR] KPI chart:', e.message); }
-    try { _srRenderProdChart(breakdown, labels); } catch(e) { console.warn('[SR] Prod chart:', e.message); }
-    try { _srRenderOTChart(breakdown, labels); } catch(e) { console.warn('[SR] OT chart:', e.message); }
+  if (_srBreakdownEarly.length > 0) {
+    const labels = _srBreakdownEarly.map(b => `${b.mid.slice(5)}/${b.mid.slice(2,4)}`);
+    try { _srRenderKPIChart(_srBreakdownEarly, labels); } catch(e) { console.warn('[SR] KPI chart:', e.message); }
+    try { _srRenderProdChart(_srBreakdownEarly, labels); } catch(e) { console.warn('[SR] Prod chart:', e.message); }
+    try { _srRenderOTChart(_srBreakdownEarly, labels); } catch(e) { console.warn('[SR] OT chart:', e.message); }
   } else {
     ['srChartKPIWrap','srChartProdWrap','srChartOTWrap'].forEach(wid => {
       const w = document.getElementById(wid); if (w) w.innerHTML = noDataMsg;
     });
   }
 
-  // ── PHẦN 4: render radar ──
-  const selfRates = getStaffRateBreakdown(staffName, fromDate, toDate);
-  const teamRates = getTeamAvgRateBreakdown(prof.role, staffName, fromDate, toDate);
-  const hasSelfData = Object.values(selfRates).some(v => v > 0);
+  // ── PHẦN 4: render radar (reuse data đã compute) ──
+  const hasSelfData = Object.values(_srSelfRatesEarly).some(v => v > 0);
   if (hasSelfData) {
-    try { _srRenderRadar(selfRates, teamRates); } catch(e) { console.warn('[SR] Radar:', e.message); }
+    try { _srRenderRadar(_srSelfRatesEarly, _srTeamRatesEarly); } catch(e) { console.warn('[SR] Radar:', e.message); }
   } else {
     const w = document.getElementById('srChartRadarWrap');
     if (w) w.innerHTML = noDataMsg;

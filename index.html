@@ -5243,9 +5243,10 @@ function renderGroups(p) {
         </td>
         <td style="${cellDim}">
           ${rIsDone
-            ? `<span style="font-size:11px;color:${r.status==='new'?chipNewTx:chipRevTx};font-weight:600;background:${r.status==='new'?chipNewBg:chipRevBg};padding:2px 8px;border-radius:4px;display:inline-block">${r.status==='new'?'Làm mới':'Sửa lại'}</span>`
-            : `<select class="sel-sm" style="width:100%;font-size:11px;color:${r.status==='new'?chipNewTx:chipRevTx};font-weight:600;background:${r.status==='new'?chipNewBg:chipRevBg}"
+            ? `<span style="font-size:11px;color:${r.status==='new'?chipNewTx:r.status==='rev'?chipRevTx:'#888'};font-weight:600;background:${r.status==='new'?chipNewBg:r.status==='rev'?chipRevBg:'#eee'};padding:2px 8px;border-radius:4px;display:inline-block">${r.status==='new'?'Làm mới':r.status==='rev'?'Sửa lại':'—'}</span>`
+            : `<select class="sel-sm" style="width:100%;font-size:11px;color:${r.status==='new'?chipNewTx:r.status==='rev'?chipRevTx:'#888'};font-weight:600;background:${r.status==='new'?chipNewBg:r.status==='rev'?chipRevBg:'#f5f5f5'}"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','status',this.value);refreshPjTotals('${p.id}');rebuildGroups('${p.id}')">
+                <option value="" ${!r.status?'selected':''} disabled hidden>— Chọn —</option>
                 <option value="new" ${r.status==='new'?'selected':''}>Làm mới</option>
                 <option value="rev" ${r.status==='rev'?'selected':''}>Sửa lại</option>
               </select>`}
@@ -5621,7 +5622,7 @@ function refreshStaffSched(pjId) {
 async function addGroup(pjId) {
   const p=getPj(pjId); if(!p) return;
   if(!p.groups) p.groups=[];
-  p.groups.push({id:gid(),type:'',rows:[{id:gid(),status:'new',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
+  p.groups.push({id:gid(),type:'',rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
   _sbAuditLog('create', 'groups', p.groups[p.groups.length-1] && p.groups[p.groups.length-1].id || '', 'Thêm hạng mục cho "' + (p.nameVN||p.nameJP||pjId) + '"');
   setTimeout(()=>{ const inputs=document.querySelectorAll(`#rbody-${pjId} .grp-hd .tbl-input-dark`); if(inputs.length) inputs[inputs.length-1].focus(); },50);
@@ -5633,11 +5634,11 @@ async function addGroup(pjId) {
       _sbQueueChange('Thêm hạng mục vào "' + pNameAG + '"',
         'groups', 'insert', g.id, { project_id: pjId, type: '', sort_order: p.groups.length - 1 }, { projectId: pjId });
       _sbQueueChange('Thêm dòng đầu tiên cho hạng mục mới | ' + pNameAG,
-        'rows', 'insert', g.rows[0].id, { group_id: g.id, status: 'new', qty: 0, ot: 0 }, { projectId: pjId });
+        'rows', 'insert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
     } else {
       try {
         await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1 });
-        await _sb.from('rows').insert({ id: g.rows[0].id, group_id: g.id, status: 'new', qty: 0, ot: 0 });
+        await _sb.from('rows').insert({ id: g.rows[0].id, group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' });
       } catch(e) { console.warn('[Phase 5] addGroup failed:', e.message); }
     }
   }
@@ -5645,7 +5646,7 @@ async function addGroup(pjId) {
 async function addRow(pjId,gid2) {
   const p=getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
-  g.rows.push({id:gid(),status:'new',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0});
+  g.rows.push({id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0});
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
   if (window._sbReady) {
     const r = g.rows[g.rows.length - 1];
@@ -5653,9 +5654,9 @@ async function addRow(pjId,gid2) {
       var pObjAR = getPj(pjId);
       var pNameAR = pObjAR && (pObjAR.nameVN || pObjAR.nameJP) || pjId;
       _sbQueueChange('Thêm dòng vào "' + pNameAR + '"',
-        'rows', 'insert', r.id, { group_id: gid2, status: 'new', qty: 0, ot: 0 }, { projectId: pjId });
+        'rows', 'insert', r.id, { group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
     } else {
-      try { await _sb.from('rows').insert({ id: r.id, group_id: gid2, status: 'new', qty: 0, ot: 0 }); }
+      try { await _sb.from('rows').insert({ id: r.id, group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00' }); }
       catch(e) { console.warn('[Phase 5] addRow failed:', e.message); }
     }
   }
@@ -7050,6 +7051,85 @@ function sortedStaffList() {
   });
 }
 
+// ── Money helpers cho input format "5.000.000" ↔ 5000000 ──
+function _parseMoneyInput(v) {
+  const stripped = String(v||'').replace(/[.,\s]/g, '');
+  const n = Number(stripped);
+  return isNaN(n) ? 0 : n;
+}
+function _formatMoney(n) {
+  if (!n || isNaN(n)) return '';
+  return Number(n).toLocaleString('vi-VN');
+}
+
+// ── Quy đổi Lương Gross ↔ Net theo luật thuế VN 2026 ──
+// Lương cơ sở 2.340.000 (từ 01/07/2024), lương tối thiểu vùng 1: 4.960.000 (2024)
+// BHXH 8% capped 20× LCS, BHYT 1.5% capped 20× LCS, BHTN 1% capped 20× LTTV
+// Giảm trừ bản thân 11.000.000, thuế TNCN lũy tiến 7 bậc.
+const TAX_LCS_2026     = 2340000;
+const TAX_LTTV_2026    = 4960000;
+const TAX_BHXH_CAP     = 20 * TAX_LCS_2026;   // 46.800.000
+const TAX_BHTN_CAP     = 20 * TAX_LTTV_2026;  // 99.200.000
+const TAX_DEDUCT_SELF  = 11000000;
+
+function _calcInsurance(gross) {
+  const bhxhBase = Math.min(gross, TAX_BHXH_CAP);
+  const bhytBase = Math.min(gross, TAX_BHXH_CAP);
+  const bhtnBase = Math.min(gross, TAX_BHTN_CAP);
+  return bhxhBase * 0.08 + bhytBase * 0.015 + bhtnBase * 0.01;
+}
+function _calcPIT(taxable) {
+  if (taxable <= 0) return 0;
+  if (taxable <= 5000000)  return taxable * 0.05;
+  if (taxable <= 10000000) return taxable * 0.10 -   250000;
+  if (taxable <= 18000000) return taxable * 0.15 -   750000;
+  if (taxable <= 32000000) return taxable * 0.20 -  1650000;
+  if (taxable <= 52000000) return taxable * 0.25 -  3250000;
+  if (taxable <= 80000000) return taxable * 0.30 -  5850000;
+  return taxable * 0.35 - 9850000;
+}
+function grossToNet(gross) {
+  gross = Math.max(0, +gross || 0);
+  if (!gross) return 0;
+  const ins = _calcInsurance(gross);
+  const pre = gross - ins;
+  const taxable = Math.max(0, pre - TAX_DEDUCT_SELF);
+  const tax = _calcPIT(taxable);
+  return Math.round(pre - tax);
+}
+function netToGross(net) {
+  net = Math.max(0, +net || 0);
+  if (!net) return 0;
+  // Binary search vì PIT lũy tiến không có công thức ngược trực tiếp
+  let lo = net, hi = Math.max(net * 2, 500000000);
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const computed = grossToNet(mid);
+    if (Math.abs(computed - net) < 1) return Math.round(mid);
+    if (computed < net) lo = mid; else hi = mid;
+  }
+  return Math.round((lo + hi) / 2);
+}
+
+// ── Handler salary change: parse, save, auto-fill ô kia ──
+async function _onSalaryChange(staffName, field, si, inputEl) {
+  const num = _parseMoneyInput(inputEl.value);
+  inputEl.value = _formatMoney(num);
+  await saveStaffProfile(staffName, field, num);
+  if (!num) return;
+  if (field === 'salaryGross') {
+    const netNum = grossToNet(num);
+    const netEl = document.getElementById('sal-net-' + si);
+    if (netEl) netEl.value = _formatMoney(netNum);
+    await saveStaffProfile(staffName, 'salaryNet', netNum);
+  } else if (field === 'salaryNet') {
+    const grossNum = netToGross(num);
+    const grossEl = document.getElementById('sal-gross-' + si);
+    if (grossEl) grossEl.value = _formatMoney(grossNum);
+    await saveStaffProfile(staffName, 'salaryGross', grossNum);
+  }
+}
+
 async function saveStaffProfile(name, field, val) {
   const p = getStaffProfile(name);
   p[field] = val;
@@ -7648,18 +7728,21 @@ function renderStaffPage() {
             <div id="sal-${si}" style="display:none">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <div class="field"><label>Gross</label>
-                  <input type="text" value="${prof.salaryGross ? Number(prof.salaryGross).toLocaleString('vi-VN') : ''}" placeholder="0"
+                  <input id="sal-gross-${si}" type="text" value="${_formatMoney(prof.salaryGross)}" placeholder="0"
                     style="font-family:inherit;font-size:12px;text-align:right"
-                    onchange="saveStaffProfile('${s}','salaryGross',+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))||0);this.value=this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,'')?Number(+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))).toLocaleString('vi-VN'):''">
+                    title="Lương Gross — nhập xong sẽ tự động tính Net theo luật VN 2026 (không gồm phụ cấp, thưởng, NPT)"
+                    onchange="_onSalaryChange('${x(s)}','salaryGross',${si},this)">
                   <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
                 <div class="field"><label>Net</label>
-                  <input type="text" value="${prof.salaryNet ? Number(prof.salaryNet).toLocaleString('vi-VN') : ''}" placeholder="0"
+                  <input id="sal-net-${si}" type="text" value="${_formatMoney(prof.salaryNet)}" placeholder="0"
                     style="font-family:inherit;font-size:12px;text-align:right"
-                    onchange="saveStaffProfile('${s}','salaryNet',+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))||0);this.value=this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,'')?Number(+(this.value.replace(/\./g,'').replace(/,/g,'').replace(/\s/g,''))).toLocaleString('vi-VN'):''">
+                    title="Lương Net — nhập xong sẽ tự động tính Gross theo luật VN 2026 (không gồm phụ cấp, thưởng, NPT)"
+                    onchange="_onSalaryChange('${x(s)}','salaryNet',${si},this)">
                   <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
               </div>
+              <div style="font-size:9px;color:var(--gray4);margin-top:6px;font-style:italic">💡 Quy đổi tự động theo luật VN 2026 (BHXH 8%, BHYT 1.5%, BHTN 1%, TNCN 7 bậc).</div>
             </div>
             <div id="sal-hidden-${si}" style="font-size:12px;color:var(--gray3);font-style:italic">●●●●● / ●●●●●</div>
           </div>

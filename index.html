@@ -568,6 +568,10 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
   #dashContent .dash-grid.c3 { grid-template-columns: 1fr 1fr !important; }
 }
 
+/* ── Trạng thái "Đã UP / Hoàn thành" — gray đậm + line-through, không opacity ── */
+.is-done, .is-done td, .is-done .gantt-text { color:#6b7280; text-decoration:line-through; font-style:normal; }
+.is-done .keep-color { text-decoration:none; }  /* badge ✓ Đã UP giữ màu xanh */
+
 </style>
 </head>
 <body>
@@ -2172,7 +2176,7 @@ function renderProjectTimeline(pjs) {
   const rows = sorted.map((p, pi) => {
     const allGrpRows = (p.groups||[]).filter(g => g.type || (g.rows||[]).some(r=>r.qty>0));
     const allDone = allGrpRows.length>0 && allGrpRows.every(g=>(g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt)) && allGrpRows.some(g=>(g.rows||[]).some(r=>r.dateTo));
-    const rowDim = allDone ? 'opacity:0.5' : '';
+    const rowDim = allDone ? 'color:#6b7280;text-decoration:line-through' : '';
     // Project-level pending check — dùng cho info panel VN (không phụ thuộc group đầu tiên)
     // Áp dụng cho cả groups từ tlTasks lẫn groups thêm thủ công
     const pjHasPendingUp = (p.groups||[]).some(g =>
@@ -2214,11 +2218,11 @@ function renderProjectTimeline(pjs) {
       const grpAllDone = (g.rows||[]).some(r=>r.dateTo) && (g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt);
       // Có lịch UP chưa done và deadline chưa qua
       const grpHasPendingUp = (g.rows||[]).some(r => r.dateTo >= todayStr && !r.doneAt);
-      // Opacity: done→mờ nhẹ, có UP pending→sáng, không có UP→mờ vừa (tăng lên để dễ đọc)
-      const grpOpacity = grpAllDone ? '0.55' : grpHasPendingUp ? '1' : (rowDim ? '0.7' : '0.65');
+      // Done state: gray đậm + line-through (không opacity)
+      const grpDoneStyle = grpAllDone ? 'color:#6b7280;text-decoration:line-through;' : '';
       // Màu tên hạng mục: khớp với status của row đang pending (mới=xanh, sửa=vàng)
       const pendingRow = (g.rows||[]).find(r=>r.dateTo && !r.doneAt && r.dateTo >= todayStr);
-      const grpNameColor = grpAllDone ? '#999' : grpHasPendingUp
+      const grpNameColor = grpAllDone ? '#6b7280' : grpHasPendingUp
         ? (isVN
             ? (pendingRow?.status==='new' ? '#7c3aed' : '#db2777')
             : (pendingRow?.status==='new' ? '#5a9a35' : '#d4900a'))
@@ -2274,15 +2278,15 @@ function renderProjectTimeline(pjs) {
       const vnInfoCell = (isVN && isFirstGrp)
         ? `<td rowspan="${allGrpRows.length}" style="vertical-align:top;padding:0;border-right:${CB};border-left:${CB};border-bottom:${PB}">${renderVNInfoPanel(p)}</td>`
         : '';
-      // VN first grpRow: info panel dùng project-level opacity, không phụ thuộc group đầu
-      const trOpacity = (isVN && isFirstGrp)
-        ? (allDone ? '0.55' : pjHasPendingUp ? '1' : '0.65')
-        : grpOpacity;
-      return `<tr style="opacity:${trOpacity}">
+      // VN first grpRow: dùng allDone state; JP grp dùng grpAllDone
+      const trDoneStyle = (isVN && isFirstGrp)
+        ? (allDone ? 'color:#6b7280;text-decoration:line-through;' : '')
+        : grpDoneStyle;
+      return `<tr style="${trDoneStyle}">
         ${vnInfoCell}
         ${!isVN ? `<td style="padding:0 4px 0;border-bottom:${rowBorderB};border-right:${CB};border-left:${CB};background:var(--table-bg)"></td>` : ''}
         <td style="padding:1px 4px 1px;border-bottom:${rowBorderB};border-right:${CB};${isVN?'border-left:'+CB+';':''}background:var(--table-bg);vertical-align:middle">
-          <div style="font-size:7px;color:${grpNameColor};font-weight:${grpNameWeight};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:165px;line-height:1.2;font-style:${grpAllDone?'italic':'normal'}">${x(g.type||'—')}${grpAllDone?' ✓':''}</div>
+          <div style="font-size:7px;color:${grpNameColor};font-weight:${grpNameWeight};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:165px;line-height:1.2;${grpAllDone?'text-decoration:line-through;':''}">${x(g.type||'—')}${grpAllDone?' ✓':''}</div>
         </td>
         <td style="padding:1px 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:8px;font-weight:600;color:#27ae60;background:var(--table-bg);vertical-align:middle">${grpNew||''}</td>
         <td style="padding:1px 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:8px;font-weight:600;color:#e67e22;background:var(--table-bg);vertical-align:middle">${grpRev||''}</td>
@@ -2688,15 +2692,16 @@ function renderMonthGantt(pjs) {
         ? '<span style="font-size:7px;color:#e67e22;font-weight:700;margin-left:2px">⚡Sắp UP</span>'
         : '';
 
-      const textColor = isActuallyDone ? '#27ae60'
+      const textColor = isActuallyDone ? '#6b7280'
         : isTodayUp ? '#e74c3c'
         : isUrgent  ? '#e67e22'
-        : isDoneByDate ? '#aaa'
+        : isDoneByDate ? '#6b7280'
         : 'inherit';
+      const textDeco = (isActuallyDone || isDoneByDate) ? 'line-through' : 'none';
 
       return `<div style="font-size:9px;display:flex;align-items:center;gap:2px;white-space:nowrap;overflow:hidden">
         <span style="font-size:8px;font-weight:800;color:${numColor};flex-shrink:0">[${r.pjNum||'?'}]</span>
-        <span style="overflow:hidden;text-overflow:ellipsis;color:${textColor}">${r.groupName.length>8?r.groupName.substring(0,8)+'…':r.groupName}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;color:${textColor};text-decoration:${textDeco}">${r.groupName.length>8?r.groupName.substring(0,8)+'…':r.groupName}</span>
         ${r.upTime && !isActuallyDone ? `<span style="font-size:7px;color:#c0392b;font-weight:800;background:#fff0f0;border-radius:2px;padding:0 2px;flex-shrink:0">⚡${r.upTime}</span>` : ''}
         ${badge}
       </div>`;
@@ -2746,7 +2751,7 @@ function renderMonthGantt(pjs) {
 
         let inner = '';
         if (active) {
-          const bc = (isActuallyDone||isDoneByDate) ? '#adb5bd'
+          const bc = (isActuallyDone||isDoneByDate) ? '#9ca3af'
             : r.isVN ? (isNew?'#7c3aed':'#db2777')
             :          (isNew?'#5a9a35':'#d4900a');
           const br = isFirst&&isLast?'2px':isFirst?'2px 0 0 2px':isLast?'0 2px 2px 0':'0';
@@ -2759,7 +2764,7 @@ function renderMonthGantt(pjs) {
             ? `<div style="position:absolute;top:1px;right:2px;font-size:6px;font-weight:900;color:#e74c3c;z-index:11;text-shadow:0 0 3px #fff">UP</div>`
             : '';
           // Bar nằm phía dưới dòng, có khoảng cách với chữ
-          inner = `${labelHtml}${upHtml}<div style="position:absolute;bottom:3px;left:0;right:0;height:3px;background:${bc};border-radius:${br};opacity:${isActuallyDone?0.6:1}"></div>`;
+          inner = `${labelHtml}${upHtml}<div style="position:absolute;bottom:3px;left:0;right:0;height:3px;background:${bc};border-radius:${br}"></div>`;
         }
         return `<div style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_H}px;overflow:visible">${inner}</div>`;
       });
@@ -3717,6 +3722,8 @@ function renderProjectTimeline_VN(p) {
     const prog     = t.lv==='group' ? (t._autoProgress||0) : (t.progress||0);
     const bc       = SC[t.status]||'#94a3b8';
     const isUpToday= t.upDate===today;
+    const isTaskDone = t.status === 'done';
+    const taskDoneStyle = isTaskDone ? 'color:#6b7280;text-decoration:line-through;' : '';
     const staffNames=(t.staff||[]).map(s=>staffShortName(s)).join(', ');
     const wds      = startDs&&endDs ? calcWorkDays(startDs,endDs) : 0;
 
@@ -3766,7 +3773,7 @@ function renderProjectTimeline_VN(p) {
 
     const depName = t.dep ? (allTasks.find(q=>q.id===t.dep)?.name?.slice(0,22)||'?') : '';
 
-    return `<tr style="${rowBg}" ${isChild?`class="tl-child-${groupId||''}"`:''}>
+    return `<tr style="${rowBg};${taskDoneStyle}" ${isChild?`class="tl-child-${groupId||''}"`:''}>
       ${prependCell||''}
       <td style="font-size:10px;color:var(--gray4);text-align:center;width:24px;padding:3px">${idx}</td>
       <td style="padding:4px 6px;padding-left:${t.lv==='group'?6:t.lv==='task'?24:40}px;font-weight:${t.lv==='group'?700:400};min-width:200px;max-width:250px">
@@ -3774,7 +3781,7 @@ function renderProjectTimeline_VN(p) {
           ${collapseBtn}
           <div style="flex:1;min-width:0">
             <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
-              color:${t.lv==='group'?'#3730A3':'var(--color-text-primary)'};font-size:${t.lv==='group'?'12px':'11px'}"
+              color:${isTaskDone?'#6b7280':(t.lv==='group'?'#3730A3':'var(--color-text-primary)')};font-size:${t.lv==='group'?'12px':'11px'};${isTaskDone?'text-decoration:line-through;':''}"
               onclick="openTlTaskModal('${p.id}','${t.id}')" title="${x(t.name)}">${x(t.name)||'—'}</div>
             ${depName?`<div style="font-size:9px;color:#1a5276">↳ sau: ${x(depName)}</div>`:''}
             ${staffNames&&t.lv!=='group'?`<div style="font-size:9px;color:var(--gray4)">${x(staffNames)}</div>`:''}
@@ -4948,8 +4955,8 @@ function renderGroups(p) {
     // Border: xanh khi active, transparent khi xám
     const gBorderColor  = gHasActiveUp ? '#27ae60' : 'transparent';
     const gBorderWidth  = gHasActiveUp ? '3px' : '2px';
-    // Tên hạng mục: KHÔNG mờ nếu có bất kỳ row nào có lịch UP đang chờ
-    const gDimStyle     = gHasActiveUp ? '' : 'opacity:0.42;filter:saturate(0.1) brightness(0.85);';
+    // Tên hạng mục: khi không có UP active → coi như hoàn thành/cũ, hiện xám + line-through
+    const gDimStyle     = gHasActiveUp ? '' : 'color:#6b7280;text-decoration:line-through;';
 
     const rowsHtml = rows.map((r, ri) => {
       const isFirst = ri === 0;
@@ -4958,9 +4965,9 @@ function renderGroups(p) {
       const rActiveUp = !!(r.dateTo) && r.dateTo >= today && !r.doneAt;
       const rIsDone   = !!(r.doneAt);
       const rowBg = rActiveUp ? '#f0fff4' : '#f5f5f5';
-      // outline bị xóa: nó đè lên cột Hạng mục (rowspan td) ở các dòng 2+
-      // Chỉ dùng background color để highlight row active
-      const cellDim  = (!rActiveUp && !rIsDone) ? 'opacity:0.45;filter:saturate(0.1) brightness(0.88);' : '';
+      // Done row: gray đậm + line-through. Stale (no active, no done): chỉ gray. Active: bình thường.
+      const cellDim  = rIsDone ? 'color:#6b7280;text-decoration:line-through;'
+                     : (!rActiveUp ? 'color:#6b7280;' : '');
       const rowStyle = `background:${rowBg};`;
       const isDark = parseInt(gc.bg.slice(1,3),16) < 180;
 
@@ -4979,15 +4986,15 @@ function renderGroups(p) {
           border-left:${gBorderWidth} solid ${gBorderColor};
           border-right:1px solid ${gc.border};
           vertical-align:top;padding:0;
-          min-width:0;opacity:1;filter:none;transition:all .15s">
-          <div style="padding:6px 8px;${gHasActiveUp?'':'opacity:0.45;filter:saturate(0.1) brightness(0.85);'}">
+          min-width:0;transition:all .15s">
+          <div style="padding:6px 8px;">
             <input class="tbl-input-dark" list="tl-${p.id}" value="${x(g.type||'')}"
               onchange="updGroup('${p.id}','${g.id}','type',this.value)"
-              style="background:var(--navy);border-color:rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:11px;width:100%"
+              style="background:var(--navy);border-color:rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:11px;width:100%${gHasActiveUp?'':';text-decoration:line-through'}"
               placeholder="外観パース…">
             <datalist id="tl-${p.id}">${D.settings.typeList.map(t=>`<option value="${x(t)}">`).join('')}</datalist>
           </div>
-          <div style="padding:3px 8px 5px;${gHasActiveUp?'':'opacity:0.45;filter:saturate(0.1) brightness(0.85);'}display:flex;align-items:center;justify-content:space-between;background:var(--navy2);gap:6px;flex-wrap:nowrap">
+          <div style="padding:3px 8px 5px;display:flex;align-items:center;justify-content:space-between;background:var(--navy2);gap:6px;flex-wrap:nowrap">
             <div style="display:flex;gap:4px;align-items:center;min-width:0;overflow:hidden">
               <span style="font-size:9px;color:var(--gold2)">Làm mới:</span>
               <span style="font-size:11px;font-weight:700;color:var(--gold)">${gNew}</span>
@@ -5255,16 +5262,15 @@ function renderStaffSchedule(p) {
       const blocks = activeTasks.map(r=>{
         const isActuallyDone = !!(r.doneAt);
         const isNew = r.status==='new';
-        // Màu thanh: xám nếu past staff hoặc đã UP, xanh/vàng nếu active
-        const barColor = (isPastStaff || isActuallyDone) ? '#adb5bd'
+        // Màu thanh: xám đậm nếu past staff hoặc đã UP, xanh/vàng nếu active
+        const barColor = (isPastStaff || isActuallyDone) ? '#9ca3af'
           : isNew ? '#5a9a35' : '#d4900a';
         const isFirstDay = r.dateFrom===dk;
         const isLastDay  = r.dateTo===dk;
         return `<div title="${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
           style="background:${barColor};height:11px;margin:1px 0;
           border-radius:${isFirstDay?'3px 0 0 3px':isLastDay?'0 3px 3px 0':'0'};
-          overflow:hidden;font-size:7.5px;color:#fff;white-space:nowrap;padding:0 3px;line-height:11px;font-weight:700;
-          opacity:${isPastStaff?0.5:1}">
+          overflow:hidden;font-size:7.5px;color:#fff;white-space:nowrap;padding:0 3px;line-height:11px;font-weight:700">
           ${isFirstDay?x(r.groupName.substring(0,6)):''}
         </div>`;
       }).join('');
@@ -5282,24 +5288,24 @@ function renderStaffSchedule(p) {
         + tasks.map(r=>{
           const overdue = r.dateTo && r.dateTo < todayStr && !r.doneAt;
           const done    = !!(r.doneAt);
-          const dotColor = done ? '#adb5bd' : r.status==='new' ? '#70AD47' : 'var(--gold)';
+          const dotColor = done ? '#9ca3af' : r.status==='new' ? '#70AD47' : 'var(--gold)';
           return `<div style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden">
             <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;display:inline-block"></span>
-            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?'#aaa':overdue?'#e74c3c':'inherit'};text-decoration:${done?'line-through':'none'}">${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?'#6b7280':overdue?'#e74c3c':'inherit'};text-decoration:${done?'line-through':'none'}">${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
             ${overdue?'<span style="color:#e74c3c;font-weight:700">!</span>':''}
             ${done?'<span style="color:#27ae60;font-size:8px">✓</span>':''}
           </div>`;
         }).join('')
       : `<div style="font-size:9px;color:#aaa;font-style:italic">Không có task</div>`;
 
-    // Name cell: active = sáng, past = mờ xám
+    // Name cell: active = sáng; past staff = gray đậm + line-through
     const nameBg   = isPastStaff ? '#f9f9f9' : 'var(--gray1)';
-    const nameColor= isPastStaff ? '#aaa' : 'var(--navy)';
-    const rowOpacity = isPastStaff ? 'opacity:0.55' : '';
-    return `<tr style="border-bottom:1px solid var(--gray2);${rowOpacity}">
+    const nameColor= isPastStaff ? '#6b7280' : 'var(--navy)';
+    const rowDoneStyle = isPastStaff ? 'color:#6b7280;text-decoration:line-through;' : '';
+    return `<tr style="border-bottom:1px solid var(--gray2);${rowDoneStyle}">
       <td style="background:${nameBg};padding:5px 8px;min-width:90px;border-right:1px solid var(--gray2);vertical-align:top">
-        <div style="font-weight:700;font-size:11px;color:${nameColor}">${staff}</div>
-        ${isPastStaff?'<div style="font-size:8px;color:#bbb;font-style:italic">Đã hoàn thành</div>':''}
+        <div style="font-weight:700;font-size:11px;color:${nameColor};${isPastStaff?'text-decoration:line-through;':''}">${staff}</div>
+        ${isPastStaff?'<div style="font-size:8px;color:#6b7280">Đã hoàn thành</div>':''}
         ${taskSummary}
       </td>
       ${dayCells}

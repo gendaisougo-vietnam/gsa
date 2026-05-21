@@ -7872,18 +7872,6 @@ function _srGenSuggestions(stats, breakdown, concerns) {
     ];
   }
 
-  // B. Contract
-  let contractRec, contractColor;
-  if (stats.avgKPI >= 8.0 && stats.unpaidLeaveDays === 0 && stats.workingDays > 200) {
-    contractRec = 'Tái ký 2 năm'; contractColor = '#10b981';
-  } else if (stats.avgKPI >= 6.5) {
-    contractRec = 'Tái ký 1 năm'; contractColor = '#3b82f6';
-  } else if (stats.avgKPI >= 5.0) {
-    contractRec = 'Tái ký 6 tháng + theo dõi'; contractColor = '#eab308';
-  } else {
-    contractRec = 'Cần cân nhắc / thảo luận'; contractColor = '#ef4444';
-  }
-
   // C. Review notes từ concerns
   const reviewNotes = [];
   concerns.forEach(c => {
@@ -7902,7 +7890,7 @@ function _srGenSuggestions(stats, breakdown, concerns) {
   });
   if (reviewNotes.length === 0) reviewNotes.push('Duy trì phong độ hiện tại, đặt mục tiêu cao hơn cho kỳ tới');
 
-  return { salaryRec, salaryColor, salaryReasons, contractRec, contractColor, reviewNotes: reviewNotes.slice(0, 5) };
+  return { salaryRec, salaryColor, salaryReasons, reviewNotes: reviewNotes.slice(0, 5) };
 }
 
 function _renderStaffReview(staffName, fromDate, toDate) {
@@ -8067,18 +8055,12 @@ function _renderStaffReview(staffName, fromDate, toDate) {
     <!-- PHẦN 7: GỢI Ý QUYẾT ĐỊNH -->
     <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden;margin-bottom:18px">
       <div style="background:#1F3864;color:#fff;padding:10px 16px;font-size:13px;font-weight:700">💼 Gợi ý quyết định (rule-based)</div>
-      <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="padding:16px">
         <!-- A. Salary -->
         <div style="border:2px solid ${_srSuggest.salaryColor};border-radius:8px;padding:12px 14px">
           <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">💰 Đề xuất tăng lương</div>
           <div style="font-size:18px;font-weight:800;color:${_srSuggest.salaryColor};margin-bottom:8px">${_srSuggest.salaryRec}</div>
           <ul style="margin:0;padding-left:18px;font-size:11px;color:#555;line-height:1.6">${_srSuggest.salaryReasons.map(r=>`<li>${r}</li>`).join('')}</ul>
-        </div>
-        <!-- B. Contract -->
-        <div style="border:2px solid ${_srSuggest.contractColor};border-radius:8px;padding:12px 14px">
-          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">📜 Đề xuất tái ký HĐ</div>
-          <div style="font-size:18px;font-weight:800;color:${_srSuggest.contractColor};margin-bottom:8px">${_srSuggest.contractRec}</div>
-          <div style="font-size:11px;color:#555;line-height:1.6">Dựa trên KPI ${stats.avgKPI.toFixed(2)}/10, ${stats.unpaidLeaveDays} nghỉ KP, ${stats.workingDays} ngày làm việc.</div>
         </div>
       </div>
       <!-- C. Review notes -->

@@ -7310,6 +7310,312 @@ function getStaffStatsBetween(name, fromDate, toDate) {
   return stats;
 }
 
+// ── GĐ2: Per-month breakdown cho biểu đồ trend ──
+function getStaffMonthBreakdown(staffName, fromDate, toDate) {
+  const result = [];
+  const mids = Object.keys(D.months || {}).filter(mid => _monthInRange(mid, fromDate, toDate)).sort();
+
+  // KPI map merge JP+VN
+  const jpKPIs = (typeof getStaffMonthlyKPIs === 'function') ? (getStaffMonthlyKPIs(staffName, 'jp') || []) : [];
+  const vnKPIs = (typeof getStaffMonthlyKPIs === 'function') ? (getStaffMonthlyKPIs(staffName, 'vn') || []) : [];
+  const kpiMap = new Map();
+  [...jpKPIs, ...vnKPIs].forEach(item => {
+    if (!item || item.kpi == null) return;
+    if (kpiMap.has(item.mid)) kpiMap.set(item.mid, (kpiMap.get(item.mid) + item.kpi) / 2);
+    else kpiMap.set(item.mid, item.kpi);
+  });
+
+  mids.forEach(mid => {
+    const m = D.months[mid];
+    if (!m) return;
+    let n = 0, r = 0, ot = 0;
+    [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
+      (p.groups||[]).forEach(g => {
+        (g.rows||[]).forEach(row => {
+          if (row.staff !== staffName) return;
+          const refDate = row.doneAt ? row.doneAt.slice(0,10) : (row.dateTo || '');
+          if (refDate && (refDate < fromDate || refDate > toDate)) return;
+          const qty = row.qty || 0;
+          if (row.status === 'new') n += qty;
+          else if (row.status === 'rev') r += qty;
+          ot += row.ot || 0;
+        });
+      });
+      (p.otLog || []).forEach(e => {
+        if (e.staff !== staffName) return;
+        if (e.date && (e.date < fromDate || e.date > toDate)) return;
+        ot += e.hours || 0;
+      });
+    });
+    result.push({
+      mid,
+      kpi: kpiMap.has(mid) ? kpiMap.get(mid) : null,
+      new: n, rev: r,
+      target: (m.targetNew || 0) + (m.targetRev || 0),
+      ot
+    });
+  });
+  return result;
+}
+
+// ── GĐ2: TB 6 nhóm rate của 1 staff ──
+function getStaffRateBreakdown(staffName, fromDate, toDate) {
+  const groups = {
+    A: { fields: ['rate0','rate1','rate2','rate3','rate4','rate5'], sum:0, cnt:0 },
+    B: { fields: ['rate6','rate7','rate8'], sum:0, cnt:0 },
+    C: { fields: ['rate9','rate10'], sum:0, cnt:0 },
+    D: { fields: ['rate11','rate12'], sum:0, cnt:0 },
+    E: { fields: ['rate13','rate14'], sum:0, cnt:0 },
+    F: { fields: ['rate15'], sum:0, cnt:0 },
+  };
+  Object.entries(D.months || {}).forEach(([mid, m]) => {
+    if (!_monthInRange(mid, fromDate, toDate)) return;
+    [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
+      (p.groups||[]).forEach(g => {
+        (g.rows||[]).forEach(r => {
+          if (r.staff !== staffName) return;
+          const refDate = r.doneAt ? r.doneAt.slice(0,10) : (r.dateTo || '');
+          if (refDate && (refDate < fromDate || refDate > toDate)) return;
+          Object.values(groups).forEach(grp => {
+            grp.fields.forEach(f => {
+              const v = r[f];
+              if (v && v > 0) { grp.sum += v; grp.cnt++; }
+            });
+          });
+        });
+      });
+    });
+  });
+  const result = {};
+  Object.entries(groups).forEach(([key, grp]) => {
+    result[key] = grp.cnt > 0 ? +(grp.sum / grp.cnt).toFixed(2) : 0;
+  });
+  return result;
+}
+
+// ── GĐ2: TB team cùng role, loại trừ chính nhân viên đó ──
+function getTeamAvgRateBreakdown(role, excludeName, fromDate, toDate) {
+  if (!role) return null;
+  const profiles = D.settings.staffProfiles || {};
+  const teamMembers = Object.entries(profiles)
+    .filter(([name, prof]) => prof.role === role && name !== excludeName)
+    .map(([name]) => name);
+  if (teamMembers.length === 0) return null;
+
+  const groups = {
+    A: { fields: ['rate0','rate1','rate2','rate3','rate4','rate5'], sum:0, cnt:0 },
+    B: { fields: ['rate6','rate7','rate8'], sum:0, cnt:0 },
+    C: { fields: ['rate9','rate10'], sum:0, cnt:0 },
+    D: { fields: ['rate11','rate12'], sum:0, cnt:0 },
+    E: { fields: ['rate13','rate14'], sum:0, cnt:0 },
+    F: { fields: ['rate15'], sum:0, cnt:0 },
+  };
+  const teamSet = new Set(teamMembers);
+  Object.entries(D.months || {}).forEach(([mid, m]) => {
+    if (!_monthInRange(mid, fromDate, toDate)) return;
+    [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
+      (p.groups||[]).forEach(g => {
+        (g.rows||[]).forEach(r => {
+          if (!teamSet.has(r.staff)) return;
+          const refDate = r.doneAt ? r.doneAt.slice(0,10) : (r.dateTo || '');
+          if (refDate && (refDate < fromDate || refDate > toDate)) return;
+          Object.values(groups).forEach(grp => {
+            grp.fields.forEach(f => {
+              const v = r[f];
+              if (v && v > 0) { grp.sum += v; grp.cnt++; }
+            });
+          });
+        });
+      });
+    });
+  });
+  const result = {};
+  Object.entries(groups).forEach(([key, grp]) => {
+    result[key] = grp.cnt > 0 ? +(grp.sum / grp.cnt).toFixed(2) : 0;
+  });
+  return result;
+}
+
+// Chart.js plugin: vẽ threshold line 30h cho biểu đồ OT
+const _srOTThresholdPlugin = {
+  id: 'srOTThreshold',
+  afterDraw(chart) {
+    const opt = chart.options.plugins && chart.options.plugins.srOTThreshold;
+    if (!opt || !opt.enabled) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!scales.y) return;
+    const y = scales.y.getPixelForValue(30);
+    if (y < chartArea.top || y > chartArea.bottom) return;
+    ctx.save();
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, y);
+    ctx.lineTo(chartArea.right, y);
+    ctx.stroke();
+    ctx.fillStyle = '#ef4444';
+    ctx.font = '9px sans-serif';
+    ctx.fillText('30h burnout', chartArea.left + 6, y - 3);
+    ctx.restore();
+  }
+};
+
+function _srRenderKPIChart(breakdown, labels) {
+  const canvas = document.getElementById('srChartKPI');
+  if (!canvas) return;
+  const data = breakdown.map(b => b.kpi);
+  window._srCharts.kpi = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'KPI',
+        data,
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59,130,246,.15)',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointBackgroundColor: '#3b82f6',
+        tension: 0.3,
+        spanGaps: true
+      }]
+    },
+    options: {
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Tháng ${ctx.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(2) + '/10' : '—'}`
+          }
+        }
+      },
+      scales: {
+        y: { min: 0, max: 10, ticks: { stepSize: 2, font: { size: 10 } } },
+        x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+      },
+      maintainAspectRatio: false,
+      responsive: true
+    }
+  });
+}
+
+function _srRenderProdChart(breakdown, labels) {
+  const canvas = document.getElementById('srChartProd');
+  if (!canvas) return;
+  const targets = breakdown.map(b => b.target);
+  const actuals = breakdown.map(b => b.new + b.rev);
+  window._srCharts.prod = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Mục tiêu', data: targets, backgroundColor: '#e5e7eb', borderRadius: 3 },
+        { label: 'Thực tế', data: actuals, backgroundColor: '#f59e0b', borderRadius: 3 }
+      ]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 10 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const idx = ctx.dataIndex;
+              const t = targets[idx], a = actuals[idx];
+              const pct = t > 0 ? Math.round(a / t * 100) : 0;
+              return `${ctx.dataset.label}: ${ctx.parsed.y}` + (ctx.datasetIndex === 1 && t > 0 ? ` (${pct}%)` : '');
+            }
+          }
+        }
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+        x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+      },
+      maintainAspectRatio: false,
+      responsive: true
+    }
+  });
+}
+
+function _srRenderOTChart(breakdown, labels) {
+  const canvas = document.getElementById('srChartOT');
+  if (!canvas) return;
+  const data = breakdown.map(b => b.ot);
+  const colors = data.map(v => v > 30 ? '#ef4444' : '#8b5cf6');
+  window._srCharts.ot = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'OT (giờ)', data, backgroundColor: colors, borderRadius: 3 }]
+    },
+    options: {
+      plugins: {
+        legend: { display: false },
+        srOTThreshold: { enabled: true },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.label}: ${ctx.parsed.y.toFixed(1)}h` + (ctx.parsed.y > 30 ? ' ⚠️ Cao' : '')
+          }
+        }
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+        x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+      },
+      maintainAspectRatio: false,
+      responsive: true
+    },
+    plugins: [_srOTThresholdPlugin]
+  });
+}
+
+function _srRenderRadar(selfRates, teamRates) {
+  const canvas = document.getElementById('srChartRadar');
+  if (!canvas) return;
+  const labels = ['📐 Chuyên môn', '📅 Tiến độ', '🤝 Phối hợp', '💼 Thái độ', '📈 Phát triển', '🌐 Ngoại ngữ'];
+  const keys = ['A','B','C','D','E','F'];
+  const selfData = keys.map(k => selfRates[k] || 0);
+  const datasets = [{
+    label: 'Nhân viên',
+    data: selfData,
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59,130,246,.25)',
+    borderWidth: 2,
+    pointRadius: 4,
+    pointBackgroundColor: '#3b82f6'
+  }];
+  if (teamRates && Object.values(teamRates).some(v => v > 0)) {
+    const teamData = keys.map(k => teamRates[k] || 0);
+    datasets.push({
+      label: 'TB team cùng vị trí',
+      data: teamData,
+      borderColor: '#9ca3af',
+      backgroundColor: 'rgba(156,163,175,.2)',
+      borderWidth: 1.5,
+      pointRadius: 3,
+      pointBackgroundColor: '#9ca3af'
+    });
+  }
+  window._srCharts.radar = new Chart(canvas, {
+    type: 'radar',
+    data: { labels, datasets },
+    options: {
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11 } } },
+        tooltip: {
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.r.toFixed(2)}/10` }
+        }
+      },
+      scales: {
+        r: { min: 0, max: 10, ticks: { stepSize: 2, font: { size: 9 } }, pointLabels: { font: { size: 10 } } }
+      },
+      maintainAspectRatio: false,
+      responsive: true
+    }
+  });
+}
+
 // Modal full-screen báo cáo
 function openStaffReviewModal(staffName) {
   const period = _getCurrentContractPeriod(staffName);
@@ -7344,6 +7650,11 @@ function openStaffReviewModal(staffName) {
 }
 
 function _closeStaffReviewModal() {
+  // Destroy charts trước khi remove overlay (tránh memory leak)
+  if (window._srCharts) {
+    Object.values(window._srCharts).forEach(c => { try { c && c.destroy(); } catch(e){} });
+    window._srCharts = null;
+  }
   const el = document.getElementById('staffReviewOverlay');
   if (el) el.remove();
   if (window._srEscHandler) {
@@ -7395,6 +7706,11 @@ function _srKpiColor(pct) {
 function _renderStaffReview(staffName, fromDate, toDate) {
   const body = document.getElementById('srBody');
   if (!body) return;
+  // Destroy old charts (tránh memory leak khi date range thay đổi)
+  if (window._srCharts) {
+    Object.values(window._srCharts).forEach(c => { try { c && c.destroy(); } catch(e){} });
+  }
+  window._srCharts = {};
   const stats = getStaffStatsBetween(staffName, fromDate, toDate);
   const prof = getStaffProfile(staffName);
   const office = _detectStaffOffice(staffName);
@@ -7481,6 +7797,28 @@ function _renderStaffReview(staffName, fromDate, toDate) {
       </div>
     </div>
 
+    <!-- PHẦN 3: 3 BIỂU ĐỒ TREND -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px">
+      <div style="background:#fff;border-radius:8px;padding:12px;border:1px solid #ddd">
+        <div style="font-size:11px;font-weight:700;color:#1F3864;margin-bottom:8px">📈 KPI theo tháng</div>
+        <div style="height:220px;position:relative" id="srChartKPIWrap"><canvas id="srChartKPI"></canvas></div>
+      </div>
+      <div style="background:#fff;border-radius:8px;padding:12px;border:1px solid #ddd">
+        <div style="font-size:11px;font-weight:700;color:#1F3864;margin-bottom:8px">🎯 Năng suất theo tháng</div>
+        <div style="height:220px;position:relative" id="srChartProdWrap"><canvas id="srChartProd"></canvas></div>
+      </div>
+      <div style="background:#fff;border-radius:8px;padding:12px;border:1px solid #ddd">
+        <div style="font-size:11px;font-weight:700;color:#1F3864;margin-bottom:8px">🌙 OT theo tháng</div>
+        <div style="height:220px;position:relative" id="srChartOTWrap"><canvas id="srChartOT"></canvas></div>
+      </div>
+    </div>
+
+    <!-- PHẦN 4: RADAR 6 NHÓM TIÊU CHÍ -->
+    <div style="background:#fff;border-radius:8px;padding:12px 16px;border:1px solid #ddd;margin-bottom:18px;display:flex;flex-direction:column;align-items:center">
+      <div style="font-size:11px;font-weight:700;color:#1F3864;margin-bottom:8px;align-self:flex-start">🎨 So sánh 6 nhóm tiêu chí</div>
+      <div style="width:100%;max-width:500px;height:350px;position:relative" id="srChartRadarWrap"><canvas id="srChartRadar"></canvas></div>
+    </div>
+
     <!-- PHẦN 5: STATS CHI TIẾT -->
     <div style="background:#fff;border-radius:8px;border:1px solid #ddd;overflow:hidden">
       <div style="background:#1F3864;color:#fff;padding:10px 16px;font-size:13px;font-weight:700">📋 Thống kê chi tiết</div>
@@ -7496,6 +7834,35 @@ function _renderStaffReview(staffName, fromDate, toDate) {
       </table>
     </div>
   `;
+
+  // ── PHẦN 3: render 3 trend charts ──
+  const breakdown = getStaffMonthBreakdown(staffName, fromDate, toDate);
+  const noDataMsg = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#aaa;font-size:11px;font-style:italic">Chưa có dữ liệu</div>';
+  if (breakdown.length > 0) {
+    const labels = breakdown.map(b => {
+      const yr2 = b.mid.slice(2, 4);
+      const mo = b.mid.slice(5);
+      return `${mo}/${yr2}`;
+    });
+    try { _srRenderKPIChart(breakdown, labels); } catch(e) { console.warn('[SR] KPI chart:', e.message); }
+    try { _srRenderProdChart(breakdown, labels); } catch(e) { console.warn('[SR] Prod chart:', e.message); }
+    try { _srRenderOTChart(breakdown, labels); } catch(e) { console.warn('[SR] OT chart:', e.message); }
+  } else {
+    ['srChartKPIWrap','srChartProdWrap','srChartOTWrap'].forEach(wid => {
+      const w = document.getElementById(wid); if (w) w.innerHTML = noDataMsg;
+    });
+  }
+
+  // ── PHẦN 4: render radar ──
+  const selfRates = getStaffRateBreakdown(staffName, fromDate, toDate);
+  const teamRates = getTeamAvgRateBreakdown(prof.role, staffName, fromDate, toDate);
+  const hasSelfData = Object.values(selfRates).some(v => v > 0);
+  if (hasSelfData) {
+    try { _srRenderRadar(selfRates, teamRates); } catch(e) { console.warn('[SR] Radar:', e.message); }
+  } else {
+    const w = document.getElementById('srChartRadarWrap');
+    if (w) w.innerHTML = noDataMsg;
+  }
 }
 
 async function saveStaffProfile(name, field, val) {

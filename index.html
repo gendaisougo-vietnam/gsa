@@ -918,6 +918,7 @@ async function sbLoadAll() {
           rate4:r.rate4,rate5:r.rate5,rate6:r.rate6,rate7:r.rate7,
           rate8:r.rate8,rate9:r.rate9,rate10:r.rate10,
           rate11:r.rate11,rate12:r.rate12,rate13:r.rate13,
+          rate14:r.rate14,rate15:r.rate15,
           fromCarryover: !!r.from_carryover,
           _fromTlTask: tlStaffSet.size > 0 && r.staff && tlStaffSet.has(r.staff) ? true : undefined,
         }))
@@ -1024,7 +1025,7 @@ async function sbPushAll() {
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
         _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++ });
-        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0, sort_order:_sr++ }); });
+        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, sort_order:_sr++ }); });
       });
     });
   });
@@ -1074,6 +1075,7 @@ const _COL_MAP = {
   rate0:'rate0',rate1:'rate1',rate2:'rate2',rate3:'rate3',rate4:'rate4',
   rate5:'rate5',rate6:'rate6',rate7:'rate7',rate8:'rate8',rate9:'rate9',
   rate10:'rate10',rate11:'rate11',rate12:'rate12',rate13:'rate13',
+  rate14:'rate14',rate15:'rate15',
 };
 
 // Phase 4: Save project to Supabase

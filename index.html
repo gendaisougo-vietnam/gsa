@@ -701,11 +701,18 @@ const DONE_BAR_COLOR    = '#6b7280';  // bar Gantt done — gray đậm
 const GANTT_BAR_H       = 2;          // độ dày bar Gantt (px), thống nhất mọi màu
 const GANTT_TEXT_SCALE  = 1.5;        // hệ số tăng chữ label trên bar
 
-// ── Phát hiện row đã UP — chỉ dựa vào r.doneAt ──
-// Verify dữ liệu thực tế: không có row nào có upScore/rate6-11 mà không có doneAt.
-// rate6/7/8/10/11 do recalcStaffUpKPI broadcast ra TẤT CẢ row của staff (false positive).
+// ── Phát hiện row đã UP (bao gồm data cũ thiếu doneAt) ──
 function _rowIsLocked(r) {
-  return !!(r && r.doneAt);
+  if (!r) return false;
+  // 1) Đã UP rõ ràng
+  if (r.doneAt) return true;
+  // 2) Data cũ: có rate auto-fill (recalcStaffUpKPI broadcast SAU UP)
+  //    NHƯNG KHÔNG có dateTo → chắc chắn data cũ đã từng UP,
+  //    không phải row mới đang chuẩn bị UP (row đang prep có dateTo).
+  if (r.dateTo) return false;
+  const autoFillRates = ['rate6','rate7','rate8','rate10','rate11'];
+  if (autoFillRates.some(k => (r[k] || 0) > 0)) return true;
+  return false;
 }
 
 // Phase 2: Load toàn bộ D từ Supabase
@@ -5188,9 +5195,14 @@ function renderGroups(p) {
         </td>
         <td style="text-align:center;${cellDim}">
           ${rIsDone
-            ? `<div style="text-align:center">
-                <span style="font-size:9px;font-weight:700;color:#27ae60">✓ Đã UP ${r.doneAt.slice(0,10)}</span>
-              </div>`
+            ? (r.doneAt
+                ? `<div style="text-align:center">
+                    <span style="font-size:9px;font-weight:700;color:#27ae60">✓ Đã UP ${r.doneAt.slice(0,10)}</span>
+                  </div>`
+                : `<div style="text-align:center">
+                    <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
+                    <div style="font-size:8px;color:#888;font-style:italic">(data cũ)</div>
+                  </div>`)
             : `<input type="date" class="tbl-input" value="${r.dateTo||''}"
                 style="font-size:10px;padding:3px 5px;min-width:0;${deadlinePast?'border-color:#e74c3c;background:#fff5f5':deadlineSoon?'border-color:var(--orange);background:#fffbf0':''}"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','dateTo',this.value);refreshStaffSched('${p.id}')">
@@ -5233,11 +5245,17 @@ function renderGroups(p) {
         ${(sessionStorage.getItem('splash_role')||'admin')==='edit' ? '' : renderRatingGroups(p.id, g.id, r, cellDim)}
         <td style="text-align:center;min-width:64px;padding:2px 4px;${cellDim}">
           ${rIsDone
-            ? `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
-                <span style="font-size:9px;font-weight:700;color:#27ae60">✓ UP</span>
-                <span style="font-size:8px;color:#888">${r.doneAt.slice(11,16)}</span>
-                <span style="font-size:8px;font-weight:700;color:${r.upScore===10?'#27ae60':r.upScore===8?'#2980b9':r.upScore===7||r.upScore===5?'#aaa':'#e74c3c'}">${r.upScore===10?'● Sớm':r.upScore===8?'✓ Đúng giờ':r.upScore===5?'● Bthg':r.upScore!=null&&r.upScore<5?'● Muộn':''}</span>
-              </div>`
+            ? (r.doneAt
+                ? `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
+                    <span style="font-size:9px;font-weight:700;color:#27ae60">✓ UP</span>
+                    <span style="font-size:8px;color:#888">${r.doneAt.slice(11,16)}</span>
+                    <span style="font-size:8px;font-weight:700;color:${r.upScore===10?'#27ae60':r.upScore===8?'#2980b9':r.upScore===7||r.upScore===5?'#aaa':'#e74c3c'}">${r.upScore===10?'● Sớm':r.upScore===8?'✓ Đúng giờ':r.upScore===5?'● Bthg':r.upScore!=null&&r.upScore<5?'● Muộn':''}</span>
+                  </div>`
+                : `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
+                    <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
+                    <span style="font-size:8px;color:#888;font-style:italic">(data cũ)</span>
+                    ${r.upScore!=null?`<span style="font-size:8px;font-weight:700;color:${r.upScore===10?'#27ae60':r.upScore===8?'#2980b9':r.upScore===7||r.upScore===5?'#aaa':'#e74c3c'}">${r.upScore===10?'● Sớm':r.upScore===8?'✓ Đúng giờ':r.upScore===5?'● Bthg':r.upScore<5?'● Muộn':''}</span>`:''}
+                  </div>`)
             : (() => {
                 const role = sessionStorage.getItem('splash_role')||'admin';
                 const hasTimeline = !!(r.dateTo);

@@ -4824,7 +4824,7 @@ function saveUpRating(pjId, gId, rowId) {
   if (hasVal) toast('✓ Đã lưu đánh giá');
 }
 
-async function markRowDone(pjId, gId, rId) {
+async function markRowDone(pjId, gId, rId, overrideDoneAt, overrideUpScore) {
   const pj = allCurProjects().find(p=>p.id===pjId);
   if (!pj) return;
   const g = (pj.groups||[]).find(g=>g.id===gId);
@@ -4833,12 +4833,13 @@ async function markRowDone(pjId, gId, rId) {
   if (!r) return;
   if (r.doneAt) return; // không cho bấm lại
 
-  // Lấy local time VN — không dùng toISOString() vì đó là UTC
+  // Override từ popup chọn giờ UP, hoặc fallback dùng giờ hiện tại
   const now = new Date();
   const pad = n => String(n).padStart(2,'0');
-  const doneAt = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const doneAt = overrideDoneAt
+    || `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-  const score = calcUpScore(doneAt, r.dateTo, r.upTime||'');
+  const score = (overrideUpScore != null) ? overrideUpScore : calcUpScore(doneAt, r.dateTo, r.upTime||'');
   r.doneAt  = doneAt;
   r.upScore = score;
 
@@ -4867,6 +4868,140 @@ async function markRowDone(pjId, gId, rId) {
   _refreshOverviewParts();
 
   openUpRatingModal(pjId, gId, rId, label, timeStr);
+}
+
+// ── Popup chọn thời điểm UP — 4 lựa chọn (SỚM / ĐÚNG GIỜ / MUỘN / NHẬP TAY) ──
+function openUpConfirmModal(pjId, gId, rowId) {
+  const pj = allCurProjects().find(p => p.id === pjId);
+  if (!pj) return;
+  const g = (pj.groups||[]).find(gg => gg.id === gId);
+  if (!g) return;
+  const r = (g.rows||[]).find(rw => rw.id === rowId);
+  if (!r) return;
+  if (r.doneAt) return; // đã UP rồi
+
+  const deadline = r.dateTo || '';
+  const upTime = r.upTime || '';
+  const hasDeadline = !!deadline;
+  const deadlineInfo = hasDeadline
+    ? `Deadline: <strong>${deadline}${upTime ? ' · ' + upTime : ''}</strong>`
+    : '<span style="color:#e67e22">⚠️ Chưa có deadline — chỉ NHẬP TAY khả dụng</span>';
+
+  const pad = n => String(n).padStart(2,'0');
+  const _now = new Date();
+  const nowStr = `${_now.getFullYear()}-${pad(_now.getMonth()+1)}-${pad(_now.getDate())}T${pad(_now.getHours())}:${pad(_now.getMinutes())}`;
+  const disAttr = hasDeadline ? '' : 'disabled';
+  const disStyle = hasDeadline ? '' : 'opacity:.4;cursor:not-allowed;';
+
+  showModal(`
+    <h3 style="margin-bottom:6px">✓ Xác nhận UP hoàn thành</h3>
+    <div style="font-size:11px;color:#666;margin-bottom:14px;padding:8px 10px;background:#f8f9fa;border-radius:6px">
+      <b>${x(pj.nameVN||pj.nameJP||'?')}</b> · ${x(g.type||'?')} · ${x(r.staff||'?')}<br>
+      ${deadlineInfo}
+    </div>
+
+    <button class="btn" style="width:100%;text-align:left;padding:12px 14px;margin-bottom:6px;display:flex;align-items:center;gap:12px;background:#dcfce7;border:1.5px solid #86efac;color:#15803d;${disStyle}"
+      ${disAttr} onclick="_upConfirm('${x(pjId)}','${x(gId)}','${x(rowId)}','early')">
+      <span style="font-size:22px">✅</span>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700">SỚM</div>
+        <div style="font-size:11px;color:#777;margin-top:2px">UP trước deadline 1 ngày · upScore = 10</div>
+      </div>
+    </button>
+
+    <button class="btn" style="width:100%;text-align:left;padding:12px 14px;margin-bottom:6px;display:flex;align-items:center;gap:12px;background:#dbeafe;border:1.5px solid #93c5fd;color:#1e40af;${disStyle}"
+      ${disAttr} onclick="_upConfirm('${x(pjId)}','${x(gId)}','${x(rowId)}','on_time')">
+      <span style="font-size:22px">🕒</span>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700">ĐÚNG GIỜ</div>
+        <div style="font-size:11px;color:#777;margin-top:2px">UP đúng deadline · upScore = 8</div>
+      </div>
+    </button>
+
+    <div style="border:1.5px solid #fcd34d;background:#fef3c7;border-radius:8px;padding:12px 14px;margin-bottom:6px;${disStyle}">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <span style="font-size:22px">⚠️</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#92400e">MUỘN</div>
+          <div style="font-size:11px;color:#777;margin-top:2px">Chọn số ngày trễ — upScore tự tính (3 / 1 / 0)</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;padding-left:34px">
+        <button class="btn btn-sm" style="flex:1" ${disAttr} onclick="_upConfirm('${x(pjId)}','${x(gId)}','${x(rowId)}','late',1)">Trễ 1 ngày</button>
+        <button class="btn btn-sm" style="flex:1" ${disAttr} onclick="_upConfirm('${x(pjId)}','${x(gId)}','${x(rowId)}','late',2)">Trễ 2 ngày</button>
+        <button class="btn btn-sm" style="flex:1" ${disAttr} onclick="_upConfirm('${x(pjId)}','${x(gId)}','${x(rowId)}','late',3)">Trễ 3+ ngày</button>
+      </div>
+    </div>
+
+    <div style="border:1.5px solid #a5b4fc;background:#e0e7ff;border-radius:8px;padding:12px 14px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <span style="font-size:22px">📅</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#3730a3">NHẬP TAY</div>
+          <div style="font-size:11px;color:#777;margin-top:2px">Chọn chính xác ngày + giờ UP — upScore tính theo calcUpScore</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;padding-left:34px">
+        <input type="datetime-local" id="upCustomDt" value="${nowStr}" style="flex:1;padding:6px;border:1px solid #c7d2fe;border-radius:4px;font-size:12px">
+        <button class="btn btn-gold btn-sm" onclick="_upConfirmCustom('${x(pjId)}','${x(gId)}','${x(rowId)}')">Xác nhận</button>
+      </div>
+    </div>
+
+    <div class="modal-ft"><button class="btn" onclick="closeModal()">Hủy</button></div>
+  `);
+}
+
+function _upConfirm(pjId, gId, rowId, mode, daysLate) {
+  const pj = allCurProjects().find(p => p.id === pjId);
+  if (!pj) return;
+  const g = (pj.groups||[]).find(gg => gg.id === gId);
+  if (!g) return;
+  const r = (g.rows||[]).find(rw => rw.id === rowId);
+  if (!r) return;
+  const dateTo = r.dateTo;
+  if (!dateTo) { toast('Cần có deadline trước khi chọn SỚM/ĐÚNG GIỜ/MUỘN'); return; }
+
+  const pad = n => String(n).padStart(2,'0');
+  const tStr = r.upTime || '12:00';
+  let doneAt, upScore;
+
+  if (mode === 'early') {
+    const d = new Date(dateTo);
+    d.setDate(d.getDate() - 1);
+    doneAt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${tStr}:00`;
+    upScore = 10;
+  } else if (mode === 'on_time') {
+    doneAt = `${dateTo}T${tStr}:00`;
+    upScore = 8;
+  } else if (mode === 'late') {
+    const d = new Date(dateTo);
+    d.setDate(d.getDate() + (daysLate || 1));
+    doneAt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${tStr}:00`;
+    upScore = calcUpScore(doneAt, dateTo, r.upTime||'');
+  } else {
+    return;
+  }
+
+  closeModal();
+  markRowDone(pjId, gId, rowId, doneAt, upScore);
+}
+
+function _upConfirmCustom(pjId, gId, rowId) {
+  const dtInput = document.getElementById('upCustomDt');
+  if (!dtInput) return;
+  const v = dtInput.value;
+  if (!v) { toast('Chọn ngày giờ UP trước'); return; }
+  const pj = allCurProjects().find(p => p.id === pjId);
+  if (!pj) return;
+  const g = (pj.groups||[]).find(gg => gg.id === gId);
+  if (!g) return;
+  const r = (g.rows||[]).find(rw => rw.id === rowId);
+  if (!r) return;
+
+  const doneAt = v + ':00';
+  const upScore = calcUpScore(doneAt, r.dateTo, r.upTime || '');
+  closeModal();
+  markRowDone(pjId, gId, rowId, doneAt, upScore);
 }
 
 function updRowRating(pjId, gId, rId, field, val) {
@@ -5016,25 +5151,33 @@ function renderGroups(p) {
           </div>
         </td>` : ''}
         <td style="border-left:2px solid ${gc.border};${cellDim}">
-          <select class="sel-sm" style="width:100%;font-size:11px" onchange="updRow('${p.id}','${g.id}','${r.id}','staff',this.value)">
-            <option value="">— Người TH —</option>
-            ${sortedStaffList().map(s=>`<option value="${s}" ${r.staff===s?"selected":""}>${s}</option>`).join('')}
-          </select>
+          ${rIsDone
+            ? `<span style="font-size:11px;color:${DONE_COLOR};font-weight:600">${x(r.staff||'—')}</span>`
+            : `<select class="sel-sm" style="width:100%;font-size:11px" onchange="updRow('${p.id}','${g.id}','${r.id}','staff',this.value)">
+                <option value="">— Người TH —</option>
+                ${sortedStaffList().map(s=>`<option value="${s}" ${r.staff===s?"selected":""}>${s}</option>`).join('')}
+              </select>`}
         </td>
         <td style="${cellDim}">
-          <select class="sel-sm" style="width:100%;font-size:11px;color:${r.status==='new'?chipNewTx:chipRevTx};font-weight:600;background:${r.status==='new'?chipNewBg:chipRevBg}"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','status',this.value);refreshPjTotals('${p.id}');rebuildGroups('${p.id}')">
-            <option value="new" ${r.status==='new'?'selected':''}>Làm mới</option>
-            <option value="rev" ${r.status==='rev'?'selected':''}>Sửa lại</option>
-          </select>
+          ${rIsDone
+            ? `<span style="font-size:11px;color:${r.status==='new'?chipNewTx:chipRevTx};font-weight:600;background:${r.status==='new'?chipNewBg:chipRevBg};padding:2px 8px;border-radius:4px;display:inline-block">${r.status==='new'?'Làm mới':'Sửa lại'}</span>`
+            : `<select class="sel-sm" style="width:100%;font-size:11px;color:${r.status==='new'?chipNewTx:chipRevTx};font-weight:600;background:${r.status==='new'?chipNewBg:chipRevBg}"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','status',this.value);refreshPjTotals('${p.id}');rebuildGroups('${p.id}')">
+                <option value="new" ${r.status==='new'?'selected':''}>Làm mới</option>
+                <option value="rev" ${r.status==='rev'?'selected':''}>Sửa lại</option>
+              </select>`}
         </td>
         <td style="text-align:center;${cellDim}">
-          <input class="qty-inp" type="number" min="0" value="${r.qty||0}" style="width:54px"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','qty',+this.value);refreshPjTotals('${p.id}')">
+          ${rIsDone
+            ? `<span style="font-size:11px;color:${DONE_COLOR};font-weight:600">${r.qty||0}</span>`
+            : `<input class="qty-inp" type="number" min="0" value="${r.qty||0}" style="width:54px"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','qty',+this.value);refreshPjTotals('${p.id}')">`}
         </td>
         <td style="text-align:center;${cellDim}">
-          <input type="date" class="tbl-input" value="${r.dateFrom||''}" style="font-size:10px;padding:3px 5px;min-width:0"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','dateFrom',this.value);refreshStaffSched('${p.id}')">
+          ${rIsDone
+            ? `<span style="font-size:10px;color:${DONE_COLOR}">${r.dateFrom||'—'}</span>`
+            : `<input type="date" class="tbl-input" value="${r.dateFrom||''}" style="font-size:10px;padding:3px 5px;min-width:0"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','dateFrom',this.value);refreshStaffSched('${p.id}')">`}
         </td>
         <td style="text-align:center;${cellDim}">
           ${r.doneAt
@@ -5053,24 +5196,32 @@ function renderGroups(p) {
           }
         </td>
         <td style="text-align:center;min-width:56px;${cellDim}">
-          <input type="time" class="tbl-input" value="${r.upTime||''}"
-            title="Giờ UP đặc biệt — để trống nếu không có yêu cầu giờ cụ thể"
-            style="font-size:10px;padding:2px 4px;min-width:0;width:64px;${r.upTime?'border-color:#e74c3c;background:#fff0f0;color:#c0392b;font-weight:700':''}"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','upTime',this.value);refreshStaffSched('${p.id}')">
-          ${r.upTime?`<div style="font-size:8px;color:#c0392b;font-weight:700">⚡${r.upTime}</div>`:''}
+          ${rIsDone
+            ? `<span style="font-size:10px;color:${DONE_COLOR}">${r.upTime||'—'}</span>`
+            : `<input type="time" class="tbl-input" value="${r.upTime||''}"
+                title="Giờ UP đặc biệt — để trống nếu không có yêu cầu giờ cụ thể"
+                style="font-size:10px;padding:2px 4px;min-width:0;width:64px;${r.upTime?'border-color:#e74c3c;background:#fff0f0;color:#c0392b;font-weight:700':''}"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','upTime',this.value);refreshStaffSched('${p.id}')">
+              ${r.upTime?`<div style="font-size:8px;color:#c0392b;font-weight:700">⚡${r.upTime}</div>`:''}`}
         </td>
         <td style="${cellDim}">
-          <input class="tbl-input" value="${x(r.note||'')}" style="font-size:11px"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','note',this.value)" placeholder="Ghi chú…">
+          ${rIsDone
+            ? `<span style="font-size:11px;color:${DONE_COLOR};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:100%" title="${x(r.note||'')}">${x(r.note||'—')}</span>`
+            : `<input class="tbl-input" value="${x(r.note||'')}" style="font-size:11px"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','note',this.value)" placeholder="Ghi chú…">`}
         </td>
         <td style="text-align:center;${cellDim}">
-          <input class="qty-inp" type="number" min="0" step="0.5" value="${r.ot||''}"
-            style="color:var(--orange);width:48px" placeholder="0"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','ot',+this.value||0);refreshPjTotals('${p.id}')">
+          ${rIsDone
+            ? `<span style="font-size:11px;color:var(--orange);font-weight:600">${r.ot||0}</span>`
+            : `<input class="qty-inp" type="number" min="0" step="0.5" value="${r.ot||''}"
+                style="color:var(--orange);width:48px" placeholder="0"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','ot',+this.value||0);refreshPjTotals('${p.id}')">`}
         </td>
         <td style="${cellDim}">
-          <input class="tbl-input" value="${x(r.otNote||'')}" style="font-size:10px"
-            onchange="updRow('${p.id}','${g.id}','${r.id}','otNote',this.value)" placeholder="Lý do OT…">
+          ${rIsDone
+            ? `<span style="font-size:10px;color:${DONE_COLOR};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:100%" title="${x(r.otNote||'')}">${x(r.otNote||'—')}</span>`
+            : `<input class="tbl-input" value="${x(r.otNote||'')}" style="font-size:10px"
+                onchange="updRow('${p.id}','${g.id}','${r.id}','otNote',this.value)" placeholder="Lý do OT…">`}
         </td>
         ${(sessionStorage.getItem('splash_role')||'admin')==='edit' ? '' : renderRatingGroups(p.id, g.id, r, cellDim)}
         <td style="text-align:center;min-width:64px;padding:2px 4px;${cellDim}">
@@ -5085,18 +5236,21 @@ function renderGroups(p) {
                 const hasTimeline = !!(r.dateTo);
                 const isPast = r.dateTo && r.dateTo < localDateStr(new Date());
                 if (role !== 'admin') return '<span style="color:#ddd;font-size:10px">—</span>';
-                if (!hasTimeline || isPast) {
+                if (!hasTimeline) {
                   return `<button class="btn btn-xs" disabled
                     style="background:#f5f5f5;color:#ccc;border-color:#e0e0e0;font-size:10px;padding:2px 6px;cursor:not-allowed;opacity:.6"
-                    title="${!hasTimeline?'Chưa có ngày UP':'Đã quá ngày UP'}">✓ UP</button>`;
+                    title="Chưa có ngày UP">✓ UP</button>`;
                 }
                 if ((r.qty||0) <= 0) {
                   return `<button class="btn btn-xs" disabled
                     style="background:#f5f5f5;color:#ccc;border-color:#e0e0e0;font-size:10px;padding:2px 6px;cursor:not-allowed;opacity:.6"
                     title="Chưa có số lượng">✓ UP</button>`;
                 }
+                const overdueBadge = isPast
+                  ? `<div style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:3px;padding:1px 4px;margin-top:3px;font-weight:700;white-space:nowrap">⏰ Cần UP</div>`
+                  : '';
                 return `<button class="btn btn-xs" style="background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7;font-size:10px;padding:2px 6px;white-space:nowrap"
-                  onclick="markRowDone('${p.id}','${g.id}','${r.id}')">✓ UP</button>`;
+                  onclick="openUpConfirmModal('${p.id}','${g.id}','${r.id}')">✓ UP</button>${overdueBadge}`;
               })()
           }
         </td>
@@ -5464,6 +5618,7 @@ function updRow(pjId,gid2,rid,field,val) {
   const p=getPjGlobal(pjId)||getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
   const r=g.rows.find(r=>r.id===rid); if(!r) return;
+  if (r.doneAt) { console.warn('[updRow] Row locked (đã UP):', rid); return; }
   r[field]=val;
   persistD();
   if (['dateFrom','dateTo','doneAt','status','qty'].includes(field)) {

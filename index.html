@@ -701,19 +701,83 @@ const DONE_BAR_COLOR    = '#6b7280';  // bar Gantt done — gray đậm
 const GANTT_BAR_H       = 2;          // độ dày bar Gantt (px), thống nhất mọi màu
 const GANTT_TEXT_SCALE  = 1.5;        // hệ số tăng chữ label trên bar
 
-// ── Phát hiện row đã UP (bao gồm data cũ thiếu doneAt) ──
+// ── Phát hiện row đã UP / carryover từ tháng cũ (lock) ──
 function _rowIsLocked(r) {
   if (!r) return false;
   // 1) Đã UP rõ ràng
   if (r.doneAt) return true;
-  // 2) Data cũ: có rate auto-fill (recalcStaffUpKPI broadcast SAU UP)
-  //    NHƯNG KHÔNG có dateTo → chắc chắn data cũ đã từng UP,
-  //    không phải row mới đang chuẩn bị UP (row đang prep có dateTo).
+  // 2) Carryover từ tháng cũ (flag từ doAddMonth hoặc migration)
+  if (r.fromCarryover) return true;
+  // 3) Data cũ: rate auto-fill (recalcStaffUpKPI sau UP) + KHÔNG có dateTo
+  //    → chắc chắn đã từng UP, không phải row đang chuẩn bị UP.
   if (r.dateTo) return false;
   const autoFillRates = ['rate6','rate7','rate8','rate10','rate11'];
   if (autoFillRates.some(k => (r[k] || 0) > 0)) return true;
   return false;
 }
+
+// ── Auto-migrate v1: gắn fromCarryover cho row data cũ thiếu flag ──
+// Chạy 1 lần khi load (flag localStorage 'migrate_carryover_v1').
+// Điều kiện chặt: r.staff && status new/rev && qty=0 && !doneAt && !dateTo && !fromCarryover
+async function _migrateCarryoverV1() {
+  const flag = localStorage.getItem('migrate_carryover_v1');
+  const monthCount = (D && D.months) ? Object.keys(D.months).length : 0;
+  console.log('[Migrate v1] called. flag =', flag, '| D.months =', monthCount);
+  if (window._migratingV1) { console.log('[Migrate v1] Skip — đang chạy'); return; }
+  if (flag === '1') { console.log('[Migrate v1] Skip — flag đã set'); return; }
+  if (!D || !D.months || monthCount === 0) { console.log('[Migrate v1] Skip — D.months rỗng'); return; }
+  window._migratingV1 = true;
+
+  try {
+    const toUpdate = [];
+    Object.values(D.months).forEach(m => {
+      [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
+        (p.groups||[]).forEach(g => {
+          (g.rows||[]).forEach(r => {
+            if (r.staff && (r.status === 'new' || r.status === 'rev')
+                && (r.qty || 0) === 0
+                && !r.doneAt && !r.dateTo
+                && !r.fromCarryover) {
+              r.fromCarryover = true;
+              toUpdate.push(r.id);
+            }
+          });
+        });
+      });
+    });
+
+    console.log(`[Migrate v1] Set fromCarryover cho ${toUpdate.length} row`);
+
+    if (toUpdate.length > 0) {
+      try { persistD(); } catch(e) { console.warn('[Migrate v1] persistD failed:', e.message); }
+      if (window._sbReady) {
+        let sbFails = 0;
+        for (let i = 0; i < toUpdate.length; i += 100) {
+          const batch = toUpdate.slice(i, i + 100);
+          try {
+            const { error } = await _sb.from('rows').update({ from_carryover: true }).in('id', batch);
+            if (error) { sbFails += batch.length; console.warn('[Migrate v1] batch update error:', error.message); }
+          } catch(e) {
+            sbFails += batch.length;
+            console.warn('[Migrate v1] Supabase update failed:', e.message);
+          }
+        }
+        console.log(`[Migrate v1] Supabase synced ${toUpdate.length - sbFails}/${toUpdate.length} row`);
+      } else {
+        console.warn('[Migrate v1] _sbReady=false → chỉ persist localStorage');
+      }
+      try { renderAll(); } catch(e) { console.warn('[Migrate v1] renderAll failed:', e.message); }
+      try { toast(`🔁 Migrate: khóa ${toUpdate.length} row carryover cũ`, 4000); } catch(e) {}
+    }
+
+    localStorage.setItem('migrate_carryover_v1', '1');
+    console.log('[Migrate v1] DONE — flag set');
+  } finally {
+    window._migratingV1 = false;
+  }
+}
+// Expose để debug từ Console nếu cần re-run
+window._migrateCarryoverV1 = _migrateCarryoverV1;
 
 // Phase 2: Load toàn bộ D từ Supabase
 async function sbLoadAll() {
@@ -854,6 +918,7 @@ async function sbLoadAll() {
           rate4:r.rate4,rate5:r.rate5,rate6:r.rate6,rate7:r.rate7,
           rate8:r.rate8,rate9:r.rate9,rate10:r.rate10,
           rate11:r.rate11,rate12:r.rate12,rate13:r.rate13,
+          fromCarryover: !!r.from_carryover,
           _fromTlTask: tlStaffSet.size > 0 && r.staff && tlStaffSet.has(r.staff) ? true : undefined,
         }))
       };
@@ -1830,6 +1895,8 @@ async function doAddMonth(prevMid, newMid) {
             dateFrom: rowActive ? r.dateFrom : '',
             dateTo:   rowActive ? r.dateTo   : '',
             doneAt:   rowActive ? ''          : '', // reset doneAt để UP lại được
+            // Đánh dấu carryover từ tháng cũ → lock (chỉ áp dụng row đã KHÔNG còn active)
+            fromCarryover: rowActive ? false : true,
           };
         })
       }));
@@ -5199,10 +5266,14 @@ function renderGroups(p) {
                 ? `<div style="text-align:center">
                     <span style="font-size:9px;font-weight:700;color:#27ae60">✓ Đã UP ${r.doneAt.slice(0,10)}</span>
                   </div>`
-                : `<div style="text-align:center">
-                    <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
-                    <div style="font-size:8px;color:#888;font-style:italic">(data cũ)</div>
-                  </div>`)
+                : r.fromCarryover
+                  ? `<div style="text-align:center">
+                      <span style="font-size:9px;font-weight:700;color:${DONE_COLOR};font-style:italic">✓ Hạng mục tháng trước</span>
+                    </div>`
+                  : `<div style="text-align:center">
+                      <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
+                      <div style="font-size:8px;color:#888;font-style:italic">(data cũ)</div>
+                    </div>`)
             : `<input type="date" class="tbl-input" value="${r.dateTo||''}"
                 style="font-size:10px;padding:3px 5px;min-width:0;${deadlinePast?'border-color:#e74c3c;background:#fff5f5':deadlineSoon?'border-color:var(--orange);background:#fffbf0':''}"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','dateTo',this.value);refreshStaffSched('${p.id}')">
@@ -5251,11 +5322,15 @@ function renderGroups(p) {
                     <span style="font-size:8px;color:#888">${r.doneAt.slice(11,16)}</span>
                     <span style="font-size:8px;font-weight:700;color:${r.upScore===10?'#27ae60':r.upScore===8?'#2980b9':r.upScore===7||r.upScore===5?'#aaa':'#e74c3c'}">${r.upScore===10?'● Sớm':r.upScore===8?'✓ Đúng giờ':r.upScore===5?'● Bthg':r.upScore!=null&&r.upScore<5?'● Muộn':''}</span>
                   </div>`
-                : `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
-                    <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
-                    <span style="font-size:8px;color:#888;font-style:italic">(data cũ)</span>
-                    ${r.upScore!=null?`<span style="font-size:8px;font-weight:700;color:${r.upScore===10?'#27ae60':r.upScore===8?'#2980b9':r.upScore===7||r.upScore===5?'#aaa':'#e74c3c'}">${r.upScore===10?'● Sớm':r.upScore===8?'✓ Đúng giờ':r.upScore===5?'● Bthg':r.upScore<5?'● Muộn':''}</span>`:''}
-                  </div>`)
+                : r.fromCarryover
+                  ? `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
+                      <span style="font-size:9px;font-weight:700;color:${DONE_COLOR};font-style:italic">✓ Tháng trước</span>
+                    </div>`
+                  : `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
+                      <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
+                      <span style="font-size:8px;color:#888;font-style:italic">(data cũ)</span>
+                      ${r.upScore!=null?`<span style="font-size:8px;font-weight:700;color:${r.upScore===10?'#27ae60':r.upScore===8?'#2980b9':r.upScore===7||r.upScore===5?'#aaa':'#e74c3c'}">${r.upScore===10?'● Sớm':r.upScore===8?'✓ Đúng giờ':r.upScore===5?'● Bthg':r.upScore<5?'● Muộn':''}</span>`:''}
+                    </div>`)
             : (() => {
                 const role = sessionStorage.getItem('splash_role')||'admin';
                 const hasTimeline = !!(r.dateTo);
@@ -9251,6 +9326,7 @@ window.addEventListener('beforeunload', function() {
             console.warn('[Phase 2] sbLoadAll failed, dung localStorage:', e.message);
           }
         }
+        try { await _migrateCarryoverV1(); } catch(e) { console.warn('[Migrate v1] error:', e.message); }
         try { renderAll(); } catch(e) {}
         try {
           startRealtimeSync();
@@ -9281,9 +9357,14 @@ window.addEventListener('beforeunload', function() {
         try {
           if (window._sbReady) {
             setSyncStatus('syncing', '⏳ Đang tải…');
-            const sbData = await sbLoadAll();
-            if (sbData) { D = sbData; injectSyncHashes(); try { localStorage.setItem(SK, JSON.stringify(D)); } catch(e) {} }
+            try {
+              const sbData = await sbLoadAll();
+              if (sbData) { D = sbData; injectSyncHashes(); try { localStorage.setItem(SK, JSON.stringify(D)); } catch(e) {} }
+            } catch(e) {
+              console.warn('[Session restore] sbLoadAll failed:', e.message);
+            }
           }
+          try { await _migrateCarryoverV1(); } catch(e) { console.warn('[Migrate v1] error:', e.message); }
           renderAll();
           startRealtimeSync();
           try { checkMorningNotification(); } catch(e) {}
@@ -9302,6 +9383,23 @@ window.addEventListener('beforeunload', function() {
     if (hdr) hdr.style.visibility = 'hidden';
     if (pgm) pgm.style.visibility = 'hidden';
   } catch(e) {}
+})();
+
+// ── Fallback migration trigger: nếu login path miss, đảm bảo migration vẫn chạy ──
+// Poll mỗi 1.5s sau 3s đầu, dừng khi flag set hoặc D có data → migrate
+(function _scheduleFallbackMigrate(){
+  let tries = 0;
+  function tick(){
+    tries++;
+    if (localStorage.getItem('migrate_carryover_v1') === '1') return; // đã xong
+    if (tries > 20) { console.warn('[Migrate v1 fallback] giving up after 20 tries'); return; }
+    if (D && D.months && Object.keys(D.months).length > 0) {
+      _migrateCarryoverV1().catch(e => console.warn('[Migrate v1 fallback] error:', e.message));
+      return;
+    }
+    setTimeout(tick, 1500);
+  }
+  setTimeout(tick, 3000);
 })();
 
 </script>

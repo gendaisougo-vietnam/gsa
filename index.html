@@ -5504,6 +5504,7 @@ function _refreshOverviewParts() {
 function updPj(pjId,field,val) { const p=getPj(pjId); if(!p) return; p[field]=val; save(); renderSidebar(); }
 
 function openAddProject() {
+  window._apFullSource = null;  // reset state mỗi lần mở modal
   const hist = getPjHistory();
   const histOptions = hist.map(h=>`<option value="${x(h.nameVN||h.nameJP)}">`).join('');
   const isVN = activeSection === 'vn';
@@ -5601,35 +5602,96 @@ function openAddProject() {
 function apTryLoadHistory() {
   const nVN = document.getElementById('ap-nVN')?.value.trim();
   const nJP = document.getElementById('ap-nJP')?.value.trim();
-  const found = loadPjFromHistory(nVN, nJP);
   const preview = document.getElementById('ap-hist-preview');
   const info = document.getElementById('ap-hist-info');
-  if(found && preview && info) {
+  if (!preview || !info) return;
+
+  const isVN = activeSection === 'vn';
+
+  // 1) Ưu tiên scan D.months (JP only) — đầy đủ groups/rows/photos
+  const dMatch = isVN ? null : findLatestProjectInD(nVN, nJP, 'jp');
+  if (dMatch) {
+    const p = dMatch.project;
+    const nGroups = (p.groups||[]).length;
+    const nRows   = (p.groups||[]).reduce((s,g)=>s+(g.rows||[]).length, 0);
+    const nPhotos = (p.photos||[]).filter(Boolean).length;
     preview.style.display = 'block';
+    preview.style.background = '#fff8e7';
+    preview.style.borderColor = '#f9d56e';
     info.innerHTML = `
-      <b>${x(found.nameVN||found.nameJP)}</b> · ${found.office||'?'} · ${found.mainStaff||'?'}<br>
-      Hạng mục: ${(found.groups||[]).map(g=>x(g.type)).filter(Boolean).join(', ')||'—'}<br>
-      <span style="color:#888">Lưu lúc: ${found.savedAt||'?'}</span>
-      ${found.photo?`<div style="margin-top:6px"><img src="${found.photo}" style="height:50px;border-radius:4px;object-fit:cover"></div>`:''}
+      <div style="font-size:11px;font-weight:700;color:#7d6608;margin-bottom:6px">🔥 Tìm thấy trong dữ liệu app (tháng ${monthLabel(dMatch.monthId)})</div>
+      <div style="font-size:11px;color:#555;margin-bottom:8px">
+        <b>${x(p.nameVN||p.nameJP||'?')}</b> · ${x(p.office||'?')} · ${x(p.mainStaff||'?')}<br>
+        📦 Có thể load: <b>${nGroups}</b> hạng mục · <b>${nRows}</b> dòng nhân sự · <b>${nPhotos}</b> ảnh
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-xs" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;padding:4px 10px;font-size:11px;font-weight:600" onclick="apLoadHistory('full')">🔥 Tải đầy đủ (groups+rows+photos)</button>
+        <button class="btn btn-xs" style="background:#fff;color:#555;border:1px solid #ddd;padding:4px 10px;font-size:11px" onclick="apLoadHistory('basic')">📂 Chỉ tải thông tin (5 field)</button>
+      </div>
     `;
-  } else if(preview) {
-    preview.style.display = 'none';
+    return;
   }
+
+  // 2) Fallback pj_history localStorage
+  const found = loadPjFromHistory(nVN, nJP);
+  if (found) {
+    preview.style.display = 'block';
+    preview.style.background = '#f8fff8';
+    preview.style.borderColor = '#a9dfbf';
+    info.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:#1e8449;margin-bottom:6px">✅ Đã tìm thấy trong lịch sử (metadata)</div>
+      <div style="font-size:11px;color:#555">
+        <b>${x(found.nameVN||found.nameJP)}</b> · ${found.office||'?'} · ${found.mainStaff||'?'}<br>
+        Hạng mục: ${(found.groups||[]).map(g=>x(g.type)).filter(Boolean).join(', ')||'—'}<br>
+        <span style="color:#888">Lưu lúc: ${found.savedAt||'?'}</span>
+        ${found.photo?`<div style="margin-top:6px"><img src="${found.photo}" style="height:50px;border-radius:4px;object-fit:cover"></div>`:''}
+      </div>
+    `;
+    return;
+  }
+
+  preview.style.display = 'none';
+  window._apFullSource = null;
 }
 
 // Load đầy đủ từ history vào form
-function apLoadHistory() {
+function apLoadHistory(mode) {
+  mode = mode || 'basic';
   const nVN = document.getElementById('ap-nVN')?.value.trim();
   const nJP = document.getElementById('ap-nJP')?.value.trim();
+  const isVN = activeSection === 'vn';
+
+  // FULL mode: lock source từ D, sẽ clone đầy đủ khi confirmAddPj
+  if (mode === 'full' && !isVN) {
+    const dMatch = findLatestProjectInD(nVN, nJP, 'jp');
+    if (!dMatch) { toast('Không tìm thấy dự án này trong dữ liệu app'); return; }
+    window._apFullSource = dMatch;
+    const src = dMatch.project;
+    if (document.getElementById('ap-nVN')) document.getElementById('ap-nVN').value = src.nameVN||'';
+    if (document.getElementById('ap-nJP')) document.getElementById('ap-nJP').value = src.nameJP||'';
+    const offSel = document.getElementById('ap-off');
+    if (offSel && src.office) [...offSel.options].forEach(o=>{ o.selected = o.value===src.office; });
+    if (document.getElementById('ap-ct')) document.getElementById('ap-ct').value = src.contact||'';
+    const stSel = document.getElementById('ap-st');
+    if (stSel && src.mainStaff) [...stSel.options].forEach(o=>{ o.selected = o.value===src.mainStaff; });
+    const nG = (src.groups||[]).length;
+    const nR = (src.groups||[]).reduce((s,g)=>s+(g.rows||[]).length, 0);
+    const nP = (src.photos||[]).filter(Boolean).length;
+    toast(`🔥 Sẵn sàng tạo "${src.nameVN||src.nameJP}" với ${nG} hạng mục · ${nR} dòng · ${nP} ảnh. Bấm "Thêm dự án" để xác nhận.`, 3500);
+    return;
+  }
+
+  // BASIC mode (như cũ): chỉ điền 5 field từ pj_history
+  window._apFullSource = null;
   const found = loadPjFromHistory(nVN, nJP);
-  if(!found) { toast('Không tìm thấy trong lịch sử — thử nhập tên dự án trước'); return; }
-  if(document.getElementById('ap-nVN')) document.getElementById('ap-nVN').value = found.nameVN||'';
-  if(document.getElementById('ap-nJP')) document.getElementById('ap-nJP').value = found.nameJP||'';
+  if (!found) { toast('Không tìm thấy trong lịch sử — thử nhập tên dự án trước'); return; }
+  if (document.getElementById('ap-nVN')) document.getElementById('ap-nVN').value = found.nameVN||'';
+  if (document.getElementById('ap-nJP')) document.getElementById('ap-nJP').value = found.nameJP||'';
   const offSel = document.getElementById('ap-off');
-  if(offSel && found.office) [...offSel.options].forEach(o=>{ o.selected = o.value===found.office; });
-  if(document.getElementById('ap-ct')) document.getElementById('ap-ct').value = found.contact||'';
+  if (offSel && found.office) [...offSel.options].forEach(o=>{ o.selected = o.value===found.office; });
+  if (document.getElementById('ap-ct')) document.getElementById('ap-ct').value = found.contact||'';
   const stSel = document.getElementById('ap-st');
-  if(stSel && found.mainStaff) [...stSel.options].forEach(o=>{ o.selected = o.value===found.mainStaff; });
+  if (stSel && found.mainStaff) [...stSel.options].forEach(o=>{ o.selected = o.value===found.mainStaff; });
   toast(`✅ Đã tải thông tin "${found.nameVN||found.nameJP}" từ lịch sử`);
   apTryLoadHistory();
 }
@@ -5637,9 +5699,44 @@ function confirmAddPj() {
   const nVN=document.getElementById('ap-nVN').value.trim();
   const nJP=(document.getElementById('ap-nJP')?.value||'').trim();
   if(!nVN&&!nJP){alert('Vui lòng nhập tên dự án');return;}
-  // Tìm history để restore ảnh
-  const hist = loadPjFromHistory(nVN, nJP);
   const isVN = activeSection === 'vn';
+
+  // ── FULL LOAD path (JP only): clone từ D với groups/rows/photos ──
+  if (!isVN && window._apFullSource && window._apFullSource.project) {
+    const src = window._apFullSource.project;
+    const srcMid = window._apFullSource.monthId;
+    const pj = cloneProjectFromHistory(src, srcMid);
+    // Override với input từ form (user có thể đã sửa)
+    pj.nameVN    = nVN || pj.nameVN;
+    pj.nameJP    = nJP || pj.nameJP;
+    pj.office    = document.getElementById('ap-off').value || pj.office;
+    pj.contact   = (document.getElementById('ap-ct')?.value||'').trim() || pj.contact;
+    pj.mainStaff = (document.getElementById('ap-st')?.value||'') || pj.mainStaff;
+
+    if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
+    D.months[D.activeMonth].projects.push(pj);
+    save(); closeModal(); activePjId=pj.id; renderSidebar(); renderContent();
+
+    const nG = (pj.groups||[]).length;
+    const nR = (pj.groups||[]).reduce((s,g)=>s+(g.rows||[]).length, 0);
+    const nP = (pj.photos||[]).length;
+    toast(`✅ Đã tạo dự án từ ${monthLabel(srcMid)} (${nG} hạng mục · ${nR} dòng · ${nP} ảnh)`, 3500);
+    _sbAuditLog('create', 'projects', pj.id, 'Tải đầy đủ từ ' + srcMid + ': "' + (pj.nameVN || pj.nameJP) + '" (' + nG + ' hạng mục, ' + nR + ' dòng, ' + nP + ' ảnh)');
+    if (_needsApproval()) {
+      _sbQueueChange('Tải dự án từ lịch sử: "' + (pj.nameVN || pj.nameJP) + '" (' + nG + ' hạng mục, ' + nR + ' dòng)',
+        'projects', 'insert', pj.id,
+        { month_id: D.activeMonth, section: 'jp', name_vn: pj.nameVN||'', name_jp: pj.nameJP||'',
+          office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', notes: '', is_carryover: false },
+        { monthId: D.activeMonth });
+    } else {
+      _syncFullLoadedProject(pj, D.activeMonth, src);
+    }
+    window._apFullSource = null;
+    return;
+  }
+
+  // Tìm history để restore ảnh (fallback path — đường cũ)
+  const hist = loadPjFromHistory(nVN, nJP);
   const pj={id:gid(),nameVN:nVN,nameJP:nJP,
     office:document.getElementById('ap-off').value,
     contact:(document.getElementById('ap-ct')?.value||'').trim(),
@@ -6074,6 +6171,94 @@ function loadPjFromHistory(nameVN, nameJP) {
     (nameVN && h.nameJP===nameVN) ||  // tìm chéo
     (nameJP && h.nameVN===nameJP)
   ) || null;
+}
+
+// ── Hybrid history search: D.months (full data) → fallback pj_history (metadata) ──
+function findLatestProjectInD(nameVN, nameJP, section) {
+  section = section || 'jp';
+  if (!nameVN && !nameJP) return null;
+  const mids = Object.keys(D.months||{}).sort().reverse();
+  for (const mid of mids) {
+    const arr = section === 'vn' ? (D.months[mid].projectsVN||[]) : (D.months[mid].projects||[]);
+    for (const p of arr) {
+      if ((nameVN && (p.nameVN === nameVN || p.nameJP === nameVN)) ||
+          (nameJP && (p.nameJP === nameJP || p.nameVN === nameJP))) {
+        return { project: p, monthId: mid };
+      }
+    }
+  }
+  return null;
+}
+
+function cloneProjectFromHistory(srcPj, srcMonthId) {
+  const newId = 'pj_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  const newGroups = (srcPj.groups || []).map(g => ({
+    id: gid(),
+    type: g.type || '',
+    rows: (g.rows || []).map(r => ({
+      id: gid(),
+      staff: r.staff || '',
+      status: r.status || 'new',
+      qty: 0, ot: 0, otNote: '', note: '',
+      dateFrom: '', dateTo: '', upTime: '', doneAt: '', upScore: null,
+      rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,
+      rate6:0,rate7:0,rate8:0,rate9:0,rate10:0,
+      rate11:0,rate12:0,rate13:0,rate14:0,rate15:0,
+    }))
+  }));
+  return {
+    id: newId,
+    nameVN: srcPj.nameVN || '', nameJP: srcPj.nameJP || '',
+    office: srcPj.office || '', contact: srcPj.contact || '',
+    mainStaff: srcPj.mainStaff || '',
+    client: srcPj.client || '', buildingType: srcPj.buildingType || '',
+    scope: srcPj.scope || '', area: srcPj.area || '',
+    groups: newGroups,
+    photos: (srcPj.photos || []).filter(Boolean),
+    otLog: [], notes: '',
+    _historySrcMonthId: srcMonthId,
+  };
+}
+
+async function _syncFullLoadedProject(pj, monthId, srcPj) {
+  if (!window._sbReady) return;
+  window._isSyncing = true;
+  try {
+    await _sbSaveProject(pj, monthId, 'jp');
+    const gRecs = [], rRecs = [];
+    (pj.groups||[]).forEach((g, gi) => {
+      gRecs.push({ id: g.id, project_id: pj.id, type: g.type||'', sort_order: gi });
+      (g.rows||[]).forEach((r, ri) => {
+        rRecs.push({
+          id: r.id, group_id: g.id, sort_order: ri,
+          staff: r.staff || null, status: r.status || 'new',
+          qty: 0, ot: 0,
+        });
+      });
+    });
+    for (let i=0; i<gRecs.length; i+=100) {
+      try { await _sb.from('groups').upsert(gRecs.slice(i, i+100), { onConflict: 'id' }); }
+      catch(e) { console.warn('[FullLoad] groups upsert:', e.message); }
+    }
+    for (let i=0; i<rRecs.length; i+=100) {
+      try { await _sb.from('rows').upsert(rRecs.slice(i, i+100), { onConflict: 'id' }); }
+      catch(e) { console.warn('[FullLoad] rows upsert:', e.message); }
+    }
+    const BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/';
+    const photoRows = [];
+    (srcPj.photos||[]).forEach((url, slot) => {
+      if (!url || typeof url !== 'string' || !url.startsWith(BASE)) return;
+      photoRows.push({ project_id: pj.id, slot: slot, storage_path: url.replace(BASE, ''), month_id: monthId });
+    });
+    if (photoRows.length) {
+      try { await _sb.from('project_photos').upsert(photoRows, { onConflict: 'project_id,slot' }); }
+      catch(e) { console.warn('[FullLoad] project_photos upsert:', e.message); }
+    }
+  } catch(e) {
+    console.warn('[FullLoad] sync failed:', e.message);
+  } finally {
+    window._isSyncing = false;
+  }
 }
 
 async function deletePj(id) {

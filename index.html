@@ -568,9 +568,8 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
   #dashContent .dash-grid.c3 { grid-template-columns: 1fr 1fr !important; }
 }
 
-/* ── Trạng thái "Đã UP / Hoàn thành" — gray đậm + line-through, không opacity ── */
-.is-done, .is-done td, .is-done .gantt-text { color:#6b7280; text-decoration:line-through; font-style:normal; }
-.is-done .keep-color { text-decoration:none; }  /* badge ✓ Đã UP giữ màu xanh */
+/* ── Trạng thái "Đã UP / Hoàn thành" — gray gần đen, KHÔNG opacity, KHÔNG line-through ── */
+.is-done, .is-done td, .is-done .gantt-text { color:#374151; font-style:normal; }
 
 </style>
 </head>
@@ -696,6 +695,11 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
 
 const SK = 'phoicanh_v3';
 const PHOTO_RETENTION_MONTHS = 6;  // giữ ảnh các tháng <= N tháng cũ; xóa cứng tháng cũ hơn
+// ── Style thống nhất cho trạng thái Đã UP / Hoàn thành ──
+const DONE_COLOR        = '#374151';  // text done — gray gần đen
+const DONE_BAR_COLOR    = '#6b7280';  // bar Gantt done — gray đậm
+const GANTT_BAR_H       = 2;          // độ dày bar Gantt (px), thống nhất mọi màu
+const GANTT_TEXT_SCALE  = 1.5;        // hệ số tăng chữ label trên bar
 
 // Phase 2: Load toàn bộ D từ Supabase
 async function sbLoadAll() {
@@ -2153,10 +2157,10 @@ function renderProjectTimeline(pjs) {
     const bg = isToday ? 'rgba(39,174,96,.07)' : isHol ? 'rgba(231,76,60,.04)' : isPrev ? 'rgba(0,0,0,.02)' : 'var(--table-bg)';
     const br = '0';
     const labelHtml = (pos==='start' && label)
-      ? `<div style="position:absolute;top:0;left:2px;font-size:6px;color:${barColor};white-space:nowrap;line-height:1;font-weight:700;z-index:10;pointer-events:none;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff">${label}</div>`
+      ? `<div style="position:absolute;top:0;left:2px;font-size:9px;color:${barColor};white-space:nowrap;line-height:1;font-weight:700;z-index:10;pointer-events:none;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff">${label}</div>`
       : '';
     const bar = barColor
-      ? `<div style="position:absolute;top:50%;transform:translateY(-50%);left:0;right:0;height:3px;background:${barColor};border-radius:${br}"></div>${labelHtml}`
+      ? `<div style="position:absolute;top:50%;transform:translateY(-50%);left:0;right:0;height:${GANTT_BAR_H}px;background:${barColor};border-radius:${br}"></div>${labelHtml}`
       : '';
     const upHtml = (isToday && showUp)
       ? `<div style="position:absolute;top:1px;left:0;right:0;text-align:center;font-size:7px;font-weight:900;color:#e74c3c;line-height:1;z-index:11;text-shadow:0 0 3px #fff,0 0 3px #fff">UP</div>`
@@ -2176,7 +2180,7 @@ function renderProjectTimeline(pjs) {
   const rows = sorted.map((p, pi) => {
     const allGrpRows = (p.groups||[]).filter(g => g.type || (g.rows||[]).some(r=>r.qty>0));
     const allDone = allGrpRows.length>0 && allGrpRows.every(g=>(g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt)) && allGrpRows.some(g=>(g.rows||[]).some(r=>r.dateTo));
-    const rowDim = allDone ? 'color:#6b7280;text-decoration:line-through' : '';
+    const rowDim = allDone ? `color:${DONE_COLOR}` : '';
     // Project-level pending check — dùng cho info panel VN (không phụ thuộc group đầu tiên)
     // Áp dụng cho cả groups từ tlTasks lẫn groups thêm thủ công
     const pjHasPendingUp = (p.groups||[]).some(g =>
@@ -2218,11 +2222,11 @@ function renderProjectTimeline(pjs) {
       const grpAllDone = (g.rows||[]).some(r=>r.dateTo) && (g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt);
       // Có lịch UP chưa done và deadline chưa qua
       const grpHasPendingUp = (g.rows||[]).some(r => r.dateTo >= todayStr && !r.doneAt);
-      // Done state: gray đậm + line-through (không opacity)
-      const grpDoneStyle = grpAllDone ? 'color:#6b7280;text-decoration:line-through;' : '';
+      // Done state: gray đậm (không opacity, không line-through)
+      const grpDoneStyle = grpAllDone ? `color:${DONE_COLOR};` : '';
       // Màu tên hạng mục: khớp với status của row đang pending (mới=xanh, sửa=vàng)
       const pendingRow = (g.rows||[]).find(r=>r.dateTo && !r.doneAt && r.dateTo >= todayStr);
-      const grpNameColor = grpAllDone ? '#6b7280' : grpHasPendingUp
+      const grpNameColor = grpAllDone ? DONE_COLOR : grpHasPendingUp
         ? (isVN
             ? (pendingRow?.status==='new' ? '#7c3aed' : '#db2777')
             : (pendingRow?.status==='new' ? '#5a9a35' : '#d4900a'))
@@ -2255,7 +2259,7 @@ function renderProjectTimeline(pjs) {
           const from = allFroms[0]||'', to = allTos[allTos.length-1]||'';
           const done = (g.rows||[]).every(r=>r.doneAt);
           const pastDeadline = to && to < todayStr;
-          barColor = (done || pastDeadline) ? '#ccc'
+          barColor = (done || pastDeadline) ? DONE_BAR_COLOR
             : isVN ? (activeRow.status==='new'?'#7c3aed':'#db2777')
             :        (activeRow.status==='new'?'#5a9a35':'#d4900a');
 
@@ -2280,13 +2284,13 @@ function renderProjectTimeline(pjs) {
         : '';
       // VN first grpRow: dùng allDone state; JP grp dùng grpAllDone
       const trDoneStyle = (isVN && isFirstGrp)
-        ? (allDone ? 'color:#6b7280;text-decoration:line-through;' : '')
+        ? (allDone ? `color:${DONE_COLOR};` : '')
         : grpDoneStyle;
       return `<tr style="${trDoneStyle}">
         ${vnInfoCell}
         ${!isVN ? `<td style="padding:0 4px 0;border-bottom:${rowBorderB};border-right:${CB};border-left:${CB};background:var(--table-bg)"></td>` : ''}
         <td style="padding:1px 4px 1px;border-bottom:${rowBorderB};border-right:${CB};${isVN?'border-left:'+CB+';':''}background:var(--table-bg);vertical-align:middle">
-          <div style="font-size:7px;color:${grpNameColor};font-weight:${grpNameWeight};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:165px;line-height:1.2;${grpAllDone?'text-decoration:line-through;':''}">${x(g.type||'—')}${grpAllDone?' ✓':''}</div>
+          <div style="font-size:7px;color:${grpNameColor};font-weight:${grpNameWeight};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:165px;line-height:1.2;">${x(g.type||'—')}${grpAllDone?' ✓':''}</div>
         </td>
         <td style="padding:1px 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:8px;font-weight:600;color:#27ae60;background:var(--table-bg);vertical-align:middle">${grpNew||''}</td>
         <td style="padding:1px 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:8px;font-weight:600;color:#e67e22;background:var(--table-bg);vertical-align:middle">${grpRev||''}</td>
@@ -2692,16 +2696,15 @@ function renderMonthGantt(pjs) {
         ? '<span style="font-size:7px;color:#e67e22;font-weight:700;margin-left:2px">⚡Sắp UP</span>'
         : '';
 
-      const textColor = isActuallyDone ? '#6b7280'
+      const textColor = isActuallyDone ? DONE_COLOR
         : isTodayUp ? '#e74c3c'
         : isUrgent  ? '#e67e22'
-        : isDoneByDate ? '#6b7280'
+        : isDoneByDate ? DONE_COLOR
         : 'inherit';
-      const textDeco = (isActuallyDone || isDoneByDate) ? 'line-through' : 'none';
 
       return `<div style="font-size:9px;display:flex;align-items:center;gap:2px;white-space:nowrap;overflow:hidden">
         <span style="font-size:8px;font-weight:800;color:${numColor};flex-shrink:0">[${r.pjNum||'?'}]</span>
-        <span style="overflow:hidden;text-overflow:ellipsis;color:${textColor};text-decoration:${textDeco}">${r.groupName.length>8?r.groupName.substring(0,8)+'…':r.groupName}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;color:${textColor}">${r.groupName.length>8?r.groupName.substring(0,8)+'…':r.groupName}</span>
         ${r.upTime && !isActuallyDone ? `<span style="font-size:7px;color:#c0392b;font-weight:800;background:#fff0f0;border-radius:2px;padding:0 2px;flex-shrink:0">⚡${r.upTime}</span>` : ''}
         ${badge}
       </div>`;
@@ -2751,20 +2754,20 @@ function renderMonthGantt(pjs) {
 
         let inner = '';
         if (active) {
-          const bc = (isActuallyDone||isDoneByDate) ? '#9ca3af'
+          const bc = (isActuallyDone||isDoneByDate) ? DONE_BAR_COLOR
             : r.isVN ? (isNew?'#7c3aed':'#db2777')
             :          (isNew?'#5a9a35':'#d4900a');
           const br = isFirst&&isLast?'2px':isFirst?'2px 0 0 2px':isLast?'0 2px 2px 0':'0';
           const typeName = (r.groupName||'').replace('パース','').replace('作成','').trim();
           // Label: trên cùng dòng, bar ở giữa-dưới, UP ở trên bar
           const labelHtml = isFirst
-            ? `<div style="position:absolute;top:1px;left:2px;font-size:6px;color:${bc};white-space:nowrap;font-weight:700;z-index:10;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff">[${r.pjNum||'?'}] ${typeName}</div>`
+            ? `<div style="position:absolute;top:1px;left:2px;font-size:9px;color:${bc};white-space:nowrap;font-weight:700;z-index:10;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff">[${r.pjNum||'?'}] ${typeName}</div>`
             : '';
           const upHtml = (isToday && isTodayUp)
-            ? `<div style="position:absolute;top:1px;right:2px;font-size:6px;font-weight:900;color:#e74c3c;z-index:11;text-shadow:0 0 3px #fff">UP</div>`
+            ? `<div style="position:absolute;top:1px;right:2px;font-size:9px;font-weight:900;color:#e74c3c;z-index:11;text-shadow:0 0 3px #fff">UP</div>`
             : '';
           // Bar nằm phía dưới dòng, có khoảng cách với chữ
-          inner = `${labelHtml}${upHtml}<div style="position:absolute;bottom:3px;left:0;right:0;height:3px;background:${bc};border-radius:${br}"></div>`;
+          inner = `${labelHtml}${upHtml}<div style="position:absolute;bottom:3px;left:0;right:0;height:${GANTT_BAR_H}px;background:${bc};border-radius:${br}"></div>`;
         }
         return `<div style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_H}px;overflow:visible">${inner}</div>`;
       });
@@ -2773,7 +2776,7 @@ function renderMonthGantt(pjs) {
       if (isOnTrip && tasks.length===0) {
         const tripActive = activeTasks.length===0;
         const tripHtml = tripActive
-          ? `<div style="position:absolute;top:0;left:0;right:0;height:${ROW_H}px;overflow:visible"><div style="position:absolute;top:1px;left:2px;font-size:6px;color:#8e44ad;white-space:nowrap;font-weight:700;z-index:10;text-shadow:0 0 3px #fff">✈</div><div style="position:absolute;bottom:3px;left:0;right:0;height:3px;background:#8e44ad;border-radius:2px"></div></div>`
+          ? `<div style="position:absolute;top:0;left:0;right:0;height:${ROW_H}px;overflow:visible"><div style="position:absolute;top:1px;left:2px;font-size:9px;color:#8e44ad;white-space:nowrap;font-weight:700;z-index:10;text-shadow:0 0 3px #fff">✈</div><div style="position:absolute;bottom:3px;left:0;right:0;height:${GANTT_BAR_H}px;background:#8e44ad;border-radius:2px"></div></div>`
           : '';
         return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible"><div style="height:${cellH}px;position:relative;overflow:visible">${tripHtml}</div></td>`;
       }
@@ -2843,7 +2846,7 @@ function renderMonthGantt(pjs) {
     <span style="display:flex;align-items:center;gap:3px"><span style="width:12px;height:7px;background:#db2777;border-radius:2px;display:inline-block"></span>🇻🇳 Sửa</span>
     <span style="display:flex;align-items:center;gap:3px"><span style="font-size:8px;font-weight:800;color:#e74c3c">🔴</span><span style="color:#e74c3c;font-weight:700">Hôm nay UP</span></span>
     <span style="display:flex;align-items:center;gap:3px"><span style="font-size:8px;color:#e67e22">⚡</span><span style="color:#e67e22;font-weight:700">Sắp UP</span></span>
-    <span style="display:flex;align-items:center;gap:3px"><span style="width:12px;height:7px;background:#adb5bd;border-radius:2px;display:inline-block"></span><span style="color:#888;">Đã UP / Qua ngày</span></span>
+    <span style="display:flex;align-items:center;gap:3px"><span style="width:12px;height:7px;background:#6b7280;border-radius:2px;display:inline-block"></span><span style="color:#888;">Đã UP / Qua ngày</span></span>
     <span style="display:flex;align-items:center;gap:3px"><span style="width:12px;height:7px;background:#8e44ad;border-radius:2px;display:inline-block"></span>✈ Công tác</span>
     <span style="display:flex;align-items:center;gap:3px"><span style="width:12px;height:7px;background:rgba(231,76,60,.2);border:1px solid #e74c3c;border-radius:2px;display:inline-block"></span>Nghỉ phép</span>
     <span style="display:flex;align-items:center;gap:3px"><span style="display:inline-block;font-size:9px">🔴</span>Ngày lễ</span>
@@ -3723,22 +3726,22 @@ function renderProjectTimeline_VN(p) {
     const bc       = SC[t.status]||'#94a3b8';
     const isUpToday= t.upDate===today;
     const isTaskDone = t.status === 'done';
-    const taskDoneStyle = isTaskDone ? 'color:#6b7280;text-decoration:line-through;' : '';
+    const taskDoneStyle = isTaskDone ? `color:${DONE_COLOR};` : '';
     const staffNames=(t.staff||[]).map(s=>staffShortName(s)).join(', ');
     const wds      = startDs&&endDs ? calcWorkDays(startDs,endDs) : 0;
 
     const bx  = dx(startDs);
     const bw2 = dw(startDs, endDs);
-    const barH= t.lv==='group'?5:t.lv==='task'?3:2;
+    const barH= GANTT_BAR_H;
     const barY= 11; // đẩy bar xuống dưới để chữ label ở trên không bị đè
     const progW = bw2>0 ? Math.round(bw2*prog/100) : 0;
 
     const upMarker = t.upDate
       ? `<div style="position:absolute;top:0;left:${dx(t.upDate)}px;width:1.5px;height:20px;background:#e74c3c;border-radius:1px;z-index:2" title="UP: ${t.upDate}"></div>
-         <span style="position:absolute;top:1px;left:${dx(t.upDate)+2}px;font-size:7px;color:#e74c3c;white-space:nowrap;font-weight:600;line-height:1;z-index:3">${t.upDate.slice(5).replace('-','/')}</span>`
+         <span style="position:absolute;top:1px;left:${dx(t.upDate)+2}px;font-size:11px;color:#e74c3c;white-space:nowrap;font-weight:600;line-height:1;z-index:3">${t.upDate.slice(5).replace('-','/')}</span>`
       : '';
     const upLabel = isUpToday
-      ? `<span style="position:absolute;top:1px;left:${dx(t.upDate)+2}px;font-size:7px;font-weight:900;color:#e74c3c;z-index:4;white-space:nowrap">⚡UP</span>`
+      ? `<span style="position:absolute;top:1px;left:${dx(t.upDate)+2}px;font-size:11px;font-weight:900;color:#e74c3c;z-index:4;white-space:nowrap">⚡UP</span>`
       : '';
 
     // Các task con của group: hiện dấu vạch UP của từng task con trên bar group
@@ -3750,7 +3753,7 @@ function renderProjectTimeline_VN(p) {
     const ganttBar = bw2>0 ? `
       <div style="position:absolute;top:${barY}px;left:${bx}px;width:${bw2}px;height:${barH}px;background:${bc};border-radius:3px;opacity:.18"></div>
       <div style="position:absolute;top:${barY}px;left:${bx}px;width:${progW}px;height:${barH}px;background:${bc};border-radius:3px"></div>
-      ${t.lv==='group'?`<span style="position:absolute;top:1px;left:${bx+2}px;font-size:7px;color:${bc};font-weight:700;white-space:nowrap;line-height:1;z-index:2">${startDs.slice(5).replace('-','/')}${bw2>50?' → '+endDs.slice(5).replace('-','/'):''}  </span>`:''}
+      ${t.lv==='group'?`<span style="position:absolute;top:1px;left:${bx+2}px;font-size:11px;color:${bc};font-weight:700;white-space:nowrap;line-height:1;z-index:2">${startDs.slice(5).replace('-','/')}${bw2>50?' → '+endDs.slice(5).replace('-','/'):''}  </span>`:''}
     ` : '';
 
     // Style row
@@ -3781,7 +3784,7 @@ function renderProjectTimeline_VN(p) {
           ${collapseBtn}
           <div style="flex:1;min-width:0">
             <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
-              color:${isTaskDone?'#6b7280':(t.lv==='group'?'#3730A3':'var(--color-text-primary)')};font-size:${t.lv==='group'?'12px':'11px'};${isTaskDone?'text-decoration:line-through;':''}"
+              color:${isTaskDone?DONE_COLOR:(t.lv==='group'?'#3730A3':'var(--color-text-primary)')};font-size:${t.lv==='group'?'12px':'11px'};"
               onclick="openTlTaskModal('${p.id}','${t.id}')" title="${x(t.name)}">${x(t.name)||'—'}</div>
             ${depName?`<div style="font-size:9px;color:#1a5276">↳ sau: ${x(depName)}</div>`:''}
             ${staffNames&&t.lv!=='group'?`<div style="font-size:9px;color:var(--gray4)">${x(staffNames)}</div>`:''}
@@ -4955,8 +4958,8 @@ function renderGroups(p) {
     // Border: xanh khi active, transparent khi xám
     const gBorderColor  = gHasActiveUp ? '#27ae60' : 'transparent';
     const gBorderWidth  = gHasActiveUp ? '3px' : '2px';
-    // Tên hạng mục: khi không có UP active → coi như hoàn thành/cũ, hiện xám + line-through
-    const gDimStyle     = gHasActiveUp ? '' : 'color:#6b7280;text-decoration:line-through;';
+    // Tên hạng mục: khi không có UP active → coi như hoàn thành/cũ, hiện xám đậm
+    const gDimStyle     = gHasActiveUp ? '' : `color:${DONE_COLOR};`;
 
     const rowsHtml = rows.map((r, ri) => {
       const isFirst = ri === 0;
@@ -4965,9 +4968,8 @@ function renderGroups(p) {
       const rActiveUp = !!(r.dateTo) && r.dateTo >= today && !r.doneAt;
       const rIsDone   = !!(r.doneAt);
       const rowBg = rActiveUp ? '#f0fff4' : '#f5f5f5';
-      // Done row: gray đậm + line-through. Stale (no active, no done): chỉ gray. Active: bình thường.
-      const cellDim  = rIsDone ? 'color:#6b7280;text-decoration:line-through;'
-                     : (!rActiveUp ? 'color:#6b7280;' : '');
+      // Done row + stale (no active, no done): gray đậm. Active: bình thường.
+      const cellDim  = (rIsDone || !rActiveUp) ? `color:${DONE_COLOR};` : '';
       const rowStyle = `background:${rowBg};`;
       const isDark = parseInt(gc.bg.slice(1,3),16) < 180;
 
@@ -4990,7 +4992,7 @@ function renderGroups(p) {
           <div style="padding:6px 8px;">
             <input class="tbl-input-dark" list="tl-${p.id}" value="${x(g.type||'')}"
               onchange="updGroup('${p.id}','${g.id}','type',this.value)"
-              style="background:var(--navy);border-color:rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:11px;width:100%${gHasActiveUp?'':';text-decoration:line-through'}"
+              style="background:var(--navy);border-color:rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:11px;width:100%"
               placeholder="外観パース…">
             <datalist id="tl-${p.id}">${D.settings.typeList.map(t=>`<option value="${x(t)}">`).join('')}</datalist>
           </div>
@@ -5263,15 +5265,15 @@ function renderStaffSchedule(p) {
         const isActuallyDone = !!(r.doneAt);
         const isNew = r.status==='new';
         // Màu thanh: xám đậm nếu past staff hoặc đã UP, xanh/vàng nếu active
-        const barColor = (isPastStaff || isActuallyDone) ? '#9ca3af'
+        const barColor = (isPastStaff || isActuallyDone) ? DONE_BAR_COLOR
           : isNew ? '#5a9a35' : '#d4900a';
         const isFirstDay = r.dateFrom===dk;
         const isLastDay  = r.dateTo===dk;
+        // Label phía trên, bar mảnh phía dưới (giống renderProjectTimeline_VN / renderMonthGantt)
         return `<div title="${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
-          style="background:${barColor};height:11px;margin:1px 0;
-          border-radius:${isFirstDay?'3px 0 0 3px':isLastDay?'0 3px 3px 0':'0'};
-          overflow:hidden;font-size:7.5px;color:#fff;white-space:nowrap;padding:0 3px;line-height:11px;font-weight:700">
-          ${isFirstDay?x(r.groupName.substring(0,6)):''}
+          style="position:relative;height:13px;margin:1px 0;overflow:visible">
+          ${isFirstDay?`<div style="position:absolute;top:0;left:1px;font-size:11px;color:${barColor};line-height:1;font-weight:700;white-space:nowrap;z-index:2;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;pointer-events:none">${x(r.groupName.substring(0,6))}</div>`:''}
+          <div style="position:absolute;bottom:0;left:0;right:0;height:${GANTT_BAR_H}px;background:${barColor};border-radius:${isFirstDay?'1px 0 0 1px':isLastDay?'0 1px 1px 0':'0'}"></div>
         </div>`;
       }).join('');
       return `<td style="background:${bg};border-left:${borderL};padding:1px;vertical-align:top">${blocks}</td>`;
@@ -5288,24 +5290,24 @@ function renderStaffSchedule(p) {
         + tasks.map(r=>{
           const overdue = r.dateTo && r.dateTo < todayStr && !r.doneAt;
           const done    = !!(r.doneAt);
-          const dotColor = done ? '#9ca3af' : r.status==='new' ? '#70AD47' : 'var(--gold)';
+          const dotColor = done ? DONE_BAR_COLOR : r.status==='new' ? '#70AD47' : 'var(--gold)';
           return `<div style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden">
             <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;display:inline-block"></span>
-            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?'#6b7280':overdue?'#e74c3c':'inherit'};text-decoration:${done?'line-through':'none'}">${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?DONE_COLOR:overdue?'#e74c3c':'inherit'}">${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
             ${overdue?'<span style="color:#e74c3c;font-weight:700">!</span>':''}
             ${done?'<span style="color:#27ae60;font-size:8px">✓</span>':''}
           </div>`;
         }).join('')
       : `<div style="font-size:9px;color:#aaa;font-style:italic">Không có task</div>`;
 
-    // Name cell: active = sáng; past staff = gray đậm + line-through
+    // Name cell: active = sáng; past staff = gray đậm gần đen
     const nameBg   = isPastStaff ? '#f9f9f9' : 'var(--gray1)';
-    const nameColor= isPastStaff ? '#6b7280' : 'var(--navy)';
-    const rowDoneStyle = isPastStaff ? 'color:#6b7280;text-decoration:line-through;' : '';
+    const nameColor= isPastStaff ? DONE_COLOR : 'var(--navy)';
+    const rowDoneStyle = isPastStaff ? `color:${DONE_COLOR};` : '';
     return `<tr style="border-bottom:1px solid var(--gray2);${rowDoneStyle}">
       <td style="background:${nameBg};padding:5px 8px;min-width:90px;border-right:1px solid var(--gray2);vertical-align:top">
-        <div style="font-weight:700;font-size:11px;color:${nameColor};${isPastStaff?'text-decoration:line-through;':''}">${staff}</div>
-        ${isPastStaff?'<div style="font-size:8px;color:#6b7280">Đã hoàn thành</div>':''}
+        <div style="font-weight:700;font-size:11px;color:${nameColor};">${staff}</div>
+        ${isPastStaff?`<div style="font-size:8px;color:${DONE_COLOR}">Đã hoàn thành</div>`:''}
         ${taskSummary}
       </td>
       ${dayCells}

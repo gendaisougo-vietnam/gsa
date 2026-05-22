@@ -755,13 +755,9 @@ function _rowIsLocked(r) {
   if (!r) return false;
   // 1) Đã UP rõ ràng
   if (r.doneAt) return true;
-  // 2) Carryover từ tháng cũ (flag từ doAddMonth hoặc migration)
-  if (r.fromCarryover) return true;
-  // 3) Data cũ: rate auto-fill (recalcStaffUpKPI sau UP) + KHÔNG có dateTo
-  //    → chắc chắn đã từng UP, không phải row đang chuẩn bị UP.
-  if (r.dateTo) return false;
-  const autoFillRates = ['rate6','rate7','rate8','rate10','rate11'];
-  if (autoFillRates.some(k => (r[k] || 0) > 0)) return true;
+  // 2) Carryover thật từ tháng cũ — yêu cầu có rate14/15 marker (KPI tích lũy sau UP)
+  //    Tránh lock nhầm row mới chưa hoàn chỉnh bị V2/V1 mark sót.
+  if (r.fromCarryover && ((r.rate14 || 0) > 0 || (r.rate15 || 0) > 0)) return true;
   return false;
 }
 
@@ -839,17 +835,31 @@ async function _migrateCarryoverV2() {
   window._migratingV2 = true;
 
   try {
+    // Build set of row IDs tồn tại ở tháng CŨ HƠN tháng active → đây là dấu hiệu doAddMonth-carryover
+    // (doAddMonth giữ nguyên id row khi sang tháng mới qua spread `...r`)
+    const activeMid = D.activeMonth || '';
+    const prevRowIds = new Set();
+    Object.entries(D.months).forEach(([mid, m]) => {
+      if (!activeMid || mid >= activeMid) return;
+      [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
+        (p.groups||[]).forEach(g => {
+          (g.rows||[]).forEach(r => { if (r.id) prevRowIds.add(r.id); });
+        });
+      });
+    });
+
     const toUpdate = [];
     Object.values(D.months).forEach(m => {
       [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
         (p.groups||[]).forEach(g => {
           (g.rows||[]).forEach(r => {
-            if (!r.fromCarryover
-                && r.staff
-                && (r.qty || 0) === 0
-                && !r.doneAt
-                && !r.dateTo
-                && (r.status === 'new' || r.status === 'rev' || !r.status)) {
+            if (r.fromCarryover) return; // đã mark
+            // Row CARRYOVER thật khi:
+            //   (a) có rate14/rate15 > 0 → autofill từ KPI tích lũy (đã UP trước đó)
+            //   (b) id trùng row của tháng cũ hơn → doAddMonth-carryover
+            const hasAutoFill = (r.rate14 || 0) > 0 || (r.rate15 || 0) > 0;
+            const isPrevClone = r.id && prevRowIds.has(r.id);
+            if (hasAutoFill || isPrevClone) {
               r.fromCarryover = true;
               toUpdate.push(r.id);
             }
@@ -1807,6 +1817,45 @@ function _normalizeDateTime(dt) {
   if (s.length >= 19) return s.slice(0, 19);  // "YYYY-MM-DDTHH:MM:SS" (+ optional fractional/timezone)
   return s;
 }
+
+// ── Storage upload/remove via fetch native (bypass SDK bug với publishable key) ──
+// SDK 2.106.1 + sb_publishable_* không gửi Authorization+apikey trong Storage client → 403 RLS.
+async function _sbStorageUpload(bucket, path, blob, options) {
+  const opts = options || {};
+  const url = `${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`;
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Content-Type': opts.contentType || (blob && blob.type) || 'application/octet-stream',
+    'x-upsert': opts.upsert ? 'true' : 'false'
+  };
+  try {
+    const res = await fetch(url, { method: 'POST', headers, body: blob });
+    if (!res.ok) {
+      const errText = await res.text();
+      return { data: null, error: { message: errText, status: res.status } };
+    }
+    return { data: await res.json(), error: null };
+  } catch(e) {
+    return { data: null, error: { message: e.message } };
+  }
+}
+
+async function _sbStorageRemove(bucket, paths) {
+  const url = `${SUPABASE_URL}/storage/v1/object/${bucket}`;
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Content-Type': 'application/json'
+  };
+  try {
+    const res = await fetch(url, { method: 'DELETE', headers, body: JSON.stringify({ prefixes: paths }) });
+    if (!res.ok) return { data: null, error: { message: await res.text() } };
+    return { data: await res.json(), error: null };
+  } catch(e) {
+    return { data: null, error: { message: e.message } };
+  }
+}
 function totalNew(p) {
   const a=(p.records||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
   const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new'&&_rowQtyCountable(r)).reduce((s,r)=>s+(r.qty||0),0);
@@ -1940,7 +1989,7 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
     try {
       var dlRes = await _sb.storage.from('project-photos').download(srcPath);
       if (dlRes.error || !dlRes.data) continue;
-      var upRes = await _sb.storage.from('project-photos').upload(dstPath, dlRes.data, { contentType: 'image/jpeg', upsert: true });
+      var upRes = await _sbStorageUpload('project-photos', dstPath, dlRes.data, { contentType: 'image/jpeg', upsert: true });
       if (!upRes.error) {
         await _sb.from('project_photos').upsert(
           { project_id: pair.newId, slot: 0, storage_path: dstPath, month_id: newMid },
@@ -1974,13 +2023,13 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
       for (var s = 0; s < 6; s++) paths.push(mid + '/' + pjId + '/slot_' + s + '.jpg');
       var _hadFiles = false;
       try {
-        var _rmRes = await _sb.storage.from('project-photos').remove(paths);
+        var _rmRes = await _sbStorageRemove('project-photos', paths);
         if (_rmRes && Array.isArray(_rmRes.data) && _rmRes.data.length) {
           _delFileCount += _rmRes.data.length;
           _hadFiles = true;
         }
-      } catch(e) {}
-      try { await _sb.from('project_photos').delete().eq('project_id', pjId); } catch(e) {}
+      } catch(e) { console.warn('[copyPhotos] remove failed:', pjId, e.message); }
+      try { await _sb.from('project_photos').delete().eq('project_id', pjId); } catch(e) { console.warn('[copyPhotos] project_photos delete failed:', pjId, e.message); }
       if (_hadFiles) _delPjCount++;
     }
   }
@@ -4303,7 +4352,7 @@ function uploadPhoto(pjId, slot, input) {
             for (var j = 0; j < raw.length; j++) buf[j] = raw.charCodeAt(j);
             var _upMid = getMonthForPj(pjId);
             var sp = _upMid + '/' + pjId + '/slot_' + slot + '.jpg';
-            var upRes = await _sb.storage.from('project-photos').upload(sp, buf.buffer, { contentType: 'image/jpeg', upsert: true });
+            var upRes = await _sbStorageUpload('project-photos', sp, buf.buffer, { contentType: 'image/jpeg', upsert: true });
             if (!upRes.error) {
               await _sb.from('project_photos').upsert({ project_id: pjId, slot: slot, storage_path: sp, month_id: _upMid }, { onConflict: 'project_id,slot' });
               if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
@@ -4313,6 +4362,9 @@ function uploadPhoto(pjId, slot, input) {
               // Thay base64 trong D bằng URL thực để localStorage không chứa base64 lớn
               var _pRef = getPj(pjId);
               if (_pRef) { if (!_pRef.photos) _pRef.photos = []; _pRef.photos[slot] = _newUrl; persistD(); }
+            } else {
+              console.error('[Photo] Storage upload fail:', upRes.error);
+              try { toast('⚠ Ảnh chưa lên cloud: ' + (upRes.error.message || 'unknown'), 5000); } catch(e) {}
             }
           } catch(e) { console.warn('[Photo] Storage upload failed:', e.message); }
         })();
@@ -4332,7 +4384,7 @@ function delPhoto(pjId,slot) {
         var _BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/';
         var _cached = window._sbPhotosByProjectId && window._sbPhotosByProjectId[pjId] && window._sbPhotosByProjectId[pjId][slot];
         var sp = (_cached && _cached.startsWith(_BASE)) ? _cached.slice(_BASE.length) : (getMonthForPj(pjId) + '/' + pjId + '/slot_' + slot + '.jpg');
-        await _sb.storage.from('project-photos').remove([sp]);
+        await _sbStorageRemove('project-photos', [sp]);
         await _sb.from('project_photos').delete().eq('project_id', pjId).eq('slot', slot);
         if (window._sbPhotosByProjectId && window._sbPhotosByProjectId[pjId]) delete window._sbPhotosByProjectId[pjId][slot];
       } catch(e) { console.warn('[Photo] Storage delete failed:', e.message); }

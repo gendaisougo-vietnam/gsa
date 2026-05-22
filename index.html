@@ -1778,6 +1778,25 @@ function getPjGlobal(id) {
 function _rowQtyCountable(r) {
   return !r.fromCarryover || !!r.doneAt;
 }
+
+// ── Chuẩn hóa upTime/datetime cho Postgres timestamp ──
+// upTime có thể là "HH:MM" (từ input type=time) hoặc "HH:MM:SS" (từ Supabase column time).
+// Trả về luôn "HH:MM:SS" — không bao giờ append :00 hai lần.
+function _normalizeTime(t) {
+  if (!t) return '00:00:00';
+  const parts = String(t).split(':');
+  if (parts.length === 2) return t + ':00';
+  if (parts.length === 3) return t;
+  return '00:00:00';
+}
+// Chuẩn hóa "YYYY-MM-DDTHH:MM" hoặc "YYYY-MM-DDTHH:MM:SS" → luôn "YYYY-MM-DDTHH:MM:SS"
+function _normalizeDateTime(dt) {
+  if (!dt) return '';
+  const s = String(dt);
+  if (s.length === 16) return s + ':00';      // "YYYY-MM-DDTHH:MM"
+  if (s.length >= 19) return s.slice(0, 19);  // "YYYY-MM-DDTHH:MM:SS" (+ optional fractional/timezone)
+  return s;
+}
 function totalNew(p) {
   const a=(p.records||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
   const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new'&&_rowQtyCountable(r)).reduce((s,r)=>s+(r.qty||0),0);
@@ -5149,21 +5168,21 @@ function _upConfirm(pjId, gId, rowId, mode, daysLate) {
   if (!dateTo) { toast('Cần có deadline trước khi chọn SỚM/ĐÚNG GIỜ/MUỘN'); return; }
 
   const pad = n => String(n).padStart(2,'0');
-  const tStr = r.upTime || '12:00';
+  const tStr = _normalizeTime(r.upTime || '12:00');
   let doneAt, upScore;
 
   if (mode === 'early') {
     const d = new Date(dateTo);
     d.setDate(d.getDate() - 1);
-    doneAt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${tStr}:00`;
+    doneAt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${tStr}`;
     upScore = 10;
   } else if (mode === 'on_time') {
-    doneAt = `${dateTo}T${tStr}:00`;
+    doneAt = `${dateTo}T${tStr}`;
     upScore = 8;
   } else if (mode === 'late') {
     const d = new Date(dateTo);
     d.setDate(d.getDate() + (daysLate || 1));
-    doneAt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${tStr}:00`;
+    doneAt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${tStr}`;
     upScore = calcUpScore(doneAt, dateTo, r.upTime||'');
   } else {
     return;
@@ -5185,7 +5204,7 @@ function _upConfirmCustom(pjId, gId, rowId) {
   const r = (g.rows||[]).find(rw => rw.id === rowId);
   if (!r) return;
 
-  const doneAt = v + ':00';
+  const doneAt = _normalizeDateTime(v);
   const upScore = calcUpScore(doneAt, r.dateTo, r.upTime || '');
   closeModal();
   markRowDone(pjId, gId, rowId, doneAt, upScore);

@@ -19,10 +19,20 @@
 <!-- Supabase SDK — Phase 0 migration -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
+  const SUPABASE_URL = 'https://kefwrfxeneropihedght.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable__B9f2R2Y1JMsvQ2NkmTU9Q_T8f4McGZ';
   const _sb = supabase.createClient(
-    'https://kefwrfxeneropihedght.supabase.co',
-    'sb_publishable__B9f2R2Y1JMsvQ2NkmTU9Q_T8f4McGZ',
-    { auth: { persistSession: false, autoRefreshToken: false } }
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'apikey': SUPABASE_KEY
+        }
+      }
+    }
   )
   window._sbReady = true
 </script>

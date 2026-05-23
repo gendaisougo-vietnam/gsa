@@ -7,12 +7,35 @@ set -e  # Thoát ngay nếu có lỗi
 cd "$(dirname "$0")"
 
 # ── Pull code mới nhất từ GitHub trước khi deploy ──
-# Để tránh conflict khi làm việc trên nhiều máy (Mac + Windows)
+# Tự stash thay đổi local → pull → pop. Cross-machine an toàn.
 echo "🔄 Đang pull code mới nhất từ GitHub..."
+
+HAS_CHANGES=0
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  HAS_CHANGES=1
+  echo "   Có thay đổi local — tạm stash..."
+  git stash push -u -m "deploy.sh auto-stash $(date '+%H:%M:%S')" || {
+    echo "❌ Stash fail. Dừng deploy."
+    exit 1
+  }
+fi
+
 if ! git pull --rebase; then
-  echo "❌ Pull fail — có thể có conflict. Dừng deploy."
-  echo "   Anh chạy: git status để xem chi tiết."
+  echo "❌ Pull fail — có thể có conflict."
+  if [ $HAS_CHANGES -eq 1 ]; then
+    echo "   Đang restore stash..."
+    git stash pop || echo "   ⚠️  Stash pop fail — chạy 'git stash list' để check."
+  fi
   exit 1
+fi
+
+if [ $HAS_CHANGES -eq 1 ]; then
+  echo "   Restore thay đổi local..."
+  if ! git stash pop; then
+    echo "❌ Stash pop fail — có conflict với code vừa pull."
+    echo "   Chạy: git status + git stash list để xử lý."
+    exit 1
+  fi
 fi
 echo ""
 

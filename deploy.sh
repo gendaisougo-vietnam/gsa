@@ -6,6 +6,16 @@ set -e  # Thoát ngay nếu có lỗi
 
 cd "$(dirname "$0")"
 
+# ── Pull code mới nhất từ GitHub trước khi deploy ──
+# Để tránh conflict khi làm việc trên nhiều máy (Mac + Windows)
+echo "🔄 Đang pull code mới nhất từ GitHub..."
+if ! git pull --rebase; then
+  echo "❌ Pull fail — có thể có conflict. Dừng deploy."
+  echo "   Anh chạy: git status để xem chi tiết."
+  exit 1
+fi
+echo ""
+
 echo "🔍 Đang chạy syntax check..."
 python3 check_syntax3.py || { echo "❌ Syntax check fail. Dừng deploy."; exit 1; }
 

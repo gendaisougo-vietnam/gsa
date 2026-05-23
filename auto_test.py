@@ -4,10 +4,12 @@ auto_test.py — Kiểm tra index.html sau mỗi phase migration
 Chạy: python auto_test.py
 """
 
-import re, sys, time
+import os, re, sys, time
 import esprima
 
-PATH = r"E:\Dropbox\Bảng kết quả (Selective Sync Conflict)\index.html"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+INDEX_PATH = os.path.join(SCRIPT_DIR, 'index.html')
+PATH = INDEX_PATH
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -151,8 +153,7 @@ check_warn(
 # ─────────────────────────────────────────────────────────────
 # TEST 4 — Backup file nguyen ven
 # ─────────────────────────────────────────────────────────────
-import os
-BACKUP_PATH = r"E:\Dropbox\Bảng kết quả (Selective Sync Conflict)\index_backup_20260429.html"
+BACKUP_PATH = os.path.join(SCRIPT_DIR, 'index_backup_20260429.html')
 BACKUP_EXPECTED_SIZE = 788202
 
 backup_ok = False
@@ -286,8 +287,8 @@ photo_checks = {
     "_pjIdMap capture"         : "_pjIdMap.push" in html and "prevId: p.id" in html,
     "copy slot_0 only"         : "slot_0.jpg" in html and "download(srcPath)" in html,
     "cleanup >2 months"        : "(nY - mY) * 12 + (nM - mM) <= 2" in html,
-    "PHOTO_MIGRATION.sql"      : os.path.exists(r"E:\Dropbox\Bảng kết quả (Selective Sync Conflict)\PHOTO_MIGRATION.sql"),
-    "migrate_photos.js"        : os.path.exists(r"E:\Dropbox\Bảng kết quả (Selective Sync Conflict)\migrate_photos.js"),
+    "PHOTO_MIGRATION.sql"      : os.path.exists(os.path.join(SCRIPT_DIR, 'PHOTO_MIGRATION.sql')),
+    "migrate_photos.js"        : os.path.exists(os.path.join(SCRIPT_DIR, 'migrate_photos.js')),
 }
 
 photo_done    = [k for k, v in photo_checks.items() if v]

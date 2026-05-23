@@ -3181,13 +3181,16 @@ function saveTlTask(pjId, task, insertAfterTaskId) {
 // ── Supabase upsert cho 1 tl_task (fire-and-forget với verify log) ───────
 function _sbUpsertTlTask(pjId, task) {
   if (!window._sbReady) return;
+  var p = getPjGlobal(pjId) || getPj(pjId);
+  var idx = (p && p.tlTasks) ? p.tlTasks.findIndex(function(t){ return t.id === task.id; }) : -1;
   var rec = {
     id:task.id, project_id:pjId, lv:task.lv||'task', name:task.name||'',
     start_date:task.start||null, end_date:task.end||null,
     up_date:task.upDate||null, actual_date:task.actual||null,
     content:task.content||'', progress:task.progress||0,
     status:task.status||'', dep:task.dep||'',
-    staff:task.staff||[], note:task.note||'', parent_group:task.parentGroup||null
+    staff:task.staff||[], note:task.note||'', parent_group:task.parentGroup||null,
+    sort_order: idx >= 0 ? idx : 0
   };
   console.log('[tl upsert] →', task.name, '| dep:', task.dep||'(none)', '| start:', task.start, '| end:', task.end, '| rec:', rec);
   _sb.from('tl_tasks').upsert(rec, { onConflict:'id' })
@@ -3204,6 +3207,40 @@ function _sbUpsertTlTask(pjId, task) {
       else if (v && v.error) console.warn('[tl verify] error:', v.error.message);
     })
     .catch(function(e) { console.warn('[tl upsert] exception:', task.name, e.message); });
+}
+
+async function _sbResyncAllTlTaskOrder(pjId) {
+  if (!window._sbReady) return;
+  var p = getPjGlobal(pjId) || getPj(pjId);
+  if (!p || !p.tlTasks || !p.tlTasks.length) return;
+
+  var batch = p.tlTasks.map(function(t, idx) {
+    return {
+      id: t.id,
+      project_id: pjId,
+      lv: t.lv || 'task',
+      name: t.name || '',
+      start_date: t.start || null,
+      end_date: t.end || null,
+      up_date: t.upDate || null,
+      actual_date: t.actual || null,
+      content: t.content || '',
+      progress: t.progress || 0,
+      status: t.status || '',
+      dep: t.dep || '',
+      staff: t.staff || [],
+      note: t.note || '',
+      parent_group: t.parentGroup || null,
+      sort_order: idx
+    };
+  });
+
+  try {
+    await _sb.from('tl_tasks').upsert(batch, { onConflict: 'id' });
+    console.log('[tl resync] OK ' + batch.length + ' tasks for project ' + pjId);
+  } catch(e) {
+    console.warn('[tl resync] FAIL:', e.message);
+  }
 }
 
 function insertTlTaskAfter(pjId, afterTaskId) {
@@ -3256,6 +3293,8 @@ function deleteTlTask(pjId, taskId) {
     });
     relinkTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
     cascadedTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
+    // Re-sync order sau khi delete — tránh tie sort_order
+    _sbResyncAllTlTaskOrder(pjId);
   }
   try { renderContent(); } catch(e) {}
   _refreshOverviewParts();
@@ -3611,6 +3650,8 @@ function confirmSaveTlTask(pjId, taskId) {
   _sbUpsertTlTask(pjId, task);
   cascadedTasks.forEach(function(dep) { _sbUpsertTlTask(pjId, dep); });
   relinkTasks.forEach(function(t) { _sbUpsertTlTask(pjId, t); });
+  // Re-sync order sau khi insert/relink — tránh tie sort_order
+  _sbResyncAllTlTaskOrder(pjId);
 
   closeModal();
   try { renderContent(); } catch(e) {}

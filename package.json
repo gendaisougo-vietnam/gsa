@@ -1,0 +1,13 @@
+{
+  "name": "phoicanh-migrate",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Migration script: localStorage → Supabase",
+  "main": "migrate_to_supabase.js",
+  "scripts": {
+    "migrate": "node migrate_to_supabase.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.1"
+  }
+}

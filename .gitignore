@@ -22,3 +22,20 @@ diag_*.mjs
 
 # Lock files
 package-lock.json
+
+# Pre-rollback / emergency snapshots (data + html backups)
+BACKUP_PRE_ROLLBACK_*.json
+EMERGENCY_BACKUP_*.json
+*.before_rollback.html
+index_backup_*.html
+index1.html
+
+# Office binaries
+*.docx
+
+# Local Claude Code config
+.claude/settings.local.json
+
+# Project reference photos (large binaries)
+/Anh Phối Cảnh/
+

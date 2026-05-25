@@ -13,7 +13,9 @@ if errorlevel 1 set NEED_STASH=1
 
 if "%NEED_STASH%"=="1" (
   echo    Co thay doi local — tam stash...
-  git stash push -u -m "deploy.bat auto-stash"
+  REM No -u: -u would stash deploy.bat itself when untracked,
+  REM causing cmd.exe to lose the script mid-execution.
+  git stash push -m "deploy.bat auto-stash"
   if errorlevel 1 (
     echo ❌ Stash fail. Dung deploy.
     exit /b 1

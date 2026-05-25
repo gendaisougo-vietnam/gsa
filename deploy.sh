@@ -14,7 +14,9 @@ HAS_CHANGES=0
 if ! git diff --quiet || ! git diff --cached --quiet; then
   HAS_CHANGES=1
   echo "   Có thay đổi local — tạm stash..."
-  git stash push -u -m "deploy.sh auto-stash $(date '+%H:%M:%S')" || {
+  # No -u: stashing untracked files breaks cmd.exe on Windows when deploy.bat
+  # itself is untracked; keep both scripts symmetric and stash tracked only.
+  git stash push -m "deploy.sh auto-stash $(date '+%H:%M:%S')" || {
     echo "❌ Stash fail. Dừng deploy."
     exit 1
   }

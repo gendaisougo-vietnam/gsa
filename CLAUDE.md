@@ -189,7 +189,43 @@ try {
 
 ---
 
-## 4. Thứ tự thực hiện
+## 4. ⚙️ QUY TẮC CHỌN MODEL & EFFORT
+
+**Áp dụng cho mọi prompt từ user (anh Tuấn) gửi qua Claude trên web.**
+
+### Quy tắc cơ bản
+
+1. Mỗi prompt từ Claude trên web sẽ ghi rõ ở header:
+   - Model: `Sonnet 4.6` hoặc `Opus 4.7`
+   - Effort: `medium` / `high` / `xhigh`
+2. Trước khi chạy, user sẽ gõ `/model` và `/effort` để khớp cấu hình.
+3. Nếu prompt KHÔNG ghi rõ, dùng mặc định: **Opus 4.7 + high**.
+
+### Bảng phân loại độ phức tạp
+
+| Mức | Model + Effort | Khi nào |
+|-----|----------------|---------|
+| 🟢 Rất đơn giản | Sonnet 4.6 + medium | Đổi text, đổi màu, sửa typo, thêm/xóa 1 dòng độc lập |
+| 🟢 Đơn giản | Sonnet 4.6 + high | Fix bug 1 hàm độc lập, thêm UI nhỏ, thêm 1 nút |
+| 🟡 Trung bình | Opus 4.7 + medium | Fix bug đụng 2-3 hàm liên quan, thêm tính năng có state nhỏ |
+| 🟠 Phức tạp | Opus 4.7 + high | Tính năng đụng nhiều module, sync logic, có rủi ro phá tính năng cũ |
+| 🔴 Cực phức tạp | Opus 4.7 + xhigh | Refactor lớn, thiết kế kiến trúc mới, task chiến lược |
+
+### Khi session mới
+
+- Mặc định mở Claude Code sẽ ở model/effort cũ của lần trước.
+- Đọc header của prompt đầu tiên, gõ `/model` + `/effort` cho đúng.
+- Không tự ý đổi model/effort khi đang xử lý task — chỉ đổi khi user yêu cầu hoặc bắt đầu task mới.
+
+### Lý do quy tắc này
+
+- Tiết kiệm chi phí (Sonnet medium rẻ gấp 15 lần Opus xhigh).
+- Đảm bảo task phức tạp có đủ "sức mạnh suy luận".
+- Tránh dùng model quá yếu cho task có rủi ro phá tính năng cũ.
+
+---
+
+## 5. Thứ tự thực hiện
 
 Thực hiện theo đúng thứ tự Phase 0 → 6. KHÔNG bỏ qua phase.
 KHÔNG thực hiện Phase 7, 8, 9 trừ khi được yêu cầu rõ ràng.
@@ -561,7 +597,7 @@ if (window._sbReady) {
 
 ---
 
-## 5. Sau mỗi phase: tạo file PHASE_X_DONE.md
+## 6. Sau mỗi phase: tạo file PHASE_X_DONE.md
 
 Sau khi hoàn thành và verify xong một phase, tạo file:
 `PHASE_X_DONE.md` (X = số phase: 0, 1, 2, ...)
@@ -589,7 +625,7 @@ Nội dung bắt buộc:
 
 ---
 
-## 6. Xử lý lỗi: ERRORS.md
+## 7. Xử lý lỗi: ERRORS.md
 
 Nếu gặp bất kỳ lỗi nào KHÔNG tự xử lý được, thực hiện 3 bước sau rồi DỪNG:
 
@@ -621,7 +657,7 @@ Thông báo cho người dùng nội dung của `ERRORS.md`.
 
 ---
 
-## 7. Checklist trước khi bắt đầu mỗi phase
+## 8. Checklist trước khi bắt đầu mỗi phase
 
 Trước khi bắt đầu Phase X, kiểm tra:
 
@@ -633,7 +669,7 @@ Trước khi bắt đầu Phase X, kiểm tra:
 
 ---
 
-## 8. Files trong thư mục
+## 9. Files trong thư mục
 
 ```
 index.html                    ← FILE CHÍNH — đang sửa
@@ -652,7 +688,7 @@ CLAUDE.md                     ← File này
 
 ---
 
-## 9. Lệnh thường dùng
+## 10. Lệnh thường dùng
 
 ```bash
 # Kiểm tra syntax JS sau khi sửa index.html
@@ -670,7 +706,7 @@ python --version
 
 ---
 
-## 10. Những điều KHÔNG được làm
+## 11. Những điều KHÔNG được làm
 
 1. **Không sửa `index_backup_20260429.html`** — bất kỳ lý do gì
 2. **Không xóa bất kỳ function nào** trong Phase 0-6

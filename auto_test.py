@@ -286,7 +286,7 @@ photo_checks = {
     "delPhoto smart path"      : "_cached.startsWith(_BASE)" in html,
     "_pjIdMap capture"         : "_pjIdMap.push" in html and "prevId: p.id" in html,
     "copy slot_0 only"         : "slot_0.jpg" in html and "download(srcPath)" in html,
-    "cleanup >2 months"        : "(nY - mY) * 12 + (nM - mM) <= 2" in html,
+    "cleanup retention"        : "(nY - mY) * 12 + (nM - mM) <= PHOTO_RETENTION_MONTHS" in html and "const PHOTO_RETENTION_MONTHS" in html,
     "PHOTO_MIGRATION.sql"      : os.path.exists(os.path.join(SCRIPT_DIR, 'PHOTO_MIGRATION.sql')),
     "migrate_photos.js"        : os.path.exists(os.path.join(SCRIPT_DIR, 'migrate_photos.js')),
 }

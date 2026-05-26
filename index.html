@@ -4408,7 +4408,7 @@ function uploadPhoto(pjId, slot, input) {
               await _sb.from('project_photos').upsert({ project_id: pjId, slot: slot, storage_path: sp, month_id: _upMid }, { onConflict: 'project_id,slot' });
               if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
               if (!window._sbPhotosByProjectId[pjId]) window._sbPhotosByProjectId[pjId] = {};
-              var _newUrl = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/' + sp;
+              var _newUrl = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/' + sp + '?v=' + Date.now();
               window._sbPhotosByProjectId[pjId][slot] = _newUrl;
               // Thay base64 trong D bằng URL thực để localStorage không chứa base64 lớn
               var _pRef = getPj(pjId);
@@ -4424,7 +4424,7 @@ function uploadPhoto(pjId, slot, input) {
 }
 function delPhoto(pjId,slot) {
   const p=getPj(pjId); if(!p||!p.photos) return;
-  p.photos[slot]=null; p.photos=p.photos.filter((_,i)=>i!==slot); save();
+  p.photos[slot]=null; save();
   const g=document.getElementById(`photoGrid-${pjId}`); if(g) g.innerHTML=renderPhotoSlots(p);
   if (window._sbReady) {
     (async function() {

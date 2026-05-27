@@ -960,6 +960,7 @@ async function sbLoadAll() {
       role: s.role, salaryGross: s.salary_gross, salaryNet: s.salary_net,
       contractEnd: s.contract_end || '', order: s.sort_order,
       status: s.status || 'active', leaveDate: s.leave_date || '',
+      avatarUrl: s.avatar_url || '',
       leaves: [], lateLog: [], trips: [],
     };
   }
@@ -1193,7 +1194,7 @@ async function sbPushAll() {
   });
   for (var _btl=0; _btl<_tlRecs.length; _btl+=100) { try { await _sb.from('tl_tasks').upsert(_tlRecs.slice(_btl,_btl+100), {onConflict:'id'}); } catch(e) { _errs.push('tl_tasks@'+_btl+': '+e.message); } }
   // 5. Staff profiles
-  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||null, sort_order:prof.order||0, status:prof.status||'active', leave_date:prof.leaveDate||null }; });
+  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||null, sort_order:prof.order||0, status:prof.status||'active', leave_date:prof.leaveDate||null, avatar_url:prof.avatarUrl||null }; });
   if (_stRecs.length) try { await _sb.from('staff').upsert(_stRecs, {onConflict:'full_name'}); } catch(e) { _errs.push('staff: '+e.message); }
   if (_errs.length) console.warn('[sbPushAll] lỗi:', _errs);
   return _errs;
@@ -7374,7 +7375,7 @@ function renderContractBlock(staffName, prof, todayStr) {
 
 function getStaffProfile(name) {
   if (!D.settings.staffProfiles) D.settings.staffProfiles = {};
-  if (!D.settings.staffProfiles[name]) D.settings.staffProfiles[name] = {role:'',salaryGross:0,salaryNet:0,leaves:[],order:99,contractEnd:'',status:'active',leaveDate:''};
+  if (!D.settings.staffProfiles[name]) D.settings.staffProfiles[name] = {role:'',salaryGross:0,salaryNet:0,leaves:[],order:99,contractEnd:'',status:'active',leaveDate:'',avatarUrl:''};
   // Auto-set Management role và order=0 cho Management トゥアン
   if (name === 'Management トゥアン') {
     const p = D.settings.staffProfiles[name];
@@ -7442,6 +7443,33 @@ function getStaffAvatarColor(name) {
   if (name.startsWith('SGN'))        return {bg:'#E1F5EE', border:'#9FE1CB', text:'#0F6E56'};
   if (name.startsWith('HAN'))        return {bg:'#EEEDFE', border:'#CECBF6', text:'#3C3489'};
   return {bg:'#F1EFE8', border:'#D3D1C7', text:'#444441'};
+}
+
+// Phase B: render avatar — ảnh nếu có avatarUrl, fallback chữ cái
+function renderAvatarHtml(name, size) {
+  size = size || 64;
+  var prof = getStaffProfile(name);
+  var avt = getStaffAvatarColor(name);
+  var initial = getStaffInitial(name);
+  var url = prof.avatarUrl || '';
+  var fontPx = Math.round(size * 0.4);
+
+  if (url) {
+    // onerror fallback nếu URL lỗi/404 → thay <img> bằng chữ cái
+    var fallback = '<div style=&quot;width:100%;height:100%;border-radius:50%;background:' + avt.bg + ';border:3px solid ' + avt.border + ';display:flex;align-items:center;justify-content:center;font-size:' + fontPx + 'px;font-weight:500;color:' + avt.text + ';&quot;>' + initial + '</div>';
+    return '<div style="position:relative; width:' + size + 'px; height:' + size + 'px; flex-shrink:0;">' +
+      '<img src="' + url + '" alt="' + x(name) + '" ' +
+           'style="width:100%; height:100%; border-radius:50%; object-fit:cover; border:3px solid ' + avt.border + ';" ' +
+           "onerror=\"this.outerHTML='" + fallback + "'\">" +
+      '</div>';
+  }
+  // Fallback chữ cái
+  return '<div style="width:' + size + 'px; height:' + size + 'px; border-radius:50%; ' +
+         'background:' + avt.bg + '; border:3px solid ' + avt.border + '; ' +
+         'display:flex; align-items:center; justify-content:center; flex-shrink:0; ' +
+         'font-size:' + fontPx + 'px; font-weight:500; color:' + avt.text + ';">' +
+         initial +
+         '</div>';
 }
 
 function staffShortName(fullName) {
@@ -8511,7 +8539,7 @@ async function saveStaffProfile(name, field, val) {
   const COL_STAFF = {
     role:'role', salaryGross:'salary_gross', salaryNet:'salary_net',
     contractEnd:'contract_end', order:'sort_order',
-    status:'status', leaveDate:'leave_date'
+    status:'status', leaveDate:'leave_date', avatarUrl:'avatar_url'
   };
   const col = COL_STAFF[field];
   if (col && window._sbReady) {
@@ -9010,7 +9038,7 @@ function renderStaffPage() {
 
         <!-- Header: avatar 128px LEFT + (name/role/badges TRÊN, buttons DƯỚI) RIGHT -->
         <div style="padding:16px; display:flex; gap:16px; align-items:stretch;">
-          <div style="width:128px; height:128px; border-radius:50%; background:${_avt.bg}; border:3px solid ${_avt.border}; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:48px; font-weight:500; color:${_avt.text};">${_ini}</div>
+          ${renderAvatarHtml(s, 128)}
           <div style="flex:1; min-width:0; display:flex; flex-direction:column; justify-content:space-between;">
             <div>
               <div style="font-size:20px; font-weight:500; color:#111827; line-height:1.2; margin-bottom:6px; word-break:break-word;">${x(s)}</div>
@@ -9890,6 +9918,97 @@ function closeModal() { document.getElementById('activeModal')?.remove(); }
 
 /* Staff Feature Step 4: Leaving modal handlers */
 /* Staff Feature Step 7: tab switching + restore staff */
+/* Phase B: Staff avatar upload/delete handlers */
+async function uploadStaffAvatar(name, input) {
+  if (!input || !input.files || !input.files[0]) return;
+  if (!window._sbReady) {
+    toast('⚠ Chưa kết nối Supabase, không upload được', 3000);
+    return;
+  }
+
+  var file = input.files[0];
+  if (file.size > 5 * 1024 * 1024) {
+    toast('⚠ Ảnh quá lớn (>5MB), vui lòng chọn ảnh nhỏ hơn', 3000);
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = async function() {
+      // Crop center-square + resize 256×256, JPEG quality 0.85
+      var size = 256;
+      var cv = document.createElement('canvas');
+      cv.width = size; cv.height = size;
+      var ctx = cv.getContext('2d');
+      var src = Math.min(img.width, img.height);
+      var sx = (img.width - src) / 2;
+      var sy = (img.height - src) / 2;
+      ctx.drawImage(img, sx, sy, src, src, 0, 0, size, size);
+
+      var compressed = cv.toDataURL('image/jpeg', 0.85);
+      var b64 = compressed.replace(/^data:image\/\w+;base64,/, '');
+      var raw = atob(b64);
+      var buf = new Uint8Array(raw.length);
+      for (var j = 0; j < raw.length; j++) buf[j] = raw.charCodeAt(j);
+
+      // Safe path: base64-encode tên (Nhật-Việt) → ASCII only
+      var safeName = btoa(unescape(encodeURIComponent(name))).replace(/[^a-zA-Z0-9]/g, '');
+      var sp = safeName + '.jpg';
+
+      try {
+        var upRes = await _sb.storage.from('staff-avatars').upload(sp, buf.buffer, {
+          contentType: 'image/jpeg',
+          upsert: true
+        });
+        if (upRes.error) {
+          _sbReport('uploadAvatar', upRes.error, {op:'upload', table:'staff-avatars'});
+          return;
+        }
+        // URL + cache buster để browser fetch fresh sau khi replace
+        var newUrl = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/staff-avatars/' + sp + '?v=' + Date.now();
+        var prof = getStaffProfile(name);
+        prof.avatarUrl = newUrl;
+        save();
+        await saveStaffProfile(name, 'avatarUrl', newUrl);
+        toast('✓ Đã cập nhật ảnh đại diện cho ' + name, 3000);
+        if (typeof refreshStaffDetailModal === 'function') refreshStaffDetailModal();
+        renderStaffPage();
+      } catch(e) {
+        _sbReport('uploadAvatar', e, {op:'upload', table:'staff-avatars'});
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function deleteStaffAvatar(name) {
+  if (!name) return;
+  if (!confirm('Xóa ảnh đại diện của "' + name + '"?\n\nẢnh sẽ bị xóa khỏi server. Card sẽ hiển thị chữ cái thay thế.')) return;
+
+  var prof = getStaffProfile(name);
+  var oldUrl = prof.avatarUrl;
+
+  // Update local + DB trước (xóa storage best-effort sau)
+  prof.avatarUrl = '';
+  save();
+  await saveStaffProfile(name, 'avatarUrl', '');
+
+  if (window._sbReady && oldUrl) {
+    try {
+      var safeName = btoa(unescape(encodeURIComponent(name))).replace(/[^a-zA-Z0-9]/g, '');
+      await _sb.storage.from('staff-avatars').remove([safeName + '.jpg']);
+    } catch(e) {
+      console.warn('[deleteAvatar] Storage remove failed (ignored):', e.message);
+    }
+  }
+
+  toast('✓ Đã xóa ảnh, trở về chữ cái', 3000);
+  if (typeof refreshStaffDetailModal === 'function') refreshStaffDetailModal();
+  renderStaffPage();
+}
+
 /* Staff Detail Modal (Phase A refine: thay focus mode inline) */
 var _detailModalStaff = null;
 
@@ -9961,7 +10080,13 @@ function renderStaffDetailModalContent(s) {
 
     <!-- Header: avatar 96px + name + role + office badge -->
     <div style="padding:20px 24px 16px; display:flex; gap:16px; align-items:flex-start; border-bottom:0.5px solid #e5e7eb;">
-      <div style="width:96px; height:96px; border-radius:50%; background:${_avt.bg}; border:3px solid ${_avt.border}; display:flex; align-items:center; justify-content:center; font-size:38px; font-weight:500; color:${_avt.text}; flex-shrink:0;">${_ini}</div>
+      <div style="position:relative; flex-shrink:0;">
+        ${renderAvatarHtml(s, 96)}
+        <label for="avatarUpload_modal"
+               style="position:absolute; bottom:-4px; right:-4px; width:30px; height:30px; border-radius:50%; background:#fff; border:2px solid ${_avt.border}; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; box-shadow:0 2px 4px rgba(0,0,0,0.15);"
+               title="Đổi ảnh đại diện">📷<input type="file" id="avatarUpload_modal" accept="image/*" style="display:none;" onchange="uploadStaffAvatar('${x(s)}', this)"></label>
+        ${prof.avatarUrl ? `<button onclick="deleteStaffAvatar('${x(s)}')" style="position:absolute; bottom:-4px; left:-4px; width:30px; height:30px; border-radius:50%; background:#fff; border:2px solid #fca5a5; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; box-shadow:0 2px 4px rgba(0,0,0,0.15); color:#dc2626;" title="Xóa ảnh, trở về chữ cái">🗑</button>` : ''}
+      </div>
       <div style="flex:1; min-width:0; padding-right:36px;">
         <div style="font-size:22px; font-weight:600; color:#111827; margin-bottom:4px; word-break:break-word;">${x(s)}</div>
         <input value="${x(_roleTxt)}" placeholder="Chức vụ chưa cập nhật"

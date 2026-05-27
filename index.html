@@ -2510,45 +2510,30 @@ function renderProjectTimeline(pjs) {
   const holidaySet = new Set(getHolidays().map(h => h.date || h));
   const isVN = activeSection === 'vn';
 
-  // Tính ngày bắt đầu bảng: 7 ngày trước hôm nay (kể cả khi đang xem tháng mới tạo)
-  // Điều kiện: áp dụng khi hôm nay <= cuối tháng đang xem (không phải xem tháng quá khứ xa)
-  const today = new Date();
-  const curMonthStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
-  const lastDayOfViewMonth = new Date(yr, mo, 0); // ngày cuối tháng đang xem
-  let startDay, prevMonthDays = [];
+  // Logic mới: Monday-aligned, Dynamic 35/42 days (cover trọn tháng đang xem)
+  const monthStart = new Date(yr, mo-1, 1);
+  monthStart.setHours(0,0,0,0);
+  const monthEnd = new Date(yr, mo, 0);  // ngày cuối tháng
+  monthEnd.setHours(0,0,0,0);
 
-  // Áp dụng lùi 7 ngày nếu: hôm nay <= cuối tháng đang xem (tức đang xem tháng này hoặc tháng mới tạo)
-  const useSliding = today <= lastDayOfViewMonth;
+  // Tìm T2 gần nhất ≤ monthStart
+  const _dow = monthStart.getDay();                // 0=CN, 1=T2, ..., 6=T7
+  const _offset = (_dow === 0) ? -6 : (1 - _dow);  // CN→-6, T2→0, ..., T7→-5
+  const windowStart = new Date(monthStart);
+  windowStart.setDate(monthStart.getDate() + _offset);
+  windowStart.setHours(0,0,0,0);
 
-  if (useSliding) {
-    const startD = new Date(today);
-    startD.setDate(startD.getDate() - 7);
-    const startDStr = localDateStr(startD);
-    const monthStart = `${yr}-${String(mo).padStart(2,'0')}-01`;
+  // Dynamic 35 hoặc 42: nếu 35 days không cover hết monthEnd → dùng 42
+  const _day35End = new Date(windowStart);
+  _day35End.setDate(windowStart.getDate() + 34);   // 35 days = index 0..34
+  const numDays = (_day35End < monthEnd) ? 42 : 35;
 
-    if (startDStr < monthStart) {
-      // Lùi sang tháng trước — thêm các ngày đó vào đầu
-      const prevEnd = new Date(yr, mo-1, 0); // ngày cuối tháng trước
-      for (let d = new Date(startD); d <= prevEnd; d.setDate(d.getDate()+1)) {
-        prevMonthDays.push(localDateStr(new Date(d)));
-      }
-      startDay = 1;
-    } else {
-      startDay = startD.getDate();
-    }
-  } else {
-    // Xem tháng quá khứ → hiển thị nguyên từ ngày 1
-    startDay = 1;
+  const allDays = [];
+  for (let i = 0; i < numDays; i++) {
+    const d = new Date(windowStart);
+    d.setDate(windowStart.getDate() + i);
+    allDays.push(localDateStr(d));
   }
-
-  // Tất cả ngày hiển thị = [prevMonthDays] + [startDay..daysInMonth]
-  const allDays = [
-    ...prevMonthDays,
-    ...Array.from({length: daysInMonth - startDay + 1}, (_,i) => {
-      const d = startDay + i;
-      return `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    })
-  ];
 
   const CB = '1px solid #ddd';
   const PB = '2px solid #aaa';
@@ -5580,6 +5565,27 @@ function renderGroups(p) {
 
   return groups.map((g, gi) => {
     const rows = g.rows||[];
+    // Fix A: Hạng mục rỗng (rows=[]) → render placeholder để user thấy + xóa được
+    if (rows.length === 0) {
+      const _gc = GRP[gi % GRP.length];
+      const _cols = (sessionStorage.getItem('splash_role')||'admin')==='edit' ? 9 : (_isRatingCollapsed() ? 7 : 12);
+      return `<tr style="background:#fef3c7;">
+        <td colspan="${_cols}" style="padding:8px 12px; border-left:3px solid ${_gc.border}; border-right:1px solid ${_gc.border}; border-bottom:1px solid #e5e7eb;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="font-size:14px;">⚠️</span>
+            <input value="${x(g.type||'')}"
+                   onchange="updGroup('${p.id}','${g.id}','type',this.value)"
+                   placeholder="Tên hạng mục (chưa có dòng nào)"
+                   style="background:#fff; border:0.5px solid #d97706; color:#92400e; font-size:12px; padding:4px 8px; flex:1; min-width:120px; border-radius:4px; font-family:inherit;">
+            <span style="font-size:11px; color:#92400e; font-style:italic;">Hạng mục rỗng — không có dòng nào</span>
+            <button onclick="addRow('${p.id}','${g.id}')"
+                    style="background:#10b981; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:500; cursor:pointer; font-family:inherit;">+ Thêm dòng</button>
+            <button onclick="delGroup('${p.id}','${g.id}')"
+                    style="background:#dc2626; color:#fff; border:none; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:500; cursor:pointer; font-family:inherit;">✕ Xóa hạng mục</button>
+          </div>
+        </td>
+      </tr>`;
+    }
     const gNew = rows.filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
     const gRev = rows.filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
     const gOT  = rows.reduce((s,r)=>s+(r.ot||0),0);
@@ -5783,19 +5789,25 @@ function renderGroups(p) {
   }).join('');
 }
 
-/* Staff schedule - 3-week Gantt calendar */
+/* Staff schedule - 5-week Gantt calendar (start Mon of current week) */
 function renderStaffSchedule(p) {
-  // Build date range: today + 21 days (3 weeks)
+  // Build date range: 5 weeks (35 days) starting from Monday of current week
   const today = new Date();
   today.setHours(0,0,0,0);
+  const _dow = today.getDay();                        // 0=CN, 1=T2, ..., 6=T7
+  const _offset = (_dow === 0) ? -6 : (1 - _dow);     // CN→-6, T2→0, T3→-1, ..., T7→-5
+  const windowStart = new Date(today);
+  windowStart.setDate(today.getDate() + _offset);
+  windowStart.setHours(0,0,0,0);
+
   const days = [];
-  for(let i=0;i<21;i++){
-    const d = new Date(today);
-    d.setDate(today.getDate()+i);
+  for(let i=0;i<35;i++){
+    const d = new Date(windowStart);
+    d.setDate(windowStart.getDate()+i);
     days.push(d);
   }
   const todayStr = localDateStr(today);
-  const endStr   = localDateStr(days[20]);
+  const endStr   = localDateStr(days[34]);
 
   // Week separator indices
   const dow = today.getDay(); // 0=Sun
@@ -5832,7 +5844,7 @@ function renderStaffSchedule(p) {
     }))
   );
 
-  // Filter to tasks overlapping the 3-week window
+  // Filter to tasks overlapping the 5-week window
   function overlaps(r) {
     const from = r.dateFrom||r.dateTo||'';
     const to   = r.dateTo||r.dateFrom||'';
@@ -5872,7 +5884,7 @@ function renderStaffSchedule(p) {
   function dateKey(d){ return localDateStr(d); }
 
   // Build day header HTML
-  const dayColW = 'calc((100% - 90px) / 21)';
+  const dayColW = 'calc((100% - 90px) / 35)';
 
   let hdrMonths = '';
   let hdrDays   = '';
@@ -5884,7 +5896,7 @@ function renderStaffSchedule(p) {
       if(curMonth>=0) monthSpans.push({label:['T1','T2','T3','T4','T5','T6','T7','T8','T9','T10','T11','T12'][curMonth], span:mSpan});
       curMonth=d.getMonth(); mSpan=1;
     } else mSpan++;
-    if(i===20) monthSpans.push({label:['T1','T2','T3','T4','T5','T6','T7','T8','T9','T10','T11','T12'][curMonth], span:mSpan});
+    if(i===34) monthSpans.push({label:['T1','T2','T3','T4','T5','T6','T7','T8','T9','T10','T11','T12'][curMonth], span:mSpan});
   });
 
   const dayVN = ['CN','T2','T3','T4','T5','T6','T7'];
@@ -5894,7 +5906,7 @@ function renderStaffSchedule(p) {
     const isSat   = d.getDay()===6;
     const isWeekBorder = d.getDay()===1 && i>0;
     return `<th style="
-      min-width:28px;max-width:36px;text-align:center;font-size:9px;padding:2px 1px;
+      min-width:22px;max-width:30px;text-align:center;font-size:9px;padding:2px 1px;
       background:${isToday?'var(--gold)':'var(--navy)'};
       color:${isToday?'var(--navy)':isSun||isSat?'rgba(255,255,255,.4)':'rgba(255,255,255,.8)'};
       font-weight:${isToday?'800':'400'};
@@ -5993,14 +6005,14 @@ function renderStaffSchedule(p) {
   if(pastStaffList.length>0){
     staffRows += `<tr><td colspan="${days.length+1}"
       style="background:#f5f5f5;padding:4px 10px;font-size:10px;color:#aaa;font-style:italic;border-top:2px dashed #e0e0e0">
-      ↓ Nhân sự đã hoàn thành / không còn lịch trong 3 tuần tới
+      ↓ Nhân sự đã hoàn thành / không còn lịch trong 5 tuần tới
     </td></tr>`;
     staffRows += pastStaffList.map(s=>buildStaffRow(s,true)).join('');
   }
 
   return `
   <div style="overflow-x:auto">
-  <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:600px">
+  <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:870px">
     <thead>
       <tr>
         <th style="background:var(--navy);width:90px;min-width:90px;padding:4px 8px;color:rgba(255,255,255,.7);font-size:10px;text-align:left">Nhân sự</th>
@@ -6082,6 +6094,41 @@ async function addRow(pjId,gid2) {
     }
   }
 }
+// Fix C: Cleanup utility — xóa tất cả group có rows=[] (orphan từ delRow xóa hết row)
+// Chạy 1 lần từ Console: cleanupEmptyGroups()
+async function cleanupEmptyGroups() {
+  if (!confirm('Quét và xóa tất cả "hạng mục rỗng" (không còn dòng nào)?\n\nLệnh này sẽ xóa cả trên Supabase. Tiếp tục?')) return;
+  let removed = 0;
+  const details = [];
+  for (const mid of Object.keys(D.months || {})) {
+    const m = D.months[mid];
+    for (const p of [...(m.projects||[]), ...(m.projectsVN||[])]) {
+      const empty = (p.groups||[]).filter(g => !(g.rows||[]).length);
+      for (const g of empty) {
+        if (window._sbReady) {
+          try {
+            const { error } = await _sb.from('groups').delete().eq('id', g.id);
+            if (error) console.warn('[cleanup] DB delete fail:', g.id, error.message);
+          } catch(e) {
+            console.warn('[cleanup] DB delete throw:', g.id, e.message);
+          }
+        }
+        details.push({ month: mid, project: p.nameJP || p.nameVN || '(unnamed)', type: g.type || '(empty)', id: g.id });
+        removed++;
+      }
+      p.groups = (p.groups||[]).filter(g => (g.rows||[]).length > 0);
+    }
+  }
+  save();
+  console.log('=== CLEANUP EMPTY GROUPS RESULT ===');
+  console.log('Total removed:', removed);
+  if (details.length) console.table(details);
+  if (typeof toast === 'function') toast('✓ Đã xóa ' + removed + ' hạng mục rỗng', 4000);
+  if (typeof renderAll === 'function') renderAll();
+  else if (typeof renderContent === 'function') renderContent();
+}
+window.cleanupEmptyGroups = cleanupEmptyGroups;
+
 async function delGroup(pjId,gid2) {
   if(!confirm('Xóa hạng mục này?')) return;
   const p=getPj(pjId); if(!p) return;
@@ -6117,6 +6164,21 @@ async function delRow(pjId,gid2,rid) {
     }
   }
   g.rows=g.rows.filter(r=>r.id!==rid);
+
+  // Fix B: Auto-cleanup — nếu group còn 0 rows, hỏi user có xóa luôn group không
+  if (g.rows.length === 0) {
+    const _gName = g.type || '(chưa đặt tên)';
+    if (confirm('Hạng mục "' + _gName + '" không còn dòng nào.\nXóa luôn hạng mục này?')) {
+      p.groups = (p.groups||[]).filter(x => x.id !== g.id);
+      if (window._sbReady && !_needsApproval()) {
+        try {
+          const { error } = await _sb.from('groups').delete().eq('id', g.id);
+          if (error) _sbReport('delRow (auto-del group)', error, {op:'delete', table:'groups'});
+        } catch(e) { _sbReport('delRow (auto-del group)', e, {op:'delete', table:'groups'}); }
+      }
+    }
+  }
+
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
 }
 function rebuildGroups(pjId) {

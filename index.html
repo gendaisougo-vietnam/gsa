@@ -22,7 +22,19 @@
   const _sb = supabase.createClient(
     'https://kefwrfxeneropihedght.supabase.co',
     'sb_publishable__B9f2R2Y1JMsvQ2NkmTU9Q_T8f4McGZ',
-    { auth: { persistSession: false, autoRefreshToken: false } }
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+      // Fix 2: timeout 8s cho mọi HTTP request tránh hang khi DevTools Offline
+      global: {
+        fetch: function(input, init) {
+          init = init || {};
+          var controller = new AbortController();
+          var timeoutId = setTimeout(function() { controller.abort(); }, 8000);
+          init.signal = controller.signal;
+          return fetch(input, init).finally(function() { clearTimeout(timeoutId); });
+        }
+      }
+    }
   )
   window._sbReady = true
 </script>
@@ -935,6 +947,14 @@ async function sbLoadAll() {
   console.log('trips    :', eTrips    ? 'ERROR: '+eTrips.message    : (tripRows||[]).length + ' rows');
   console.log('photos   :', ePhotos   ? 'ERROR: '+ePhotos.message   : (photoRows||[]).length + ' rows');
   console.groupEnd();
+
+  // Fix C: nếu TẤT CẢ 11 query fail (offline?) → throw để caller giữ D cũ (không wipe bằng result rỗng)
+  var _allErrors = [eSettings, eMonths, eProjects, eGroups, eRows, eTl, eStaff, eLeaves, eLate, eTrips, ePhotos].filter(function(e){ return !!e; });
+  if (_allErrors.length === 11) {
+    console.warn('[sbLoadAll] All 11 queries failed (offline?) — throwing to preserve D');
+    throw new Error('sbLoadAll: tất cả 11 query fail (offline) — giữ D cũ');
+  }
+
   window._sbSettingsId = settingsRows?.id;
   const result = {
     activeMonth: settingsRows?.active_month || '',
@@ -1252,8 +1272,9 @@ async function _sbSaveProject(p, monthId, section) {
       _pjRow.construction_start= p.constructionStart || null;
       _pjRow.construction_end  = p.constructionEnd   || null;
     }
-    await _sb.from('projects').upsert(_pjRow, { onConflict: 'id' });
-  } catch(e) { console.warn('[Phase 4] saveProject failed:', e.message); }
+    const { error } = await _sb.from('projects').upsert(_pjRow, { onConflict: 'id' });
+    if (error) _sbReport('_sbSaveProject', error, {op:'upsert', table:'projects'});
+  } catch(e) { _sbReport('_sbSaveProject', e, {op:'upsert', table:'projects'}); }
 }
 
 function savePjDetailField(pjId, field, val) {
@@ -1273,7 +1294,8 @@ function savePjDetailField(pjId, field, val) {
     if (col) {
       console.log('[savePjDetailField]', field, '→', col, '=', val);
       _sb.from('projects').update({ [col]: val||null }).eq('id', pjId)
-        .then(r=>{ if(r.error) console.warn('[savePjDetailField]', r.error.message); else toast('✓ Đã lưu'); });
+        .then(r=>{ if(r.error) _sbReport('savePjDetailField', r.error, {op:'update', table:'projects'}); else toast('✓ Đã lưu'); })
+        .catch(e=>{ _sbReport('savePjDetailField', e, {op:'update', table:'projects'}); });
     }
   }
 }
@@ -1860,7 +1882,11 @@ function _esc(s) {
 function _sbClearErrLog() {
   window._sbErrLog = [];
   window._sbErrCount = 0;
-  try { setSyncStatus('synced', '🟢 Live'); } catch(e) {}
+  try {
+    // Fix A: check network state thay vì hard-code 'synced'
+    if (navigator.onLine) setSyncStatus('synced', '🟢 Live');
+    else                  setSyncStatus('error',  '🔴 Mất kết nối mạng');
+  } catch(e) {}
   _sbRenderErrPanel();
   const panel = document.getElementById('sbErrPanel');
   if (panel) panel.style.display = 'none';
@@ -1888,6 +1914,31 @@ function setSyncStatus(state, label) {
   btn.className=`sync-btn ${state}`;
   lbl.textContent=label;
 }
+
+// Fix 3: Network detection — tự cập nhật pill khi mất/có mạng máy
+(function() {
+  function onNetworkOffline() {
+    try {
+      setSyncStatus('error', '🔴 Mất kết nối mạng');
+      _sbReport('navigator.offline', new Error('Mạng máy bị ngắt'),
+                {op: 'system', table: 'network'});
+    } catch(e) { console.warn('[network] offline handler fail:', e.message); }
+  }
+  function onNetworkOnline() {
+    try {
+      if (window._sbErrCount === 0 || !window._sbErrCount) {
+        setSyncStatus('synced', '🟢 Live');
+      } else {
+        setSyncStatus('error', '🔴 ' + window._sbErrCount + ' lỗi sync');
+      }
+      toast('🌐 Đã có mạng trở lại. Bấm pill để xem lỗi sync nếu có.', 4000);
+    } catch(e) { console.warn('[network] online handler fail:', e.message); }
+  }
+  window.addEventListener('offline', onNetworkOffline);
+  window.addEventListener('online',  onNetworkOnline);
+  // Check ngay khi load (chờ DOM ready để setSyncStatus tìm thấy element)
+  if (!navigator.onLine) setTimeout(onNetworkOffline, 100);
+})();
 
 function monthLabel(mid) {
   const [y,m]=mid.split('-');
@@ -2212,8 +2263,10 @@ async function doAddMonth(prevMid, newMid) {
   // (storage file vẫn còn — chỉ tháng > PHOTO_RETENTION_MONTHS mới bị xóa cứng ở _sbCopyMonthPhotos)
 
   if (window._sbReady) {
-    try { await _sb.from('months').upsert({ id: newMid, target_new: srcMonth.targetNew || 0, target_rev: srcMonth.targetRev || 0 }); }
-    catch(e) { console.warn('[Phase 3] addMonth failed:', e.message); }
+    try {
+      const { error } = await _sb.from('months').upsert({ id: newMid, target_new: srcMonth.targetNew || 0, target_rev: srcMonth.targetRev || 0 });
+      if (error) _sbReport('doAddMonth', error, {op:'upsert', table:'months'});
+    } catch(e) { _sbReport('doAddMonth', e, {op:'upsert', table:'months'}); }
   }
   D.activeMonth = newMid;
   activePjId = null;
@@ -3222,8 +3275,10 @@ async function updateMonthTarget(field, val) {
   refreshHeroTargetDisplay();
   if (window._sbReady) {
     const col = field === 'targetNew' ? 'target_new' : 'target_rev';
-    try { await _sb.from('months').update({ [col]: Math.max(0, val) }).eq('id', D.activeMonth); }
-    catch(e) { console.warn('[Phase 3] month update failed:', e.message); }
+    try {
+      const { error } = await _sb.from('months').update({ [col]: Math.max(0, val) }).eq('id', D.activeMonth);
+      if (error) _sbReport('updateMonthTarget', error, {op:'update', table:'months'});
+    } catch(e) { _sbReport('updateMonthTarget', e, {op:'update', table:'months'}); }
   }
 }
 
@@ -3436,7 +3491,7 @@ function _sbUpsertTlTask(pjId, task) {
   _sb.from('tl_tasks').upsert(rec, { onConflict:'id' })
     .then(function(res) {
       if (res.error) {
-        console.error('[tl upsert] FAIL:', task.name, '|', res.error.message, res.error);
+        _sbReport('_sbUpsertTlTask (' + task.name + ')', res.error, {op:'upsert', table:'tl_tasks'});
       } else {
         console.log('[tl upsert] OK:', task.name);
         return _sb.from('tl_tasks').select('id,name,dep,start_date,end_date').eq('id', task.id).single();
@@ -3446,7 +3501,7 @@ function _sbUpsertTlTask(pjId, task) {
       if (v && v.data) console.log('[tl verify] Supabase row:', v.data);
       else if (v && v.error) console.warn('[tl verify] error:', v.error.message);
     })
-    .catch(function(e) { console.warn('[tl upsert] exception:', task.name, e.message); });
+    .catch(function(e) { _sbReport('_sbUpsertTlTask (' + task.name + ')', e, {op:'upsert', table:'tl_tasks'}); });
 }
 
 async function _sbResyncAllTlTaskOrder(pjId) {
@@ -3476,10 +3531,11 @@ async function _sbResyncAllTlTaskOrder(pjId) {
   });
 
   try {
-    await _sb.from('tl_tasks').upsert(batch, { onConflict: 'id' });
-    console.log('[tl resync] OK ' + batch.length + ' tasks for project ' + pjId);
+    const { error } = await _sb.from('tl_tasks').upsert(batch, { onConflict: 'id' });
+    if (error) _sbReport('_sbResyncAllTlTaskOrder', error, {op:'upsert', table:'tl_tasks'});
+    else console.log('[tl resync] OK ' + batch.length + ' tasks for project ' + pjId);
   } catch(e) {
-    console.warn('[tl resync] FAIL:', e.message);
+    _sbReport('_sbResyncAllTlTaskOrder', e, {op:'upsert', table:'tl_tasks'});
   }
 }
 
@@ -3524,12 +3580,15 @@ function deleteTlTask(pjId, taskId) {
   // Supabase: xóa task, xóa groups + rows tương ứng (rows auto-cascade nhưng xóa explicit để chắc)
   if (window._sbReady) {
     _sb.from('tl_tasks').delete().eq('id', taskId)
-      .then(function(r){ if(r.error) console.warn('[tl delete]', r.error.message); else console.log('[tl delete] OK:', taskId); });
+      .then(function(r){ if(r.error) _sbReport('deleteTlTask', r.error, {op:'delete', table:'tl_tasks'}); else console.log('[tl delete] OK:', taskId); })
+      .catch(function(e){ _sbReport('deleteTlTask', e, {op:'delete', table:'tl_tasks'}); });
     deletedGroups.forEach(function(g) {
       _sb.from('rows').delete().eq('group_id', g.id)
-        .then(function(r){ if(r.error) console.warn('[tl del rows]', r.error.message); });
+        .then(function(r){ if(r.error) _sbReport('deleteTlTask (rows)', r.error, {op:'delete', table:'rows'}); })
+        .catch(function(e){ _sbReport('deleteTlTask (rows)', e, {op:'delete', table:'rows'}); });
       _sb.from('groups').delete().eq('id', g.id)
-        .then(function(r){ if(r.error) console.warn('[tl del group]', r.error.message); });
+        .then(function(r){ if(r.error) _sbReport('deleteTlTask (groups)', r.error, {op:'delete', table:'groups'}); })
+        .catch(function(e){ _sbReport('deleteTlTask (groups)', e, {op:'delete', table:'groups'}); });
     });
     relinkTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
     cascadedTasks.forEach(function(t){ _sbUpsertTlTask(pjId, t); });
@@ -4006,14 +4065,16 @@ function syncTlTaskToGroup(pjId, task) {
     _sb.from('groups').upsert(
       { id: grp.id, project_id: pjId, type: grp.type||'', tl_task_id: task.id, sort_order: p.groups.indexOf(grp) },
       { onConflict: 'id' }
-    ).then(function(res){ if(res.error) console.warn('[syncTl] upsert group:', res.error.message); });
+    ).then(function(res){ if(res.error) _sbReport('syncTlTaskToGroup (groups)', res.error, {op:'upsert', table:'groups'}); })
+     .catch(function(e){ _sbReport('syncTlTaskToGroup (groups)', e, {op:'upsert', table:'groups'}); });
     newRows.forEach(function(r) {
       _sb.from('rows').upsert(
         { id: r.id, group_id: grp.id, staff: r.staff||null, status: r.status||'new',
           qty: r.qty||0, date_from: r.dateFrom||null, date_to: r.dateTo||null,
           done_at: r.doneAt||null, up_time: r.upTime||null, note: r.note||'', ot: r.ot||0 },
         { onConflict: 'id' }
-      ).then(function(res){ if(res.error) console.warn('[syncTl] upsert row:', res.error.message); });
+      ).then(function(res){ if(res.error) _sbReport('syncTlTaskToGroup (rows)', res.error, {op:'upsert', table:'rows'}); })
+       .catch(function(e){ _sbReport('syncTlTaskToGroup (rows)', e, {op:'upsert', table:'rows'}); });
     });
   }
 
@@ -4021,7 +4082,8 @@ function syncTlTaskToGroup(pjId, task) {
   if (window._sbReady && removedRows.length > 0) {
     removedRows.forEach(r => {
       _sb.from('rows').delete().eq('id', r.id)
-        .then(function(res){ if(res.error) console.warn('[syncTl] del row:', res.error.message); });
+        .then(function(res){ if(res.error) _sbReport('syncTlTaskToGroup (del row)', res.error, {op:'delete', table:'rows'}); })
+        .catch(function(e){ _sbReport('syncTlTaskToGroup (del row)', e, {op:'delete', table:'rows'}); });
     });
   }
 
@@ -4502,8 +4564,11 @@ function uploadPhoto(pjId, slot, input) {
             var _upMid = getMonthForPj(pjId);
             var sp = _upMid + '/' + pjId + '/slot_' + slot + '.jpg';
             var upRes = await _sb.storage.from('project-photos').upload(sp, buf.buffer, { contentType: 'image/jpeg', upsert: true });
-            if (!upRes.error) {
-              await _sb.from('project_photos').upsert({ project_id: pjId, slot: slot, storage_path: sp, month_id: _upMid }, { onConflict: 'project_id,slot' });
+            if (upRes.error) {
+              _sbReport('uploadPhoto (storage)', upRes.error, {op:'upload', table:'project-photos'});
+            } else {
+              const { error: dbErr } = await _sb.from('project_photos').upsert({ project_id: pjId, slot: slot, storage_path: sp, month_id: _upMid }, { onConflict: 'project_id,slot' });
+              if (dbErr) _sbReport('uploadPhoto (db)', dbErr, {op:'upsert', table:'project_photos'});
               if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
               if (!window._sbPhotosByProjectId[pjId]) window._sbPhotosByProjectId[pjId] = {};
               var _newUrl = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/' + sp + '?v=' + Date.now();
@@ -4512,7 +4577,7 @@ function uploadPhoto(pjId, slot, input) {
               var _pRef = getPj(pjId);
               if (_pRef) { if (!_pRef.photos) _pRef.photos = []; _pRef.photos[slot] = _newUrl; persistD(); }
             }
-          } catch(e) { console.warn('[Photo] Storage upload failed:', e.message); }
+          } catch(e) { _sbReport('uploadPhoto', e, {op:'upload', table:'project-photos'}); }
         })();
       }
     };
@@ -4530,10 +4595,12 @@ function delPhoto(pjId,slot) {
         var _BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/';
         var _cached = window._sbPhotosByProjectId && window._sbPhotosByProjectId[pjId] && window._sbPhotosByProjectId[pjId][slot];
         var sp = (_cached && _cached.startsWith(_BASE)) ? _cached.slice(_BASE.length) : (getMonthForPj(pjId) + '/' + pjId + '/slot_' + slot + '.jpg');
-        await _sb.storage.from('project-photos').remove([sp]);
-        await _sb.from('project_photos').delete().eq('project_id', pjId).eq('slot', slot);
+        const stRes = await _sb.storage.from('project-photos').remove([sp]);
+        if (stRes.error) _sbReport('delPhoto (storage)', stRes.error, {op:'remove', table:'project-photos'});
+        const { error: dbErr } = await _sb.from('project_photos').delete().eq('project_id', pjId).eq('slot', slot);
+        if (dbErr) _sbReport('delPhoto (db)', dbErr, {op:'delete', table:'project_photos'});
         if (window._sbPhotosByProjectId && window._sbPhotosByProjectId[pjId]) delete window._sbPhotosByProjectId[pjId][slot];
-      } catch(e) { console.warn('[Photo] Storage delete failed:', e.message); }
+      } catch(e) { _sbReport('delPhoto', e, {op:'remove', table:'project-photos'}); }
     })();
   }
 }
@@ -5227,8 +5294,8 @@ function saveUpRating(pjId, gId, rowId) {
       var rateData = {};
       fields.forEach(function(rf){ if (row[rf.field]) rateData[rf.field] = row[rf.field]; });
       _sb.from('rows').update(rateData).eq('id', rowId)
-        .then(function(r){ if (r.error) console.warn('[saveUpRating]', r.error.message); })
-        .catch(function(e){ console.warn('[saveUpRating]', e.message); });
+        .then(function(r){ if (r.error) _sbReport('saveUpRating', r.error, {op:'update', table:'rows'}); })
+        .catch(function(e){ _sbReport('saveUpRating', e, {op:'update', table:'rows'}); });
     }
     var tbody = document.getElementById('rbody-' + pjId);
     if (tbody) { var pp = getPjGlobal(pjId)||getPj(pjId); if (pp) tbody.innerHTML = renderGroups(pp); }
@@ -6024,8 +6091,10 @@ async function delGroup(pjId,gid2) {
       var pNameDG = pObjDG && (pObjDG.nameVN || pObjDG.nameJP) || pjId;
       _sbQueueChange('Xóa hạng mục trong "' + pNameDG + '"', 'groups', 'delete', gid2, null, { projectId: pjId });
     } else {
-      try { await _sb.from('groups').delete().eq('id', gid2); }
-      catch(e) { console.warn('[Phase 5] delGroup failed:', e.message); }
+      try {
+        const { error } = await _sb.from('groups').delete().eq('id', gid2);
+        if (error) _sbReport('delGroup', error, {op:'delete', table:'groups'});
+      } catch(e) { _sbReport('delGroup', e, {op:'delete', table:'groups'}); }
     }
   }
   p.groups=(p.groups||[]).filter(g=>g.id!==gid2);
@@ -6041,8 +6110,10 @@ async function delRow(pjId,gid2,rid) {
       var pNameDR = pObjDR && (pObjDR.nameVN || pObjDR.nameJP) || pjId;
       _sbQueueChange('Xóa dòng trong "' + pNameDR + '"', 'rows', 'delete', rid, null, { projectId: pjId });
     } else {
-      try { await _sb.from('rows').delete().eq('id', rid); }
-      catch(e) { console.warn('[Phase 5] delRow failed:', e.message); }
+      try {
+        const { error } = await _sb.from('rows').delete().eq('id', rid);
+        if (error) _sbReport('delRow', error, {op:'delete', table:'rows'});
+      } catch(e) { _sbReport('delRow', e, {op:'delete', table:'rows'}); }
     }
   }
   g.rows=g.rows.filter(r=>r.id!==rid);
@@ -6067,8 +6138,10 @@ async function updGroup(pjId,gid2,field,val) {
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
   g[field]=val; save();
   if (window._sbReady && field === 'type') {
-    try { await _sb.from('groups').update({ type: val }).eq('id', gid2); }
-    catch(e) { console.warn('[Phase 5] updGroup failed:', e.message); }
+    try {
+      const { error } = await _sb.from('groups').update({ type: val }).eq('id', gid2);
+      if (error) _sbReport('updGroup', error, {op:'update', table:'groups'});
+    } catch(e) { _sbReport('updGroup', e, {op:'update', table:'groups'}); }
   }
 }
 function updRow(pjId,gid2,rid,field,val) {
@@ -6922,8 +6995,10 @@ async function deletePj(id) {
       _sbQueueChange('Xóa dự án: "' + (p.nameVN || p.nameJP || id) + '"',
         'projects', 'delete', id, null, { monthId: D.activeMonth });
     } else {
-      try { await _sb.from('projects').delete().eq('id', id); }
-      catch(e) { console.warn('[Phase 4] deletePj failed:', e.message); }
+      try {
+        const { error } = await _sb.from('projects').delete().eq('id', id);
+        if (error) _sbReport('deletePj', error, {op:'delete', table:'projects'});
+      } catch(e) { _sbReport('deletePj', e, {op:'delete', table:'projects'}); }
     }
   }
   if(activeSection==='vn'){
@@ -8569,11 +8644,12 @@ async function addLateRecord(name, date, minutes, note) {
   const sid = window._sbStaffIdByName?.[name];
   if (sid && window._sbReady) {
     try {
-      await _sb.from('staff_late_log').upsert(
+      const { error } = await _sb.from('staff_late_log').upsert(
         { staff_id: sid, late_date: date, minutes: +minutes, note: note || '' },
         { onConflict: 'staff_id,late_date' }
       );
-    } catch(e) { console.warn('[Phase 6] addLateRecord failed:', e.message); }
+      if (error) _sbReport('addLateRecord', error, {op:'upsert', table:'staff_late_log'});
+    } catch(e) { _sbReport('addLateRecord', e, {op:'upsert', table:'staff_late_log'}); }
   }
 }
 async function deleteLateRecord(name, date) {
@@ -8583,8 +8659,10 @@ async function deleteLateRecord(name, date) {
   persistD();
   const sid = window._sbStaffIdByName?.[name];
   if (sid && window._sbReady) {
-    try { await _sb.from('staff_late_log').delete().eq('staff_id', sid).eq('late_date', date); }
-    catch(e) { console.warn('[Phase 6] deleteLateRecord failed:', e.message); }
+    try {
+      const { error } = await _sb.from('staff_late_log').delete().eq('staff_id', sid).eq('late_date', date);
+      if (error) _sbReport('deleteLateRecord', error, {op:'delete', table:'staff_late_log'});
+    } catch(e) { _sbReport('deleteLateRecord', e, {op:'delete', table:'staff_late_log'}); }
   }
 }
 function getLateThisMonth(name, mid) {
@@ -8800,10 +8878,11 @@ async function addTrip(name) {
   if (sid && window._sbReady) {
     const t = prof.trips[prof.trips.length - 1];
     try {
-      await _sb.from('business_trips').insert({
+      const { error } = await _sb.from('business_trips').insert({
         staff_id: sid, date_from: t.from, date_to: t.to || null, destination: t.note || ''
       });
-    } catch(e) { console.warn('[Phase 6] addTrip failed:', e.message); }
+      if (error) _sbReport('addTrip', error, {op:'insert', table:'business_trips'});
+    } catch(e) { _sbReport('addTrip', e, {op:'insert', table:'business_trips'}); }
   }
 }
 async function deleteTrip(name, id) {
@@ -8811,8 +8890,10 @@ async function deleteTrip(name, id) {
   prof.trips = prof.trips.filter(t=>t.id!==id);
   persistD(); renderAll();
   if (window._sbReady) {
-    try { await _sb.from('business_trips').delete().eq('id', id); }
-    catch(e) { console.warn('[Phase 6] deleteTrip failed:', e.message); }
+    try {
+      const { error } = await _sb.from('business_trips').delete().eq('id', id);
+      if (error) _sbReport('deleteTrip', error, {op:'delete', table:'business_trips'});
+    } catch(e) { _sbReport('deleteTrip', e, {op:'delete', table:'business_trips'}); }
   }
 }
 function getBusinessTrips(name) {
@@ -8876,11 +8957,12 @@ async function confirmAddLeave(name) {
   if (sid && window._sbReady) {
     const lv = prof.leaves[prof.leaves.length - 1];
     try {
-      await _sb.from('staff_leaves').insert({
+      const { error } = await _sb.from('staff_leaves').insert({
         staff_id: sid, date_from: lv.from, date_to: lv.to || null,
         session: lv.session || 'all', reason: lv.reason || ''
       });
-    } catch(e) { console.warn('[Phase 6] addLeave failed:', e.message); }
+      if (error) _sbReport('confirmAddLeave', error, {op:'insert', table:'staff_leaves'});
+    } catch(e) { _sbReport('confirmAddLeave', e, {op:'insert', table:'staff_leaves'}); }
   }
 }
 
@@ -8889,8 +8971,10 @@ async function delLeave(staffName, leaveId) {
   prof.leaves = (prof.leaves||[]).filter(l=>l.id!==leaveId);
   save(); renderStaffPage();
   if (window._sbReady) {
-    try { await _sb.from('staff_leaves').delete().eq('id', leaveId); }
-    catch(e) { console.warn('[Phase 6] delLeave failed:', e.message); }
+    try {
+      const { error } = await _sb.from('staff_leaves').delete().eq('id', leaveId);
+      if (error) _sbReport('delLeave', error, {op:'delete', table:'staff_leaves'});
+    } catch(e) { _sbReport('delLeave', e, {op:'delete', table:'staff_leaves'}); }
   }
 }
 
@@ -9836,7 +9920,7 @@ async function saveSettings() {
   save(); toast('✓ Đã lưu cài đặt');
   if (window._sbReady && window._sbSettingsId) {
     try {
-      await _sb.from('settings').update({
+      const { error } = await _sb.from('settings').update({
         staff_list: D.settings.staffList,
         type_list: D.settings.typeList,
         type_list_vn: D.settings.typeListVN,
@@ -9845,7 +9929,8 @@ async function saveSettings() {
         holidays: D.settings.holidays,
         leaving_warn_days: D.settings.leavingWarnDays || 7,
       }).eq('id', window._sbSettingsId);
-    } catch(e) { console.warn('[Phase 3] settings update failed:', e.message); }
+      if (error) _sbReport('saveSettings', error, {op:'update', table:'settings'});
+    } catch(e) { _sbReport('saveSettings', e, {op:'update', table:'settings'}); }
   }
 
   // Staff Feature Step 9.5 (fix bug đồng bộ): sync staffList → staff table

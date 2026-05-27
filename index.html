@@ -758,6 +758,44 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
   </div>
 </div>
 
+<!-- Staff Feature Step 4: Modal Nghỉ việc (static, toggled by openLeavingModal/closeLeavingModal) -->
+<div id="leavingModal" class="modal-bg" style="display:none;">
+  <div class="modal" style="max-width:480px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--gray2);padding-bottom:10px;margin-bottom:14px;">
+      <h3 id="leavingModalTitle" style="margin:0;">🚪 Nghỉ việc</h3>
+      <button onclick="closeLeavingModal()" style="background:transparent;border:none;font-size:22px;cursor:pointer;color:var(--gray4);line-height:1;padding:0 6px;">×</button>
+    </div>
+    <div style="padding:4px 0;">
+      <p style="margin:0 0 14px 0;">Nhân sự: <strong id="leavingModalStaff"></strong></p>
+
+      <label style="display:block; margin-bottom:6px; font-weight:600; font-size:12px;">Ngày nghỉ chính thức:</label>
+      <input type="date" id="leavingModalDate"
+             style="width:100%; padding:8px; border:1px solid var(--gray2); border-radius:var(--r); margin-bottom:14px; font-family:inherit; font-size:13px;">
+
+      <label style="display:block; margin-bottom:6px; font-weight:600; font-size:12px;">Trạng thái:</label>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+          <input type="radio" name="leavingStatus" value="leaving" checked>
+          <span>📅 Sắp nghỉ (giữ active đến ngày)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+          <input type="radio" name="leavingStatus" value="left">
+          <span>🚪 Đã nghỉ ngay</span>
+        </label>
+      </div>
+
+      <div style="padding:10px 12px; background:#fef3c7; border-radius:var(--r); color:#92400e; font-size:12px; margin-bottom:14px; border-left:3px solid #f59e0b;">
+        ⚠️ <strong>Lưu ý:</strong> Sau khi đánh dấu, mọi row/task của nhân sự này sẽ chuyển sang chế độ chỉ xem (read-only). Data lịch sử vẫn được giữ nguyên.
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button onclick="closeLeavingModal()" class="btn">Hủy</button>
+        <button onclick="confirmLeaving()" class="btn btn-primary" style="background:#dc2626; border-color:#dc2626;">Xác nhận nghỉ việc</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 
 const SK = 'phoicanh_v3';
@@ -771,6 +809,8 @@ const GANTT_TEXT_SCALE  = 1.5;        // hệ số tăng chữ label trên bar
 // ── Phát hiện row đã UP / carryover từ tháng cũ (lock) ──
 function _rowIsLocked(r) {
   if (!r) return false;
+  // 0) Staff đã nghỉ → row read-only (giữ data lịch sử)
+  if (r.staff && typeof isStaffLeft === 'function' && isStaffLeft(r.staff)) return true;
   // 1) Đã UP rõ ràng
   if (r.doneAt) return true;
   // 2) Carryover từ tháng cũ (flag từ doAddMonth hoặc migration)
@@ -898,6 +938,7 @@ async function sbLoadAll() {
       contactListVN: settingsRows?.contact_list_vn || [],
       holidays:      settingsRows?.holidays || [],
       sync:          settingsRows?.sync_config || {},
+      leavingWarnDays: settingsRows?.leaving_warn_days || 7,
       staffProfiles: {},
     },
     months: {},
@@ -910,6 +951,7 @@ async function sbLoadAll() {
     result.settings.staffProfiles[s.full_name] = {
       role: s.role, salaryGross: s.salary_gross, salaryNet: s.salary_net,
       contractEnd: s.contract_end || '', order: s.sort_order,
+      status: s.status || 'active', leaveDate: s.leave_date || '',
       leaves: [], lateLog: [], trips: [],
     };
   }
@@ -1056,6 +1098,42 @@ async function sbLoadAll() {
   var _photoCount = 0;
   Object.values(result.months).forEach(function(m){ [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(pj){ _photoCount += (pj.photos||[]).filter(Boolean).length; }); });
   console.log('[Photos] pObj.photos tổng:', _photoCount, '| sample:', (Object.values(result.months)[0]?.projects[0]?.photos||[])[0]?.slice(0,80));
+
+  // Staff Feature Step 10: Auto-promote staff status dựa trên leave_date
+  // Idempotent — chỉ persist khi cur !== next. Inline logic vì D chưa = result.
+  try {
+    const _today = new Date(); _today.setHours(0,0,0,0);
+    const _warnDays = result.settings.leavingWarnDays || 7;
+    const _staffChanges = [];
+    (result.settings.staffList || []).forEach(function(name) {
+      const prof = (result.settings.staffProfiles || {})[name];
+      if (!prof) return;
+      const cur = prof.status || 'active';
+      const ld = prof.leaveDate;
+      if (!ld) return;
+      const leave = new Date(ld); leave.setHours(0,0,0,0);
+      const days = Math.round((leave - _today) / 86400000);
+      let next = cur;
+      if (days < 0)                 next = 'left';
+      else if (days <= _warnDays)   next = (cur === 'left') ? cur : 'leaving';
+      if (next !== cur) {
+        prof.status = next;
+        _staffChanges.push({ name: name, from: cur, to: next, days: days });
+      }
+    });
+    if (_staffChanges.length > 0) {
+      console.log('[Auto-promote] Updated', _staffChanges.length, 'staff status:', _staffChanges);
+      // Persist async — không block sbLoadAll done. saveStaffProfile có _sbReport nội bộ.
+      _staffChanges.forEach(function(c) {
+        saveStaffProfile(c.name, 'status', c.to).catch(function(e) {
+          _sbReport('autoPromoteStaff', e, {op: 'update', table: 'staff'});
+        });
+      });
+    }
+  } catch(e) {
+    console.warn('[Auto-promote] FAIL:', e.message);
+  }
+
   console.log('[sbLoadAll] Done — months:', monthCount, '| projects:', pjCount, '| activeMonth:', result.activeMonth);
   return result;
 }
@@ -1107,7 +1185,7 @@ async function sbPushAll() {
   });
   for (var _btl=0; _btl<_tlRecs.length; _btl+=100) { try { await _sb.from('tl_tasks').upsert(_tlRecs.slice(_btl,_btl+100), {onConflict:'id'}); } catch(e) { _errs.push('tl_tasks@'+_btl+': '+e.message); } }
   // 5. Staff profiles
-  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||'', sort_order:prof.order||0 }; });
+  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||null, sort_order:prof.order||0, status:prof.status||'active', leave_date:prof.leaveDate||null }; });
   if (_stRecs.length) try { await _sb.from('staff').upsert(_stRecs, {onConflict:'full_name'}); } catch(e) { _errs.push('staff: '+e.message); }
   if (_errs.length) console.warn('[sbPushAll] lỗi:', _errs);
   return _errs;
@@ -3503,12 +3581,23 @@ function openTlTaskModal(pjId, taskId, parentGroupId, insertAfterTaskId) {
   // Tính số ngày làm việc từ start→end
   const workDays = t.start&&t.end ? calcWorkDays(t.start, t.end) : '';
 
-  const staffOpts = sortedStaffList().map(s=>`
-    <label style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:var(--r);cursor:pointer;font-size:12px;border:0.5px solid var(--gray2);${(t.staff||[]).includes(s)?'background:#dbeafe;border-color:#3b82f6;':''}">
-      <input type="checkbox" value="${s}" ${(t.staff||[]).includes(s)?'checked':''} style="width:auto">
-      <span>${staffShortName(s)}</span>
+  const staffOpts = sortedStaffList().map(s=>{
+    var _status = getStaffStatus(s);
+    var _isLeft = _status === 'left';
+    var _isLeaving = _status === 'leaving';
+    var _checked = (t.staff||[]).includes(s);
+    var _icon = _isLeft ? '🚪 ' : (_isLeaving ? '⏰ ' : '');
+    var _bg = _checked
+      ? 'background:#dbeafe;border-color:#3b82f6;'
+      : (_isLeft ? 'background:#f3f4f6;color:#9ca3af;font-style:italic;' :
+        (_isLeaving ? 'color:#d97706;' : ''));
+    return `
+    <label style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:var(--r);cursor:${_isLeft?'not-allowed':'pointer'};font-size:12px;border:0.5px solid var(--gray2);${_bg}">
+      <input type="checkbox" value="${s}" ${_checked?'checked':''} ${_isLeft?'disabled':''} style="width:auto">
+      <span>${_icon}${staffShortName(s)}</span>
       <span style="font-size:10px;color:var(--gray4)">(${s.split(' ')[0]})</span>
-    </label>`).join('');
+    </label>`;
+  }).join('');
 
   showModal(`<div class="modal-hd" style="background:var(--navy);padding:12px 16px;margin:-16px -16px 16px">
     <span style="color:#FFC000;font-weight:700;font-size:14px">${existing?'Chỉnh sửa':'Thêm'} task tiến độ</span>
@@ -5490,7 +5579,7 @@ function renderGroups(p) {
             ? `<span style="font-size:11px;color:${DONE_COLOR};font-weight:600">${x(r.staff||'—')}</span>`
             : `<select class="sel-sm" style="width:100%;font-size:11px" onchange="updRow('${p.id}','${g.id}','${r.id}','staff',this.value)">
                 <option value="">— Người TH —</option>
-                ${sortedStaffList().map(s=>`<option value="${s}" ${r.staff===s?"selected":""}>${s}</option>`).join('')}
+                ${sortedStaffOptionsHtml(r.staff)}
               </select>`}
         </td>
         <td style="${cellDim}">
@@ -6065,7 +6154,7 @@ function openAddProject() {
       </div>
       <div class="field"><label>Người triển khai chính</label>
         <select id="ap-st"><option value="">— Chọn —</option>
-          ${sortedStaffList().map(s=>`<option>${s}</option>`).join('')}
+          ${sortedStaffOptionsHtml('')}
         </select>
       </div>
     </div>`;
@@ -6110,7 +6199,7 @@ function openAddProject() {
       </div>
       <div class="field"><label>Người triển khai chính</label>
         <select id="ap-st"><option value="">— Chọn —</option>
-          ${sortedStaffList().map(s=>`<option>${s}</option>`).join('')}
+          ${sortedStaffOptionsHtml('')}
         </select>
       </div>
     </div>
@@ -6329,7 +6418,7 @@ function openEditProject(id) {
         <datalist id="ep-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist></div>
       <div class="field"><label>Người triển khai chính</label>
         <select id="ep-st"><option value="">— Chọn —</option>
-          ${sortedStaffList().map(s=>`<option ${p.mainStaff===s?'selected':''}>${s}</option>`).join('')}</select></div>
+          ${sortedStaffOptionsHtml(p.mainStaff)}</select></div>
     </div>
     <input type="hidden" id="ep-nJP-hidden" value="">`;
 
@@ -6370,7 +6459,7 @@ function openEditProject(id) {
         <datalist id="ep-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist></div>
       <div class="field"><label>Người triển khai chính</label>
         <select id="ep-st"><option value="">— Chọn —</option>
-          ${sortedStaffList().map(s=>`<option ${p.mainStaff===s?'selected':''}>${s}</option>`).join('')}</select></div>
+          ${sortedStaffOptionsHtml(p.mainStaff)}</select></div>
     </div>
     <input type="hidden" id="ep-nJP" value="${x(p.nameJP||'')}">`;
 
@@ -7277,7 +7366,7 @@ function renderContractBlock(staffName, prof, todayStr) {
 
 function getStaffProfile(name) {
   if (!D.settings.staffProfiles) D.settings.staffProfiles = {};
-  if (!D.settings.staffProfiles[name]) D.settings.staffProfiles[name] = {role:'',salaryGross:0,salaryNet:0,leaves:[],order:99,contractEnd:''};
+  if (!D.settings.staffProfiles[name]) D.settings.staffProfiles[name] = {role:'',salaryGross:0,salaryNet:0,leaves:[],order:99,contractEnd:'',status:'active',leaveDate:''};
   // Auto-set Management role và order=0 cho Management トゥアン
   if (name === 'Management トゥアン') {
     const p = D.settings.staffProfiles[name];
@@ -7286,6 +7375,50 @@ function getStaffProfile(name) {
   }
   return D.settings.staffProfiles[name];
 }
+
+// ── Staff status helpers (Step 2 of staff add/leave feature) ──────────
+function getStaffStatus(name) {
+  var prof = getStaffProfile(name);
+  return (prof && prof.status) || 'active';
+}
+function isStaffActive(name)   { return getStaffStatus(name) === 'active'; }
+function isStaffLeaving(name)  { return getStaffStatus(name) === 'leaving'; }
+function isStaffLeft(name)     { return getStaffStatus(name) === 'left'; }
+
+function getStaffLeaveDate(name) {
+  var prof = getStaffProfile(name);
+  return (prof && prof.leaveDate) || '';
+}
+
+// Số ngày còn lại đến leave_date (âm = đã qua, null = không có leave_date)
+function daysToLeave(name) {
+  var d = getStaffLeaveDate(name);
+  if (!d) return null;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var leave = new Date(d); leave.setHours(0,0,0,0);
+  return Math.round((leave - today) / 86400000);
+}
+
+// Số ngày cảnh báo trước khi nghỉ (config Cài đặt, default 7)
+function getLeavingWarnDays() {
+  return (D.settings && D.settings.leavingWarnDays) || 7;
+}
+
+// Auto-promote status dựa trên ngày hiện tại (idempotent — chỉ trả status mới)
+// KHÔNG ghi DB, để caller quyết định khi nào persist.
+function computeNextStaffStatus(name) {
+  var cur = getStaffStatus(name);
+  var days = daysToLeave(name);
+  if (days === null) return cur;
+  if (days < 0)                       return 'left';
+  if (days <= getLeavingWarnDays())   return cur === 'left' ? cur : 'leaving';
+  return cur;
+}
+
+// Lấy danh sách staff theo status
+function getActiveStaff()  { return (D.settings.staffList || []).filter(function(n){ return isStaffActive(n);  }); }
+function getLeavingStaff() { return (D.settings.staffList || []).filter(function(n){ return isStaffLeaving(n); }); }
+function getLeftStaff()    { return (D.settings.staffList || []).filter(function(n){ return isStaffLeft(n);    }); }
 
 // Helper: staffList đã sắp xếp — Management トゥアン luôn đứng đầu
 // Lấy tên nhân sự không có ký hiệu VP (SGN/HAN/Management → chỉ lấy phần tên)
@@ -7298,6 +7431,30 @@ function staffShortName(fullName) {
     return parts.slice(1).join(' '); // ヒエン, ハー, トゥアン...
   }
   return fullName; // giữ nguyên nếu không có prefix
+}
+
+// Staff Feature Step 5: HTML options cho dropdown "Người TH"
+// Caller tự render <option value="">— Chọn —</option> nếu cần empty option
+// Left → disabled + xám + 🚪 + (đã nghỉ YYYY-MM-DD)
+// Leaving → cam + ⏰ + (còn N ngày)
+function sortedStaffOptionsHtml(selectedName) {
+  var html = '';
+  sortedStaffList().forEach(function(name) {
+    var status = getStaffStatus(name);
+    var sel = (name === selectedName) ? ' selected' : '';
+    if (status === 'left') {
+      var leaveDate = getStaffLeaveDate(name);
+      var dateLabel = leaveDate ? ' (đã nghỉ ' + leaveDate + ')' : ' (đã nghỉ)';
+      html += '<option value="' + name + '" disabled style="color:#9ca3af; font-style:italic;"' + sel + '>🚪 ' + name + dateLabel + '</option>';
+    } else if (status === 'leaving') {
+      var d = daysToLeave(name);
+      var warnLabel = (d !== null && d >= 0) ? ' (còn ' + d + ' ngày)' : '';
+      html += '<option value="' + name + '" style="color:#d97706;"' + sel + '>⏰ ' + name + warnLabel + '</option>';
+    } else {
+      html += '<option value="' + name + '"' + sel + '>' + name + '</option>';
+    }
+  });
+  return html;
 }
 
 function sortedStaffList() {
@@ -8331,12 +8488,16 @@ async function saveStaffProfile(name, field, val) {
   persistD();
   const COL_STAFF = {
     role:'role', salaryGross:'salary_gross', salaryNet:'salary_net',
-    contractEnd:'contract_end', order:'sort_order'
+    contractEnd:'contract_end', order:'sort_order',
+    status:'status', leaveDate:'leave_date'
   };
   const col = COL_STAFF[field];
   if (col && window._sbReady) {
+    // DATE columns: '' → null (Supabase DATE từ chối empty string)
+    const _isDate = (col === 'contract_end' || col === 'leave_date');
+    const _v = (_isDate && (val === '' || val === undefined)) ? null : val;
     try {
-      const { error } = await _sb.from('staff').update({ [col]: val }).eq('full_name', name);
+      const { error } = await _sb.from('staff').update({ [col]: _v }).eq('full_name', name);
       if (error) _sbReport('saveStaffProfile', error, {op: 'update', table: 'staff'});
     } catch(e) { _sbReport('saveStaffProfile', e, {op: 'update', table: 'staff'}); }
   }
@@ -8778,10 +8939,30 @@ function renderStaffPage() {
       + '</div>';
   }
 
-  sc.innerHTML = reminderHtml + `
+  // Staff Feature Step 7: tab "Đang làm" / "Đã nghỉ"
+  const _staffTab = window._staffTab || 'active';
+  const _activeCount = sortedStaff.filter(n => !isStaffLeft(n)).length;
+  const _leftCount   = sortedStaff.filter(n =>  isStaffLeft(n)).length;
+  const staffToShow  = (_staffTab === 'left')
+    ? sortedStaff.filter(n =>  isStaffLeft(n))
+    : sortedStaff.filter(n => !isStaffLeft(n));
+
+  const _tabHtml = `<div style="display:flex; gap:4px; margin-bottom:16px; border-bottom:2px solid #e5e7eb;">
+    <button onclick="switchStaffTab('active')"
+            style="padding:10px 20px; border:none; background:${_staffTab==='active'?'#3b82f6':'transparent'}; color:${_staffTab==='active'?'#fff':'#374151'}; cursor:pointer; border-radius:6px 6px 0 0; font-weight:600; font-family:inherit;">
+      👥 Đang làm (${_activeCount})
+    </button>
+    <button onclick="switchStaffTab('left')"
+            style="padding:10px 20px; border:none; background:${_staffTab==='left'?'#6b7280':'transparent'}; color:${_staffTab==='left'?'#fff':'#374151'}; cursor:pointer; border-radius:6px 6px 0 0; font-weight:600; font-family:inherit;">
+      🚪 Đã nghỉ (${_leftCount})
+    </button>
+  </div>`;
+
+  sc.innerHTML = reminderHtml + _tabHtml + `
   <!-- Staff grid -->
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
-    ${sortedStaff.map((s,idx)=>{
+    ${staffToShow.length === 0 ? `<div style="grid-column:1/-1; padding:30px; text-align:center; color:var(--gray4); font-size:13px;">${_staffTab==='left' ? '🚪 Chưa có nhân sự nào đã nghỉ.' : '👥 Chưa có nhân sự đang làm.'}</div>` : ''}
+    ${staffToShow.map((s,idx)=>{
       const si = idx; // unique numeric ID for DOM elements (avoids Japanese char collisions)
       const v = sd[s]||{n:0,r:0,ot:0,pjs:[]};
       const t = v.n+v.r;
@@ -8795,7 +8976,7 @@ function renderStaffPage() {
         return lf<=today&&lt>=today;
       });
 
-      return `<div class="card" style="border-top:3px solid ${leaveToday?'#E74C3C':perfColor}">
+      return `<div class="card" style="border-top:3px solid ${leaveToday?'#E74C3C':perfColor}${isStaffLeft(s) ? '; opacity:0.7; background:#f3f4f6; border-left:4px solid #6b7280' : ''}">
         <!-- Card header: name + role + actions -->
         <div class="card-hd" style="flex-wrap:wrap;gap:6px">
           <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
@@ -8811,8 +8992,25 @@ function renderStaffPage() {
           </div>
           <div style="display:flex;gap:4px;align-items:center">
             ${leaveToday?'<span style="background:#e74c3c;color:#fff;font-size:9px;padding:2px 7px;border-radius:99px;font-weight:700">🏖 Nghỉ hôm nay</span>':''}
+            ${isStaffLeaving(s) ? (() => {
+              const _d = daysToLeave(s);
+              let _label;
+              if (_d === null)      _label = 'Sắp nghỉ';
+              else if (_d < 0)      _label = `Quá hạn ${-_d} ngày`;
+              else if (_d === 0)    _label = 'Nghỉ hôm nay';
+              else if (_d === 1)    _label = 'Nghỉ ngày mai';
+              else                  _label = `Còn ${_d} ngày`;
+              const _urgent = _d !== null && _d <= 3;
+              const _bg     = _urgent ? '#fee2e2' : '#fef3c7';
+              const _tx     = _urgent ? '#991b1b' : '#92400e';
+              const _bd     = _urgent ? '#fca5a5' : '#fbbf24';
+              return `<span style="background:${_bg};color:${_tx};border:1px solid ${_bd};padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;display:inline-flex;align-items:center;gap:3px" title="Ngày nghỉ chính thức: ${getStaffLeaveDate(s)}">⏰ ${_label}</span>`;
+            })() : ''}
             <button class="btn btn-xs" style="background:#6366f1;color:#fff;border-color:#6366f1" onclick="openStaffReviewModal('${x(s)}')" title="Mở báo cáo đánh giá toàn diện theo kỳ HĐ">📊 Đánh giá năm</button>
             <button class="btn btn-xs" style="background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.25)" onclick="openAddLeave('${s}')">＋ Nghỉ phép</button>
+            ${getStaffStatus(s) === 'left'
+              ? `<button class="btn btn-xs" style="background:#10b981;color:#fff;border-color:#10b981" onclick="restoreStaff('${x(s)}')">↩ Khôi phục</button>`
+              : `<button class="btn btn-xs" style="background:#fef3c7;color:#92400e;border-color:#fbbf24" onclick="openLeavingModal('${x(s)}')">${getStaffStatus(s) === 'leaving' ? '📅 Đổi ngày nghỉ' : '🚪 Nghỉ việc'}</button>`}
           </div>
         </div>
 
@@ -9183,6 +9381,22 @@ function renderSettings() {
         </div><button class="btn btn-sm" style="margin-top:9px" onclick="addTag('typeVNTags',140)">+ Thêm hạng mục</button>
       </div></div>
   </div>
+
+  <!-- Staff Feature Step 9: Config leavingWarnDays -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-hd"><span class="card-hd-title">⚙️ Cấu hình nhân sự</span></div>
+    <div class="card-body" style="padding:12px 14px">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <label style="min-width:220px; font-size:12px; font-weight:600;">Cảnh báo trước ngày nghỉ:</label>
+        <input type="number" id="settingLeavingWarnDays"
+               value="${D.settings.leavingWarnDays || 7}"
+               min="1" max="60"
+               style="width:80px; padding:4px 8px; border:1px solid var(--gray2); border-radius:var(--r); font-family:inherit; font-size:13px;">
+        <span style="color:var(--gray4); font-size:12px;">ngày (mặc định 7) — staff sẽ chuyển sang "leaving" + badge ⏰ khi còn ≤ N ngày tới ngày nghỉ chính thức</span>
+      </div>
+    </div>
+  </div>
+
   <div style="margin-top:16px">
   <!-- KPI REFERENCE CARD -->
   <div class="card" style="grid-column:1/-1">
@@ -9555,6 +9769,12 @@ async function saveSettings() {
   D.settings.typeListVN=[...document.querySelectorAll('#typeVNTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
   D.settings.contactList=[...document.querySelectorAll('#contactTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
   D.settings.contactListVN=[...document.querySelectorAll('#contactVNTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
+  // Staff Feature Step 9: leavingWarnDays config
+  var _warnInput = document.getElementById('settingLeavingWarnDays');
+  if (_warnInput) {
+    var _v = parseInt(_warnInput.value, 10);
+    D.settings.leavingWarnDays = (isNaN(_v) || _v < 1) ? 7 : Math.min(_v, 60);
+  }
   save(); toast('✓ Đã lưu cài đặt');
   if (window._sbReady && window._sbSettingsId) {
     try {
@@ -9565,8 +9785,66 @@ async function saveSettings() {
         contact_list: D.settings.contactList,
         contact_list_vn: D.settings.contactListVN,
         holidays: D.settings.holidays,
+        leaving_warn_days: D.settings.leavingWarnDays || 7,
       }).eq('id', window._sbSettingsId);
     } catch(e) { console.warn('[Phase 3] settings update failed:', e.message); }
+  }
+
+  // Staff Feature Step 9.5 (fix bug đồng bộ): sync staffList → staff table
+  // Tên mới trong staffList nhưng chưa có row staff → INSERT (default values).
+  // KHÔNG xóa khỏi DB khi user xóa khỏi staffList — giữ historical reference;
+  // nếu muốn nghỉ việc thật → dùng modal "Nghỉ việc" (Step 4).
+  if (window._sbReady) {
+    (async function() {
+      try {
+        var existingRes = await _sb.from('staff').select('full_name');
+        if (existingRes.error) {
+          _sbReport('saveSettings (staff sync)', existingRes.error, {op:'select', table:'staff'});
+          return;
+        }
+        var existingNames = (existingRes.data || []).map(function(s){ return s.full_name; });
+        var newNames = (D.settings.staffList || []).filter(function(n){ return !existingNames.includes(n); });
+
+        if (newNames.length > 0) {
+          var inserts = newNames.map(function(name, idx) {
+            return {
+              full_name: name,
+              short_name: '',
+              office: name.startsWith('SGN') ? 'SGN'
+                    : name.startsWith('HAN') ? 'HAN'
+                    : name.startsWith('Management') ? 'Management'
+                    : '',
+              role: '',
+              salary_gross: 0,
+              salary_net: 0,
+              sort_order: (D.settings.staffList || []).length + idx,
+              status: 'active',
+              is_active: true
+            };
+          });
+
+          var insRes = await _sb.from('staff').insert(inserts);
+          if (insRes.error) {
+            _sbReport('saveSettings (staff insert)', insRes.error, {op:'insert', table:'staff'});
+          } else {
+            console.log('[saveSettings] Đã insert', newNames.length, 'staff mới vào DB:', newNames);
+            // Cập nhật local staffProfiles để hiện ngay không cần reload
+            newNames.forEach(function(name) {
+              if (!D.settings.staffProfiles[name]) {
+                D.settings.staffProfiles[name] = {
+                  role:'', salaryGross:0, salaryNet:0, contractEnd:'',
+                  order: D.settings.staffList.indexOf(name),
+                  status:'active', leaveDate:'',
+                  leaves:[], lateLog:[], trips:[]
+                };
+              }
+            });
+          }
+        }
+      } catch(e) {
+        _sbReport('saveSettings (staff sync)', e, {op:'sync', table:'staff'});
+      }
+    })();
   }
 }
 
@@ -9578,6 +9856,95 @@ function showModal(html) {
   document.getElementById('modalRoot').appendChild(bg);
 }
 function closeModal() { document.getElementById('activeModal')?.remove(); }
+
+/* Staff Feature Step 4: Leaving modal handlers */
+/* Staff Feature Step 7: tab switching + restore staff */
+var _leavingModalStaff = null;
+
+function switchStaffTab(tab) {
+  window._staffTab = tab;
+  renderStaffPage();
+}
+
+async function restoreStaff(name) {
+  if (!name) return;
+  if (!confirm('Khôi phục nhân sự "' + name + '" về trạng thái Đang làm?\n\nHọ sẽ xuất hiện lại trong dropdown và row của họ sẽ cho phép edit.')) return;
+
+  var prof = getStaffProfile(name);
+  prof.status = 'active';
+  prof.leaveDate = '';
+  save();
+
+  try {
+    await saveStaffProfile(name, 'status', 'active');
+    await saveStaffProfile(name, 'leaveDate', '');
+    toast('✓ Đã khôi phục ' + name + ' về Đang làm', 3000);
+  } catch(e) {
+    _sbReport('restoreStaff', e, {op: 'update', table: 'staff'});
+  }
+
+  renderStaffPage();
+}
+
+function openLeavingModal(staffName) {
+  if (!staffName) return;
+  _leavingModalStaff = staffName;
+  document.getElementById('leavingModalStaff').textContent = staffName;
+
+  // Pre-fill nếu đã có data
+  var prof = getStaffProfile(staffName);
+  document.getElementById('leavingModalDate').value = prof.leaveDate || '';
+  var curStatus = prof.status || 'active';
+  var radios = document.querySelectorAll('input[name="leavingStatus"]');
+  radios.forEach(function(r) {
+    r.checked = (r.value === curStatus) || (curStatus === 'active' && r.value === 'leaving');
+  });
+
+  // Title theo status hiện tại
+  var titleEl = document.getElementById('leavingModalTitle');
+  if (curStatus === 'leaving')      titleEl.textContent = '📅 Đổi ngày nghỉ';
+  else if (curStatus === 'left')    titleEl.textContent = '🚪 Đang nghỉ — chỉnh sửa';
+  else                              titleEl.textContent = '🚪 Nghỉ việc';
+
+  document.getElementById('leavingModal').style.display = 'flex';
+}
+
+function closeLeavingModal() {
+  document.getElementById('leavingModal').style.display = 'none';
+  _leavingModalStaff = null;
+}
+
+async function confirmLeaving() {
+  var name = _leavingModalStaff;
+  if (!name) return;
+
+  var leaveDate = document.getElementById('leavingModalDate').value || '';
+  var status = document.querySelector('input[name="leavingStatus"]:checked').value;
+
+  // Validate
+  if (!leaveDate && status === 'leaving') {
+    toast('⚠ Vui lòng chọn ngày nghỉ', 3000);
+    return;
+  }
+
+  // Update local D
+  var prof = getStaffProfile(name);
+  prof.status = status;
+  prof.leaveDate = leaveDate;
+  save();
+
+  // Persist DB (saveStaffProfile đã có _sbReport nội bộ)
+  try {
+    await saveStaffProfile(name, 'status', status);
+    await saveStaffProfile(name, 'leaveDate', leaveDate);
+    toast('✓ Đã cập nhật trạng thái nghỉ việc cho ' + name, 3000);
+  } catch(e) {
+    _sbReport('confirmLeaving', e, {op: 'update', table: 'staff'});
+  }
+
+  closeLeavingModal();
+  renderStaffPage();  // refresh UI (Nhân sự page dùng #staffContent, không phải #contentInner)
+}
 
 /* PWA */
 (function(){

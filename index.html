@@ -2138,59 +2138,63 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
   var _okCount = 0, _skipCount = 0, _failCount = 0;
   for (var i = 0; i < pjIdMap.length; i++) {
     var pair = pjIdMap[i];
-    var srcPath = prevMid + '/' + pair.prevId + '/slot_0.jpg';
-    var dstPath = newMid + '/' + pair.newId + '/slot_0.jpg';
-    try {
-      var dlRes = await _sb.storage.from('project-photos').download(srcPath);
-      if (dlRes.error) {
-        // File không tồn tại hoặc lỗi khác — log + skip
-        console.log('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'] SKIP', pair.prevId, '→', pair.newId, '— download fail:', dlRes.error.message || dlRes.error);
-        _skipCount++;
-        continue;
-      }
-      if (!dlRes.data) {
-        console.log('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'] SKIP', pair.prevId, '— no data');
-        _skipCount++;
-        continue;
-      }
-      var upRes = await _sb.storage.from('project-photos').upload(dstPath, dlRes.data, { contentType: 'image/jpeg', upsert: true });
-      if (upRes.error) {
-        console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'] UPLOAD FAIL', pair.newId, '|', upRes.error.message || upRes.error);
-        _sbReport('_sbCopyMonthPhotos (upload)', upRes.error, {op:'upload', table:'project-photos'});
+    var _pjCopied = false;   // ít nhất 1 slot copy thành công cho project này
+    // Loop TẤT CẢ 6 slots — copy mọi ảnh đại diện + ảnh phụ
+    for (var slot = 0; slot < 6; slot++) {
+      var srcPath = prevMid + '/' + pair.prevId + '/slot_' + slot + '.jpg';
+      var dstPath = newMid + '/' + pair.newId + '/slot_' + slot + '.jpg';
+      try {
+        var dlRes = await _sb.storage.from('project-photos').download(srcPath);
+        if (dlRes.error || !dlRes.data) {
+          // Slot này không có file ở tháng cũ — bình thường, skip im lặng
+          _skipCount++;
+          continue;
+        }
+        var upRes = await _sb.storage.from('project-photos').upload(dstPath, dlRes.data, { contentType: 'image/jpeg', upsert: true });
+        if (upRes.error) {
+          console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'][slot '+slot+'] UPLOAD FAIL', pair.newId, '|', upRes.error.message || upRes.error);
+          _sbReport('_sbCopyMonthPhotos (upload)', upRes.error, {op:'upload', table:'project-photos'});
+          _failCount++;
+          continue;
+        }
+        var dbRes = await _sb.from('project_photos').upsert(
+          { project_id: pair.newId, slot: slot, storage_path: dstPath, month_id: newMid },
+          { onConflict: 'project_id,slot' }
+        );
+        if (dbRes.error) {
+          console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'][slot '+slot+'] DB UPSERT FAIL', pair.newId, '|', dbRes.error.message || dbRes.error);
+          _sbReport('_sbCopyMonthPhotos (db)', dbRes.error, {op:'upsert', table:'project_photos'});
+          _failCount++;
+          continue;
+        }
+        if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
+        if (!window._sbPhotosByProjectId[pair.newId]) window._sbPhotosByProjectId[pair.newId] = {};
+        var _copiedUrl = BASE + dstPath;
+        window._sbPhotosByProjectId[pair.newId][slot] = _copiedUrl;
+        var _copiedPj = getPj(pair.newId);
+        if (_copiedPj) {
+          if (!_copiedPj.photos) _copiedPj.photos = [];
+          _copiedPj.photos[slot] = _copiedUrl;
+        }
+        _okCount++;
+        _pjCopied = true;
+        console.log('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'][slot '+slot+'] OK');
+      } catch(e) {
+        console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'][slot '+slot+'] EXCEPTION', pair.prevId, '|', e.message);
+        _sbReport('_sbCopyMonthPhotos', e, {op:'copy', table:'project-photos'});
         _failCount++;
-        continue;
       }
-      var dbRes = await _sb.from('project_photos').upsert(
-        { project_id: pair.newId, slot: 0, storage_path: dstPath, month_id: newMid },
-        { onConflict: 'project_id,slot' }
-      );
-      if (dbRes.error) {
-        console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'] DB UPSERT FAIL', pair.newId, '|', dbRes.error.message || dbRes.error);
-        _sbReport('_sbCopyMonthPhotos (db)', dbRes.error, {op:'upsert', table:'project_photos'});
-        _failCount++;
-        continue;
-      }
-      if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
-      if (!window._sbPhotosByProjectId[pair.newId]) window._sbPhotosByProjectId[pair.newId] = {};
-      var _copiedUrl = BASE + dstPath;
-      window._sbPhotosByProjectId[pair.newId][0] = _copiedUrl;
-      var _copiedPj = getPj(pair.newId);
-      if (_copiedPj) {
-        if (!_copiedPj.photos) _copiedPj.photos = [];
-        _copiedPj.photos[0] = _copiedUrl;
-        var _grid = document.getElementById('photoGrid-' + pair.newId);
-        if (_grid) _grid.innerHTML = renderPhotoSlots(_copiedPj);
-      }
-      _okCount++;
-    } catch(e) {
-      console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'] EXCEPTION', pair.prevId, '|', e.message);
-      _sbReport('_sbCopyMonthPhotos', e, {op:'copy', table:'project-photos'});
-      _failCount++;
+    }
+    // Sau khi xong các slot của project này, render lại photo grid nếu có
+    if (_pjCopied) {
+      var _grid = document.getElementById('photoGrid-' + pair.newId);
+      var _pjRef = getPj(pair.newId);
+      if (_grid && _pjRef) _grid.innerHTML = renderPhotoSlots(_pjRef);
     }
   }
-  console.log('[Photo carryover] DONE — ok='+_okCount+' skip='+_skipCount+' fail='+_failCount+' / total='+pjIdMap.length);
-  if (typeof toast === 'function' && (_okCount + _skipCount + _failCount) > 0) {
-    toast('🖼 Ảnh carryover: ' + _okCount + ' copy OK, ' + _skipCount + ' skip, ' + _failCount + ' fail', 4500);
+  console.log('[Photo carryover] DONE — ok='+_okCount+' slot copy OK, skip='+_skipCount+' slot không có file, fail='+_failCount+' lỗi / total='+(pjIdMap.length*6)+' slot');
+  if (typeof toast === 'function' && (_okCount + _failCount) > 0) {
+    toast('🖼 Ảnh carryover: ' + _okCount + ' slot OK, ' + _skipCount + ' skip, ' + _failCount + ' fail', 4500);
   }
   var np = newMid.split('-'), nY = parseInt(np[0]), nM = parseInt(np[1]);
   var _delFileCount = 0, _delPjCount = 0;
@@ -2240,52 +2244,49 @@ window._recoverMissingPhotos = async function(newMid, prevMid) {
   const prevByKey = {};
   prevPjs.forEach(p => { prevByKey[keyOf(p)] = p; });
 
-  // Filter new pjs chưa có ảnh (p.photos[0] empty hoặc thiếu trong _sbPhotosByProjectId)
-  const targets = newPjs.filter(p => {
-    const hasLocal = (p.photos||[])[0];
-    const hasCache = (window._sbPhotosByProjectId||{})[p.id] && (window._sbPhotosByProjectId[p.id]||{})[0];
-    return !hasLocal && !hasCache;
-  });
-  console.log('[Recover] Tìm thấy', targets.length, '/', newPjs.length, 'project thiếu ảnh');
-
+  console.log('[Recover] Quét', newPjs.length, 'project trong', newMid, '— kiểm tra từng slot 0..5');
   let ok=0, skip=0, fail=0;
-  for (let i=0; i<targets.length; i++) {
-    const newP = targets[i];
+  for (let i=0; i<newPjs.length; i++) {
+    const newP = newPjs[i];
     const prevP = prevByKey[keyOf(newP)];
     if (!prevP) {
-      console.log('['+(i+1)+'/'+targets.length+'] SKIP', newP.nameJP||newP.nameVN, '— không tìm thấy parent');
-      skip++; continue;
+      console.log('['+(i+1)+'/'+newPjs.length+'] SKIP project', newP.nameJP||newP.nameVN, '— không tìm thấy parent');
+      continue;
     }
-    const srcPath = prevMid + '/' + prevP.id + '/slot_0.jpg';
-    const dstPath = newMid  + '/' + newP.id  + '/slot_0.jpg';
-    try {
-      const dl = await _sb.storage.from('project-photos').download(srcPath);
-      if (dl.error || !dl.data) {
-        console.log('['+(i+1)+'/'+targets.length+'] SKIP', prevP.id, '— download:', dl.error?.message||'no data');
-        skip++; continue;
-      }
-      const up = await _sb.storage.from('project-photos').upload(dstPath, dl.data, { contentType:'image/jpeg', upsert:true });
-      if (up.error) { console.warn('UPLOAD FAIL:', up.error.message); fail++; continue; }
-      const db = await _sb.from('project_photos').upsert(
-        { project_id: newP.id, slot: 0, storage_path: dstPath, month_id: newMid },
-        { onConflict: 'project_id,slot' }
-      );
-      if (db.error) { console.warn('DB FAIL:', db.error.message); fail++; continue; }
-      // Update local D + cache
-      if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
-      window._sbPhotosByProjectId[newP.id] = window._sbPhotosByProjectId[newP.id] || {};
-      const newUrl = BASE + dstPath;
-      window._sbPhotosByProjectId[newP.id][0] = newUrl;
-      if (!newP.photos) newP.photos = [];
-      newP.photos[0] = newUrl;
-      console.log('['+(i+1)+'/'+targets.length+'] OK', newP.nameJP||newP.nameVN);
-      ok++;
-    } catch(e) { console.warn('EXCEPTION:', e.message); fail++; }
+    // Lookup existing project_photos rows cho project này (tránh trùng slot)
+    const existing = await _sb.from('project_photos').select('slot').eq('project_id', newP.id);
+    const existingSlots = new Set((existing.data||[]).map(r => r.slot));
+
+    for (let slot = 0; slot < 6; slot++) {
+      if (existingSlots.has(slot)) { continue; }  // đã có row, không recover slot này
+      const srcPath = prevMid + '/' + prevP.id + '/slot_' + slot + '.jpg';
+      const dstPath = newMid  + '/' + newP.id  + '/slot_' + slot + '.jpg';
+      try {
+        const dl = await _sb.storage.from('project-photos').download(srcPath);
+        if (dl.error || !dl.data) { skip++; continue; }   // slot này không có file ở tháng cũ
+        const up = await _sb.storage.from('project-photos').upload(dstPath, dl.data, { contentType:'image/jpeg', upsert:true });
+        if (up.error) { console.warn('  slot '+slot+' UPLOAD FAIL:', up.error.message); fail++; continue; }
+        const db = await _sb.from('project_photos').upsert(
+          { project_id: newP.id, slot: slot, storage_path: dstPath, month_id: newMid },
+          { onConflict: 'project_id,slot' }
+        );
+        if (db.error) { console.warn('  slot '+slot+' DB FAIL:', db.error.message); fail++; continue; }
+        // Update local D + cache
+        if (!window._sbPhotosByProjectId) window._sbPhotosByProjectId = {};
+        window._sbPhotosByProjectId[newP.id] = window._sbPhotosByProjectId[newP.id] || {};
+        const newUrl = BASE + dstPath;
+        window._sbPhotosByProjectId[newP.id][slot] = newUrl;
+        if (!newP.photos) newP.photos = [];
+        newP.photos[slot] = newUrl;
+        console.log('  ['+(i+1)+'/'+newPjs.length+'][slot '+slot+'] OK', newP.nameJP||newP.nameVN);
+        ok++;
+      } catch(e) { console.warn('  slot '+slot+' EXCEPTION:', e.message); fail++; }
+    }
   }
   save();
   if (typeof renderAll === 'function') renderAll();
-  console.log('=== RECOVER DONE — ok='+ok+' skip='+skip+' fail='+fail+' ===');
-  toast('✓ Recover: ' + ok + ' ảnh OK, ' + skip + ' skip, ' + fail + ' fail', 6000);
+  console.log('=== RECOVER DONE — ok='+ok+' slot copy, skip='+skip+' slot không có file, fail='+fail+' lỗi ===');
+  toast('✓ Recover: ' + ok + ' slot OK, ' + skip + ' skip, ' + fail + ' fail', 6000);
 };
 
 // Dump toàn bộ entities của 1 tháng lên Supabase

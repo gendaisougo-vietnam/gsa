@@ -622,21 +622,25 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
   @page { size: A4; margin: 1cm; }
 }
 
-/* Bảng "Chi tiết dự án" — hover sync timeline ↔ tên hạng mục */
+/* Bảng "Chi tiết dự án" + "Lịch CV" — hover sync timeline ↔ tên hạng mục (gấp đôi độ đậm) */
 table.detail-tl tr.grp-row:hover > td {
-  box-shadow: inset 0 0 0 9999px rgba(254,243,199,.18);
+  box-shadow: inset 0 0 0 9999px rgba(254,243,199,.36);  /* .18 → .36 (gấp đôi) */
 }
 table.detail-tl tr.grp-row:hover .grp-name-text {
   color: #7c2d12 !important;
   font-weight: 800 !important;
-  background: #fef3c7;
+  background: #fde68a;  /* amber-200 đậm hơn #fef3c7 amber-100 */
   padding: 0 4px;
   border-radius: 3px;
   transition: background .12s ease, color .12s ease;
 }
 
-/* Lịch CV nhân sự — hover sync TỪNG hạng mục qua data-tid */
-/* Nền vàng tràn 1px 2 bên để liền mạch qua border <td> (mỗi task chia thành N div per cell) */
+/* Lịch CV — kẻ ngang ĐẬM giữa các NHÂN VIÊN (giống ranh dự án ở Chi tiết dự án) */
+table.detail-tl tr.staff-last > td {
+  border-bottom: 2px solid #aaa !important;
+}
+
+/* Lịch CV nhân sự — hover sync TỪNG hạng mục qua data-tid (giữ cho future tables) */
 .tl-task.tl-task-hl {
   background: rgba(254,243,199,.55);
   box-shadow:
@@ -647,7 +651,7 @@ table.detail-tl tr.grp-row:hover .grp-name-text {
 .tl-task-name.tl-task-hl {
   color: #7c2d12 !important;
   font-weight: 800 !important;
-  background: #fef3c7 !important;
+  background: #fde68a !important;
   padding: 0 4px;
   border-radius: 3px;
   transition: background .12s ease, color .12s ease;
@@ -3484,7 +3488,80 @@ function renderMonthGantt(pjs) {
   const holidaySet = new Set(Object.keys(holidayMap));
   const hdrDays = _tlDayHeaderHtml(allDaysStr, todayStr, holidaySet, 22);
 
-  // ── Staff rows — sắp xếp theo thứ tự JP/VN ──
+  // ── Inner helpers: 1 hạng mục = 1 <tr> (đồng bộ kiến trúc Chi tiết dự án) ──
+  function buildTaskNameCell(r) {
+    const isActuallyDone = !!r.doneAt;
+    const isDoneByDate = r.dateTo && r.dateTo<todayStr && !isActuallyDone;
+    const isTodayUp = r.dateTo === todayStr && !isActuallyDone;
+    const isUrgent = r.dateTo && r.dateTo > todayStr && r.dateTo <= soon3Str && !isActuallyDone;
+    const isNew = r.status === 'new';
+    const isTrip = !!r._isTrip;
+    const numColor = isTrip ? '#8e44ad'
+      : r.isVN ? (isNew?'#7c3aed':'#db2777')
+      :          (isNew?'#27ae60':'#b8860b');
+    const typeName = (r.groupName||'').replace('パース','').replace('作成','').trim();
+    const textColor = isActuallyDone ? DONE_COLOR
+      : isTodayUp ? '#e74c3c'
+      : isUrgent ? '#e67e22'
+      : isDoneByDate ? DONE_COLOR
+      : 'inherit';
+    const prefix = isTrip ? '✈' : `[${r.pjNum||'?'}]`;
+    return `<td style="padding:2px 6px;border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px">
+      <div class="grp-name-text" style="font-size:11px;color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:18px">
+        <span style="font-weight:800;color:${numColor}">${prefix}</span> ${typeName}${isTodayUp?' 🔴':''}${isUrgent?' ⚡':''}${isActuallyDone?' <span style="color:#27ae60;font-size:9px">✓</span>':''}
+      </div>
+    </td>`;
+  }
+
+  function buildDayCellsForTask(task, staff) {
+    return days.map((d, i) => {
+      const dkStr = dk(d), isToday = dkStr === todayStr;
+      const isSun = d.getDay()===0, isSat = d.getDay()===6;
+      const isPast = dkStr < todayStr;
+      const isHoliday = !!holidayMap[dkStr];
+      const isWeekBorder = d.getDay()===1 && i>0;
+      const prevDate = i>0 ? days[i-1] : null;
+      const isAfterToday = prevDate && dk(prevDate) === todayStr;
+      const isOnLeave = getStaffLeaves(staff).some(l=>{
+        const lf=l.from||l.to, lt=l.to||l.from;
+        return lf&&lt&&lf<=dkStr&&lt>=dkStr;
+      });
+      const bg = isOnLeave ? 'rgba(231,76,60,.1)'
+        : isHoliday ? 'rgba(192,57,43,.07)'
+        : isToday ? _TL_TODAY_BG
+        : isPast ? 'rgba(0,0,0,.02)'
+        : isSun||isSat ? 'rgba(231,76,60,.04)'
+        : '#fff';
+      const borderL = (isToday || isAfterToday) ? _TL_TODAY_BORDER
+        : isWeekBorder ? '2px solid #ccc'
+        : '1px solid #ddd';
+      let inner = '';
+      if (task) {
+        const from = task.dateFrom || task.dateTo;
+        const to = task.dateTo || task.dateFrom;
+        const active = from && to && from <= dkStr && to >= dkStr;
+        if (active) {
+          const isActuallyDone = !!task.doneAt;
+          const isDoneByDate = task.dateTo && task.dateTo<todayStr && !isActuallyDone;
+          const isNew = task.status === 'new';
+          const isTrip = !!task._isTrip;
+          const bc = isTrip ? '#8e44ad'
+            : (isActuallyDone||isDoneByDate) ? DONE_BAR_COLOR
+            : task.isVN ? (isNew?'#7c3aed':'#db2777')
+            :             (isNew?'#5a9a35':'#d4900a');
+          const isFirst = from === dkStr || dkStr === startStr;
+          const isLast = to === dkStr || dkStr === endStr;
+          const pos = isFirst && isLast ? 'only' : isFirst ? 'start' : isLast ? 'end' : 'mid';
+          const bar = _tlBarHtml(bc, pos);
+          const upHtml = (!isTrip && task.dateTo === dkStr) ? _tlUpHtml(task, task.pjName || '') : '';
+          inner = `${bar}${upHtml}`;
+        }
+      }
+      return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible;vertical-align:middle"><div style="height:24px;position:relative;overflow:visible">${inner}</div></td>`;
+    }).join('');
+  }
+
+  // ── Staff rows — sắp xếp + restructure mỗi hạng mục = 1 sub-row ──
   const STAFF_ORDER = ['HAN トゥアン','SGN ヒエン','SGN L.フォン','HAN M.フオン','SGN ズエン','HAN ハー','HAN T.タイン','HAN H.タイン','HAN D.チュン','HAN ニュー'];
   const sortedStaff = [...D.settings.staffList].sort((a,b)=>{
     const ia=STAFF_ORDER.indexOf(a),ib=STAFF_ORDER.indexOf(b);
@@ -3492,7 +3569,6 @@ function renderMonthGantt(pjs) {
   });
   const staffRows = sortedStaff.map(staff => {
     const tasks = staffMap[staff]||[];
-    const isBusy = tasks.length>0;
 
     const activeLeaveList = getStaffLeaves(staff).filter(l=>{
       const lt=l.to||l.from; return lt>=todayStr;
@@ -3502,155 +3578,67 @@ function renderMonthGantt(pjs) {
       const range = l.to&&l.to!==l.from ? `${l.from}→${l.to}` : (l.from||'?');
       return `<div style="font-size:9px;color:#e74c3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sess} ${range}</div>`;
     }).join('');
-
-    // Trips
     const trips = getTrips(staff);
     const upcomingTrips = trips.filter(t=>(t.to||t.from)>=todayStr);
     const tripParts = upcomingTrips.map(t=>`<div style="font-size:9px;color:#8e44ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">✈ ${t.from||'?'}${t.to&&t.to!==t.from?'→'+t.to:''} ${t.note||''}</div>`).join('');
-
-    const taskParts = tasks.map(r=>{
-      const isActuallyDone = !!(r.doneAt);                                      // đã bấm ✓ UP
-      const isDoneByDate   = r.dateTo && r.dateTo < todayStr && !isActuallyDone; // quá ngày chưa UP
-      const isTodayUp      = r.dateTo === todayStr && !isActuallyDone;           // hôm nay UP
-      const isUrgent       = r.dateTo && r.dateTo > todayStr && r.dateTo <= soon3Str && !isActuallyDone; // sắp UP (>hôm nay)
-      const numColor = r.isVN
-        ? (r.status==='new' ? '#7c3aed' : '#db2777')
-        : (r.status==='new' ? '#27ae60' : '#b8860b');
-
-      const badge = isActuallyDone
-        ? '<span style="font-size:7px;background:#27ae60;color:#fff;border-radius:2px;padding:0 3px;margin-left:2px;font-weight:700">✓ Đã UP</span>'
-        : isTodayUp
-        ? '<span style="font-size:7px;color:#e74c3c;font-weight:800;margin-left:2px">🔴 Hôm nay UP</span>'
-        : isUrgent
-        ? '<span style="font-size:7px;color:#e67e22;font-weight:700;margin-left:2px">⚡Sắp UP</span>'
-        : '';
-
-      const textColor = isActuallyDone ? DONE_COLOR
-        : isTodayUp ? '#e74c3c'
-        : isUrgent  ? '#e67e22'
-        : isDoneByDate ? DONE_COLOR
-        : 'inherit';
-
-      return `<div style="font-size:9px;display:flex;align-items:center;gap:2px;white-space:nowrap;overflow:hidden">
-        <span style="font-size:8px;font-weight:800;color:${numColor};flex-shrink:0">[${r.pjNum||'?'}]</span>
-        <span style="overflow:hidden;text-overflow:ellipsis;color:${textColor}">${r.groupName.length>8?r.groupName.substring(0,8)+'…':r.groupName}</span>
-        ${r.upTime && !isActuallyDone ? `<span style="font-size:7px;color:#c0392b;font-weight:800;background:#fff0f0;border-radius:2px;padding:0 2px;flex-shrink:0">⚡${r.upTime}</span>` : ''}
-        ${badge}
-      </div>`;
-    }).join('');
-
     const summary = leaveParts+tripParts || '';
-    const nameBg  = tasks.length>0||trips.length>0 ? 'var(--gray1)' : '#e8fdf0';
+    const nameBg = tasks.length>0||trips.length>0 ? 'var(--gray1)' : '#e8fdf0';
 
-    // Day cells — mỗi hạng mục 1 dòng riêng, label trên bar, không chồng
-    const ROW_H = 16; // px mỗi hàng hạng mục
-    // taskCount: số dòng cần hiển thị (tính cả trip nếu không có task)
-    const hasAnyTrip = upcomingTrips.length > 0;
-    const taskCount = Math.max(1, tasks.length + (hasAnyTrip && tasks.length===0 ? 1 : 0));
-
-    const dayCells = days.map((d,i)=>{
-      const dkStr=dk(d), isToday=dkStr===todayStr, isSun=d.getDay()===0, isSat=d.getDay()===6;
-      const isPast=dkStr<todayStr, isHoliday=!!holidayMap[dkStr];
-      const isWeekBorder=d.getDay()===1&&i>0;
-      // B9: detect cell ngay SAU today để vẽ viền xanh 2 bên cột today
-      const prevDate = i>0 ? days[i-1] : null;
-      const isAfterToday = prevDate && dk(prevDate) === todayStr;
-      const isOnLeave = getStaffLeaves(staff).some(l=>{
-        const lf=l.from||l.to, lt=l.to||l.from;
-        return lf&&lt&&lf<=dkStr&&lt>=dkStr;
+    // OT total
+    let otTotal = 0;
+    [...(m.projects||[]),...(m.projectsVN||[])].forEach(p=>{
+      (p.groups||[]).forEach(g=>{
+        (g.rows||[]).forEach(r=>{
+          if(r.staff===staff && r.ot) otTotal += (r.ot||0);
+        });
       });
-      const isOnTrip = trips.some(t=>{
-        const tf=t.from||t.to, tt=t.to||t.from;
-        return tf&&tt&&tf<=dkStr&&tt>=dkStr;
-      });
-      const activeTasks = tasks.filter(r=>{
-        const from=r.dateFrom||r.dateTo, to=r.dateTo||r.dateFrom;
-        return from&&to&&from<=dkStr&&to>=dkStr;
-      });
+      (p.otLog||[]).forEach(e=>{ if(e.staff===staff) otTotal+=(e.hours||0); });
+    });
+    const otHtml = otTotal > 0
+      ? `<div style="font-size:11px;font-weight:800;color:#e67e22">${otTotal}</div><div style="font-size:8px;color:#aaa">h</div>`
+      : `<div style="font-size:10px;color:#ccc">—</div>`;
 
-      // B9: today bg xanh .15 (đồng bộ projectTimeline), onLeave/holiday vẫn ưu tiên
-      const bg = isOnLeave ? 'rgba(231,76,60,.1)'
-        : isHoliday ? 'rgba(192,57,43,.07)'
-        : isToday ? _TL_TODAY_BG
-        : isPast ? 'rgba(0,0,0,.02)'
-        : isSun||isSat ? 'rgba(231,76,60,.04)'
-        : '#fff';
-      // B9: viền xanh 2 bên cột today (qua border-left của today + isAfterToday)
-      const borderL = (isToday || isAfterToday) ? _TL_TODAY_BORDER
-        : isWeekBorder ? '2px solid #ccc'
-        : '1px solid #ddd';
-      const cellH = taskCount * ROW_H;
+    // Trip → fake task khi 0 real task (Option 2 đã duyệt)
+    const displayTasks = tasks.length > 0
+      ? tasks
+      : upcomingTrips.map(t => ({
+          id: `trip_${staff}_${t.from||t.to||'x'}`,
+          staff,
+          dateFrom: t.from || t.to || '',
+          dateTo:   t.to   || t.from || '',
+          status: 'new',
+          pjName: 'Đi công tác',
+          groupName: '✈ ' + (t.note || 'Công tác'),
+          isVN: false,
+          _isTrip: true,
+          doneAt: ''
+        }));
 
-      // Xây dựng từng dòng per task
-      const rowDivs = tasks.map((r, ri) => {
-        const from=r.dateFrom||r.dateTo, to=r.dateTo||r.dateFrom;
-        const active = from&&to&&from<=dkStr&&to>=dkStr;
-        const isActuallyDone = !!(r.doneAt);
-        const isDoneByDate = r.dateTo && r.dateTo<todayStr && !isActuallyDone;
-        const isNew = r.status==='new';
-        // B7: pos cho bar liền mạch -1px qua _tlBarHtml (đồng bộ projectTimeline)
-        const isFirst = from===dkStr || dkStr===startStr;
-        const isLast  = to===dkStr || dkStr===endStr;
-        const pos = isFirst && isLast ? 'only' : isFirst ? 'start' : isLast ? 'end' : 'mid';
-        const top = ri * ROW_H;
+    const numRows = Math.max(1, displayTasks.length);
+    // Border-bottom 2px ở 2 cell rowspan → đáy vùng span = ranh NV → liền mạch ngang với staff-last
+    const nameCell = `<td rowspan="${numRows}" style="background:${nameBg};padding:4px 8px;min-width:130px;max-width:150px;border-right:1px solid #bbb;border-bottom:2px solid #aaa;vertical-align:top">
+      <div style="font-weight:700;font-size:12px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${staff}</div>
+      ${summary ? `<div style="margin-top:2px">${summary}</div>` : (tasks.length===0&&trips.length===0?'<div style="font-size:9px;color:#27AE60;margin-top:2px">✓ Rảnh</div>':'')}
+    </td>`;
+    const otCell = `<td rowspan="${numRows}" style="background:${nameBg};padding:4px 2px;border-right:1px solid #bbb;border-bottom:2px solid #aaa;vertical-align:middle;text-align:center;min-width:36px">
+      ${otHtml}
+    </td>`;
 
-        let inner = '';
-        if (active) {
-          const bc = (isActuallyDone||isDoneByDate) ? DONE_BAR_COLOR
-            : r.isVN ? (isNew?'#7c3aed':'#db2777')
-            :          (isNew?'#5a9a35':'#d4900a');
-          // B2: UP marker khi cell = dateTo của task (tooltip chỉ bổ sung tên dự án)
-          const showUpHere = r.dateTo === dkStr;
-          const extraTitle = r.pjName || '';
-          const upHtml = showUpHere ? _tlUpHtml(r, extraTitle) : '';
-          inner = `${upHtml}${_tlBarHtml(bc, pos)}`;
-        }
-        return `<div data-tid="${r.id}" class="tl-task" style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_H}px;overflow:visible">${inner}</div>`;
-      });
+    // Empty staff (no tasks, no trips): 1 row with placeholder — đồng thời là staff-last
+    if (displayTasks.length === 0) {
+      const emptyTaskNameCell = `<td style="padding:2px 6px;border-bottom:1px solid #ddd;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px">
+        <div style="font-size:10px;color:#aaa;font-style:italic">—</div>
+      </td>`;
+      return `<tr class="grp-row staff-last">${nameCell}${otCell}${emptyTaskNameCell}${buildDayCellsForTask(null, staff)}</tr>`;
+    }
 
-      // Trip bar riêng dòng nếu không có task
-      if (isOnTrip && tasks.length===0) {
-        const tripActive = activeTasks.length===0;
-        const tripHtml = tripActive
-          ? `<div style="position:absolute;top:0;left:0;right:0;height:${ROW_H}px;overflow:visible"><div style="position:absolute;top:1px;left:2px;font-size:9px;color:#8e44ad;white-space:nowrap;font-weight:700;z-index:10;text-shadow:0 0 3px #fff">✈</div><div style="position:absolute;bottom:3px;left:0;right:0;height:${GANTT_BAR_H}px;background:#8e44ad;border-radius:2px"></div></div>`
-          : '';
-        return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible"><div style="height:${cellH}px;position:relative;overflow:visible">${tripHtml}</div></td>`;
-      }
-
-      return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible"><div style="height:${cellH}px;position:relative;overflow:visible">${rowDivs.join('')}</div></td>`;
+    // Render N task rows (1 row per task) — row cuối có class staff-last → border đậm phân tách NV
+    return displayTasks.map((r, idx) => {
+      const isLastOfStaff = idx === displayTasks.length - 1;
+      const leftCells = idx === 0 ? `${nameCell}${otCell}` : '';
+      const trClass = isLastOfStaff ? 'grp-row staff-last' : 'grp-row';
+      return `<tr class="${trClass}">${leftCells}${buildTaskNameCell(r)}${buildDayCellsForTask(r, staff)}</tr>`;
     }).join('');
-
-    return `<tr style="border-bottom:1px solid #ddd">
-      <td style="background:${nameBg};padding:4px 8px;min-width:130px;max-width:150px;border-right:1px solid #bbb;vertical-align:top">
-        <div style="font-weight:700;font-size:12px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${staff}</div>
-        ${summary ? `<div style="margin-top:2px">${summary}</div>` : (tasks.length===0&&trips.length===0?'<div style="font-size:9px;color:#27AE60">✓ Rảnh</div>':'')}
-        ${tasks.length>0?`<div style="margin-top:1px">${tasks.map(r=>{
-          const isNew=r.status==='new';
-          const bc=r.isVN?(isNew?'#7c3aed':'#db2777'):(isNew?'#5a9a35':'#d4900a');
-          const typeName=(r.groupName||'').replace('パース','').replace('作成','').trim();
-          return `<div data-tid="${r.id}" class="tl-task-name" style="font-size:8px;color:${bc};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;line-height:${ROW_H}px;cursor:default">[${r.pjNum||'?'}] ${typeName}</div>`;
-        }).join('')}</div>`:''}
-      </td>
-      <td style="background:${nameBg};padding:4px 2px;border-right:1px solid #bbb;vertical-align:middle;text-align:center;min-width:36px">
-        ${(()=>{
-          // Tổng OT từ tất cả hạng mục của nhân sự này trong tháng hiện tại
-          const m = curMonth();
-          let otTotal = 0;
-          [...(m.projects||[]),...(m.projectsVN||[])].forEach(p=>{
-            (p.groups||[]).forEach(g=>{
-              (g.rows||[]).forEach(r=>{
-                if(r.staff===staff && r.ot) otTotal += (r.ot||0);
-              });
-            });
-            (p.otLog||[]).forEach(e=>{ if(e.staff===staff) otTotal+=(e.hours||0); });
-          });
-          return otTotal > 0
-            ? `<div style="font-size:11px;font-weight:800;color:#e67e22">${otTotal}</div><div style="font-size:8px;color:#aaa">h</div>`
-            : `<div style="font-size:10px;color:#ccc">—</div>`;
-        })()}
-      </td>
-      ${dayCells}
-    </tr>`;
   }).join('');
 
   return `<div style="overflow-x:auto">
@@ -3659,6 +3647,7 @@ function renderMonthGantt(pjs) {
       <tr>
         <th style="background:var(--navy);width:140px;min-width:130px;padding:4px 8px;color:rgba(255,255,255,.7);font-size:10px;text-align:left">Nhân sự</th>
         <th style="background:var(--navy);width:36px;min-width:36px;padding:4px 4px;color:#FFC000;font-size:10px;text-align:center;white-space:nowrap">OT</th>
+        <th style="background:var(--navy);width:160px;min-width:140px;padding:4px 8px;color:rgba(255,255,255,.9);font-size:10px;text-align:left">Hạng mục</th>
         ${hdrMonths}
       </tr>
       <tr>
@@ -3666,6 +3655,7 @@ function renderMonthGantt(pjs) {
           Hôm nay: <strong style="color:var(--gold)">${todayStr.split('-').slice(1).join('/')}</strong>
         </th>
         <th style="background:var(--navy2);padding:4px;font-size:9px;color:var(--gold2);text-align:center">h</th>
+        <th style="background:var(--navy2);border-bottom:1px solid rgba(255,255,255,.15)"></th>
         ${hdrDays}
       </tr>
     </thead>

@@ -29,6 +29,8 @@ EMERGENCY_BACKUP_*.json
 *.before_rollback.html
 index_backup_*.html
 index1.html
+index_fixed.html
+index (*).html
 
 # Office binaries
 *.docx

@@ -1058,6 +1058,10 @@ async function sbLoadAll() {
           rate11:r.rate11,rate12:r.rate12,rate13:r.rate13,
           rate14:r.rate14,rate15:r.rate15,
           fromCarryover: !!r.from_carryover,
+          // PHASE 3: carryRef — load từ Supabase
+          isCarryRef:  !!r.is_carry_ref,
+          sourceRowId: r.source_row_id || null,
+          sourceMonth: r.source_month  || null,
           _fromTlTask: tlStaffSet.size > 0 && r.staff && tlStaffSet.has(r.staff) ? true : undefined,
         }))
       };
@@ -1074,6 +1078,13 @@ async function sbLoadAll() {
 
     // Lọc orphaned groups: bad tlTaskId, hoặc null-id không khớp TL task, hoặc trùng lặp
     const groups = allMappedGroups.filter(function(g) {
+      // Fix 2D: group có rows với data thực (staff/qty/dates/done) → luôn KEEP
+      // (bảo vệ công sức user nhập, tránh mất do tl_task_id mismatch)
+      const _hasRealRow = (g.rows||[]).some(function(r) {
+        return r.staff || (r.qty > 0) || r.dateFrom || r.dateTo || r.doneAt;
+      });
+      if (_hasRealRow) return true;
+
       if (g.tlTaskId) {
         if (_pTlIdSet.has(g.tlTaskId)) return true;
         _orphanedGroupIds.push(g.id); return false;  // bad tlTaskId → orphaned
@@ -1088,13 +1099,10 @@ async function sbLoadAll() {
       return true;  // data cũ chưa có tlTaskId, chưa có proper group → keep
     });
 
-    // Xóa orphaned groups khỏi Supabase (fire-and-forget)
+    // Fix 2C: KHÔNG auto-delete orphan — tránh race condition + silent data loss
+    // (auto-delete cũ từng xóa nhầm groups VN hợp lệ khi tl_task_id mismatch)
     if (_orphanedGroupIds.length > 0) {
-      console.log('[sbLoadAll] Xóa', _orphanedGroupIds.length, 'orphaned group(s):', _orphanedGroupIds);
-      _orphanedGroupIds.forEach(function(gid) {
-        _sb.from('rows').delete().eq('group_id', gid).then(function(){});
-        _sb.from('groups').delete().eq('id', gid).then(function(){});
-      });
+      console.warn('[sbLoadAll] Tìm thấy', _orphanedGroupIds.length, 'group orphan (KHÔNG auto-delete):', _orphanedGroupIds);
     }
 
     // Sort groups theo thứ tự tl_tasks từ Supabase
@@ -1199,7 +1207,7 @@ async function sbPushAll() {
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
         _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++ });
-        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, sort_order:_sr++ }); });
+        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, sort_order:_sr++ }); });
       });
     });
   });
@@ -2010,12 +2018,14 @@ function getPjGlobal(id) {
 
 function totalNew(p) {
   const a=(p.records||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
+  // Phase 1: exclude isCarryRef — số mai chỉ tính ở tháng GỐC
+  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
   return a+b;
 }
 function totalRev(p) {
   const a=(p.records||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
+  // Phase 1: exclude isCarryRef — số mai chỉ tính ở tháng GỐC
+  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
   return a+b;
 }
 function totalOT(p) {
@@ -2374,6 +2384,10 @@ async function _sbDumpMonthEntities(mid) {
           rate12: r.rate12||0, rate13: r.rate13||0,
           rate14: r.rate14||0, rate15: r.rate15||0,
           from_carryover: !!r.fromCarryover,
+          // PHASE 3: carryRef — số mai tính ở tháng GỐC
+          is_carry_ref: !!r.isCarryRef,
+          source_row_id: r.sourceRowId || null,
+          source_month:  r.sourceMonth || null,
           sort_order: ri,
         });
       });
@@ -2457,9 +2471,18 @@ async function doAddMonth(prevMid, newMid) {
 
       const newGroups = (p.groups||[]).map(g => {
         const _newGid = gid();
+        // Defensive: nếu tlTaskId remap fail (task cũ đã bị xóa) → fallback tìm tlTask cùng name để re-link
+        let _newTlId = null;
+        if (g.tlTaskId && _tlIdMap[g.tlTaskId]) {
+          _newTlId = _tlIdMap[g.tlTaskId];
+        } else if (g.type) {
+          const _match = newTlTasks.find(t => t.name === g.type);
+          if (_match) _newTlId = _match.id;
+        }
         const newRows = (g.rows||[]).map(r => {
           // Giữ nguyên timeline nếu dateTo >= hôm nay (bao gồm lịch UP hôm nay)
           const rowActive = r.dateTo && r.dateTo >= todayStr && !r.doneAt;
+          const _srcId = r.id;  // Phase 1: lưu id gốc TRƯỚC khi gán id mới
           return {
             ...r,
             id: gid(),                                  // NEW row id
@@ -2477,12 +2500,16 @@ async function doAddMonth(prevMid, newMid) {
             doneAt:   rowActive ? ''          : '', // reset doneAt để UP lại được
             // Đánh dấu carryover từ tháng cũ → lock (chỉ áp dụng row đã KHÔNG còn active)
             fromCarryover: rowActive ? false : true,
+            // PHASE 1: carryRef — số mai chỉ tính ở tháng GỐC (chỉ áp dụng cho rowActive)
+            isCarryRef:  rowActive ? true   : false,
+            sourceRowId: rowActive ? _srcId : null,
+            sourceMonth: rowActive ? prevMid : null,
           };
         });
         return {
           ...g,
           id: _newGid,                                  // NEW group id
-          tlTaskId: g.tlTaskId ? (_tlIdMap[g.tlTaskId] || null) : null,  // remap nếu có
+          tlTaskId: _newTlId,                           // Fix 2B: ưu tiên remap, fallback theo type name
           rows: newRows,
         };
       });
@@ -2496,6 +2523,13 @@ async function doAddMonth(prevMid, newMid) {
         office:    p.office    || '',
         contact:   p.contact   || '',
         mainStaff: p.mainStaff || '',
+        // VN-specific fields (Chi tiết dự án) — phải carry sang tháng mới
+        client:            p.client            || '',
+        buildingType:      p.buildingType      || '',
+        scope:             p.scope             || '',
+        area:              p.area              || '',
+        constructionStart: p.constructionStart || '',
+        constructionEnd:   p.constructionEnd   || '',
         groups:    newGroups,
         tlTasks:   newTlTasks,
         photos:    (p.photos||[]).filter(Boolean), // copy ảnh sang tháng mới
@@ -5577,6 +5611,35 @@ async function markRowDone(pjId, gId, rId, overrideDoneAt, overrideUpScore) {
   const score = (overrideUpScore != null) ? overrideUpScore : calcUpScore(doneAt, r.dateTo, r.upTime||'');
   r.doneAt  = doneAt;
   r.upScore = score;
+
+  // PHASE 2: nếu row là carryRef → ghi UP về row gốc tháng cũ (qty tính ở tháng gốc)
+  if (r.isCarryRef && r.sourceMonth && r.sourceRowId) {
+    const srcMonth = D.months[r.sourceMonth];
+    if (srcMonth) {
+      const allSrcPjs = [...(srcMonth.projects||[]), ...(srcMonth.projectsVN||[])];
+      let srcRow = null;
+      for (const sp of allSrcPjs) {
+        for (const sg of (sp.groups||[])) {
+          const found = (sg.rows||[]).find(x => x.id === r.sourceRowId);
+          if (found) { srcRow = found; break; }
+        }
+        if (srcRow) break;
+      }
+      if (srcRow) {
+        srcRow.doneAt  = doneAt;
+        srcRow.upScore = score;
+        if (window._sbReady) {
+          try {
+            const { error } = await _sb.from('rows').update({ done_at: doneAt, up_score: score }).eq('id', r.sourceRowId);
+            if (error) console.warn('[markRowDone] sync source row fail:', error.message);
+          } catch(e) { console.warn('[markRowDone] sync source row exception:', e.message); }
+        }
+        console.log('[markRowDone] Synced UP về row gốc tháng', r.sourceMonth);
+      } else {
+        console.warn('[markRowDone] Không tìm thấy row gốc', r.sourceRowId, 'ở tháng', r.sourceMonth);
+      }
+    }
+  }
 
   const label = score===10?'● SỚM':score===8?'✓ ĐÚNG GIỜ':score===7?'✓ TRONG NGÀY':score>=1?'● MUỘN':'● QUÁ HẠN';
   const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;

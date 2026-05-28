@@ -3387,15 +3387,15 @@ function getHolidays() {
 }
 
 function renderMonthGantt(pjs) {
+  // B4: Window đồng bộ projectTimeline qua _tlComputeWindow
+  // (1 tuần cuối tháng cũ + 4 tuần tháng mới, extend 42 nếu today rơi ngoài)
   const today = new Date(); today.setHours(0,0,0,0);
-  const todayStr = localDateStr(today);
-  const days = [];
-  // 7 ngày trước + hôm nay + 48 ngày sau = 56 ngày (8 tuần) để bao phủ dự án dài hạn
-  for(let i=-7;i<49;i++){
-    const d=new Date(today); d.setDate(today.getDate()+i); days.push(d);
-  }
-  const startStr = localDateStr(days[0]);
-  const endStr   = localDateStr(days[days.length-1]);
+  const W = _tlComputeWindow(D.activeMonth);
+  const { allDays: allDaysStr, todayStr, holidaySet, monthSpans } = W;
+  const startStr = allDaysStr[0];
+  const endStr   = allDaysStr[allDaysStr.length-1];
+  // Date array cho .getDay() trong buildDayCellsForTask
+  const days = allDaysStr.map(s => new Date(s + 'T00:00:00'));
   function dk(d){ return localDateStr(d); }
 
   const holidays = getHolidays();
@@ -3471,21 +3471,8 @@ function renderMonthGantt(pjs) {
     if(r.staff && staffMap[r.staff]) staffMap[r.staff].push(r);
   });
 
-  // B5 — Month spans (format {m, span} đồng bộ helper) + fix bug i===20 thành days.length-1
-  let curMo=-1, mSpan=0;
-  const monthSpans=[];
-  days.forEach((d,i)=>{
-    if(d.getMonth()!==curMo){
-      if(curMo>=0) monthSpans.push({m: curMo+1, span: mSpan});
-      curMo=d.getMonth(); mSpan=1;
-    } else mSpan++;
-    if(i===days.length-1) monthSpans.push({m: curMo+1, span: mSpan});
-  });
+  // monthSpans + holidaySet + allDaysStr đã có từ _tlComputeWindow ở đầu hàm
   const hdrMonths = _tlMonthHeaderCells(monthSpans);
-
-  // B6 — Day header dùng helper (style đồng bộ projectTimeline)
-  const allDaysStr = days.map(d => dk(d));
-  const holidaySet = new Set(Object.keys(holidayMap));
   const hdrDays = _tlDayHeaderHtml(allDaysStr, todayStr, holidaySet, 22);
 
   // ── Inner helpers: 1 hạng mục = 1 <tr> (đồng bộ kiến trúc Chi tiết dự án) ──

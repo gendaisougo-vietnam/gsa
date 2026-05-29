@@ -1081,7 +1081,7 @@ async function sbLoadAll() {
       const tlTaskRaw = g.tl_task_id ? _pTlList.find(t => t.id === g.tl_task_id) : null;
       const tlStaffSet = new Set(Array.isArray(tlTaskRaw?.staff) ? tlTaskRaw.staff : []);
       return {
-        id: g.id, type: g.type, tlTaskId: g.tl_task_id,
+        id: g.id, type: g.type, tlTaskId: g.tl_task_id, _manual: !!g.manual,
         rows: (rowsByGroup[g.id] || []).map(r => ({
           id: r.id, staff: r.staff, status: r.status, qty: r.qty,
           dateFrom: r.date_from || '', dateTo: r.date_to || '',
@@ -1245,7 +1245,7 @@ async function sbPushAll() {
   Object.values(D.months||{}).forEach(function(m){
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
-        _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++ });
+        _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++, manual: !!g._manual });
         (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, sort_order:_sr++ }); });
       });
     });
@@ -2403,6 +2403,7 @@ async function _sbDumpMonthEntities(mid) {
         type: g.type || '',
         sort_order: gi,
         tl_task_id: g.tlTaskId || null,
+        manual: !!g._manual,
       });
     });
   });
@@ -4472,22 +4473,27 @@ function syncTlTaskToGroup(pjId, task) {
   save();
 
   // Upsert group + rows lên Supabase để sbLoadAll() trả về dữ liệu mới nhất trên mọi thiết bị
-  // sort_order dùng vị trí sau khi đã sort để Supabase cũng đúng thứ tự
+  // Chain rows upsert SAU groups upsert resolve OK → tránh FK violation race
   if (window._sbReady) {
     _sb.from('groups').upsert(
       { id: grp.id, project_id: pjId, type: grp.type||'', tl_task_id: task.id, sort_order: p.groups.indexOf(grp) },
       { onConflict: 'id' }
-    ).then(function(res){ if(res.error) _sbReport('syncTlTaskToGroup (groups)', res.error, {op:'upsert', table:'groups'}); })
-     .catch(function(e){ _sbReport('syncTlTaskToGroup (groups)', e, {op:'upsert', table:'groups'}); });
-    newRows.forEach(function(r) {
-      _sb.from('rows').upsert(
-        { id: r.id, group_id: grp.id, staff: r.staff||null, status: r.status||'new',
-          qty: r.qty||0, date_from: r.dateFrom||null, date_to: r.dateTo||null,
-          done_at: r.doneAt||null, up_time: r.upTime||null, note: r.note||'', ot: r.ot||0 },
-        { onConflict: 'id' }
-      ).then(function(res){ if(res.error) _sbReport('syncTlTaskToGroup (rows)', res.error, {op:'upsert', table:'rows'}); })
-       .catch(function(e){ _sbReport('syncTlTaskToGroup (rows)', e, {op:'upsert', table:'rows'}); });
-    });
+    ).then(function(res) {
+      if (res.error) {
+        _sbReport('syncTlTaskToGroup (groups)', res.error, {op:'upsert', table:'groups'});
+        return;  // Bỏ qua rows nếu group fail (tránh FK rows_group_id_fkey)
+      }
+      // GROUPS upsert OK → giờ mới upsert rows
+      newRows.forEach(function(r) {
+        _sb.from('rows').upsert(
+          { id: r.id, group_id: grp.id, staff: r.staff||null, status: r.status||'new',
+            qty: r.qty||0, date_from: r.dateFrom||null, date_to: r.dateTo||null,
+            done_at: r.doneAt||null, up_time: r.upTime||null, note: r.note||'', ot: r.ot||0 },
+          { onConflict: 'id' }
+        ).then(function(rRes){ if(rRes.error) _sbReport('syncTlTaskToGroup (rows)', rRes.error, {op:'upsert', table:'rows'}); })
+         .catch(function(e){ _sbReport('syncTlTaskToGroup (rows)', e, {op:'upsert', table:'rows'}); });
+      });
+    }).catch(function(e) { _sbReport('syncTlTaskToGroup (groups)', e, {op:'upsert', table:'groups'}); });
   }
 
   // Xóa rows bị remove khỏi Supabase
@@ -5989,6 +5995,7 @@ function renderGroups(p) {
 
   const groups = [...(p.groups||[])]
     .filter(function(g) {
+      if (g._manual) return true;  // group thêm thủ công qua addGroup → luôn hiển thị (không phụ thuộc tlTasks)
       if (g.tlTaskId) {
         return _tlIdRGSet.has(g.tlTaskId);
       }
@@ -6506,7 +6513,7 @@ function refreshStaffSched(pjId) {
 async function addGroup(pjId) {
   const p=getPj(pjId); if(!p) return;
   if(!p.groups) p.groups=[];
-  p.groups.push({id:gid(),type:'',rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
+  p.groups.push({id:gid(),type:'',_manual:true,rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
   _sbAuditLog('create', 'groups', p.groups[p.groups.length-1] && p.groups[p.groups.length-1].id || '', 'Thêm hạng mục cho "' + (p.nameVN||p.nameJP||pjId) + '"');
   setTimeout(()=>{ const inputs=document.querySelectorAll(`#rbody-${pjId} .grp-hd .tbl-input-dark`); if(inputs.length) inputs[inputs.length-1].focus(); },50);
@@ -6516,12 +6523,12 @@ async function addGroup(pjId) {
       var pObjAG = getPj(pjId);
       var pNameAG = pObjAG && (pObjAG.nameVN || pObjAG.nameJP) || pjId;
       _sbQueueChange('Thêm hạng mục vào "' + pNameAG + '"',
-        'groups', 'insert', g.id, { project_id: pjId, type: '', sort_order: p.groups.length - 1 }, { projectId: pjId });
+        'groups', 'insert', g.id, { project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true }, { projectId: pjId });
       _sbQueueChange('Thêm dòng đầu tiên cho hạng mục mới | ' + pNameAG,
         'rows', 'insert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
     } else {
       try {
-        const { error: err1 } = await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1 });
+        const { error: err1 } = await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true });
         if (err1) _sbReport('addGroup (groups)', err1, {op: 'insert', table: 'groups'});
         const { error: err2 } = await _sb.from('rows').insert({ id: g.rows[0].id, group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' });
         if (err2) _sbReport('addGroup (rows)', err2, {op: 'insert', table: 'rows'});

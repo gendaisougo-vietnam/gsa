@@ -1206,6 +1206,10 @@ async function sbLoadAll() {
     console.warn('[Auto-promote] FAIL:', e.message);
   }
 
+  // FORCE activeMonth = tháng MỚI NHẤT (an toàn — tránh ghi nhầm tháng cũ khi reload)
+  // Fallback về settings.active_month cũ nếu months rỗng (edge case app lần đầu)
+  const _latestMid = _pickLatestMonth(result.months);
+  if (_latestMid) result.activeMonth = _latestMid;
   console.log('[sbLoadAll] Done — months:', monthCount, '| projects:', pjCount, '| activeMonth:', result.activeMonth);
   return result;
 }
@@ -1670,6 +1674,12 @@ async function openAuditLogPanel(dateFilter, roleFilter) {
   }
 }
 
+// Helper: chọn tháng MỚI NHẤT từ object months ('' nếu rỗng)
+function _pickLatestMonth(monthsObj) {
+  const keys = Object.keys(monthsObj || {}).sort();
+  return keys.length > 0 ? keys[keys.length - 1] : '';
+}
+
 function freshData() {
   const now = new Date();
   const mid = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
@@ -1703,6 +1713,10 @@ let D = (() => {
   } catch(e){}
   return freshData();
 })();
+
+// FORCE activeMonth = tháng MỚI NHẤT khi load (fallback nếu sbLoadAll fail / offline / cache cũ)
+const _latestMidInit = _pickLatestMonth(D.months);
+if (_latestMidInit && D.activeMonth !== _latestMidInit) D.activeMonth = _latestMidInit;
 
 // ── Inject password hashes cho offline auth fallback (Phase 9: chỉ hash, không plaintext) ──
 function injectSyncHashes() {

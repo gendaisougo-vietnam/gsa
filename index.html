@@ -8158,22 +8158,39 @@ function netToGross(net) {
   return Math.round((lo + hi) / 2);
 }
 
-// ── Handler salary change: parse, save, auto-fill ô kia ──
+// ── Handler salary change: parse, save, auto-fill ô kia (robust) ──
 async function _onSalaryChange(staffName, field, si, inputEl) {
-  const num = _parseMoneyInput(inputEl.value);
-  inputEl.value = _formatMoney(num);
-  await saveStaffProfile(staffName, field, num);
-  if (!num) return;
-  if (field === 'salaryGross') {
-    const netNum = grossToNet(num);
-    const netEl = document.getElementById('sal-net-' + si);
-    if (netEl) netEl.value = _formatMoney(netNum);
-    await saveStaffProfile(staffName, 'salaryNet', netNum);
-  } else if (field === 'salaryNet') {
-    const grossNum = netToGross(num);
-    const grossEl = document.getElementById('sal-gross-' + si);
-    if (grossEl) grossEl.value = _formatMoney(grossNum);
-    await saveStaffProfile(staffName, 'salaryGross', grossNum);
+  try {
+    const num = _parseMoneyInput(inputEl.value);
+    inputEl.value = _formatMoney(num);
+
+    // Skip if unchanged → tránh save trùng (onchange + onblur cùng fire)
+    const prof = getStaffProfile(staffName);
+    if ((prof[field]||0) === num) return;
+
+    await saveStaffProfile(staffName, field, num);
+    if (!num) {
+      if (typeof toast === 'function') toast('💰 Đã xóa ' + (field==='salaryGross'?'Gross':'Net'));
+      return;
+    }
+
+    // Tính + fill ô kia (cùng si để khớp cặp input cùng nhân viên)
+    const pairField = field === 'salaryGross' ? 'salaryNet' : 'salaryGross';
+    const pairId    = field === 'salaryGross' ? 'sal-net-' + si : 'sal-gross-' + si;
+    const computed  = field === 'salaryGross' ? grossToNet(num) : netToGross(num);
+
+    const pairEl = document.getElementById(pairId);
+    if (pairEl) {
+      pairEl.value = _formatMoney(computed);
+    } else {
+      console.warn('[_onSalaryChange] Không tìm thấy input cặp:', pairId);
+    }
+    await saveStaffProfile(staffName, pairField, computed);
+
+    if (typeof toast === 'function') toast('💰 Đã lưu lương + đồng bộ Net↔Gross');
+  } catch (err) {
+    console.error('[_onSalaryChange] Failed:', err);
+    if (typeof toast === 'function') toast('❌ Lỗi lưu lương: ' + (err.message || 'unknown'));
   }
 }
 
@@ -9112,6 +9129,12 @@ function _renderStaffReview(staffName, fromDate, toDate) {
 }
 
 async function saveStaffProfile(name, field, val) {
+  // View-only mode block — báo user rõ ràng (không silent fail)
+  if (window._viewOnly || window._viewOnlyMode) {
+    console.warn('[saveStaffProfile] BLOCKED — view-only mode active. field=' + field + ', name=' + name);
+    if (typeof toast === 'function') toast('⚠️ Chế độ chỉ xem — không lưu được');
+    return;
+  }
   if (field === 'contractEnd') {
     try { _onContractEndChange(name, val); } catch(e) { console.warn('[saveStaffProfile] contractEnd history push failed:', e.message); }
   }
@@ -9853,14 +9876,16 @@ function renderStaffPage() {
                   <input id="sal-gross-${si}" type="text" value="${_formatMoney(prof.salaryGross)}" placeholder="0"
                     style="font-family:inherit;font-size:12px;text-align:right"
                     title="Lương Gross — nhập xong sẽ tự động tính Net theo luật VN 2026 (không gồm phụ cấp, thưởng, NPT)"
-                    onchange="_onSalaryChange('${x(s)}','salaryGross',${si},this)">
+                    onchange="_onSalaryChange('${x(s)}','salaryGross',${si},this)"
+                    onblur="_onSalaryChange('${x(s)}','salaryGross',${si},this)">
                   <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
                 <div class="field"><label>Net</label>
                   <input id="sal-net-${si}" type="text" value="${_formatMoney(prof.salaryNet)}" placeholder="0"
                     style="font-family:inherit;font-size:12px;text-align:right"
                     title="Lương Net — nhập xong sẽ tự động tính Gross theo luật VN 2026 (không gồm phụ cấp, thưởng, NPT)"
-                    onchange="_onSalaryChange('${x(s)}','salaryNet',${si},this)">
+                    onchange="_onSalaryChange('${x(s)}','salaryNet',${si},this)"
+                    onblur="_onSalaryChange('${x(s)}','salaryNet',${si},this)">
                   <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
               </div>
@@ -10892,14 +10917,16 @@ function renderStaffDetailModalContent(s) {
               <input id="sal-gross-${si}" type="text" value="${_formatMoney(prof.salaryGross)}" placeholder="0"
                 style="font-family:inherit;font-size:12px;text-align:right"
                 title="Lương Gross — tự động tính Net theo luật VN 2026"
-                onchange="_onSalaryChange('${x(s)}','salaryGross',${si},this);refreshStaffDetailModal()">
+                onchange="_onSalaryChange('${x(s)}','salaryGross','${si}',this);refreshStaffDetailModal()"
+                onblur="_onSalaryChange('${x(s)}','salaryGross','${si}',this)">
               <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
             </div>
             <div class="field"><label>Net</label>
               <input id="sal-net-${si}" type="text" value="${_formatMoney(prof.salaryNet)}" placeholder="0"
                 style="font-family:inherit;font-size:12px;text-align:right"
                 title="Lương Net — tự động tính Gross theo luật VN 2026"
-                onchange="_onSalaryChange('${x(s)}','salaryNet',${si},this);refreshStaffDetailModal()">
+                onchange="_onSalaryChange('${x(s)}','salaryNet','${si}',this);refreshStaffDetailModal()"
+                onblur="_onSalaryChange('${x(s)}','salaryNet','${si}',this)">
               <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
             </div>
           </div>

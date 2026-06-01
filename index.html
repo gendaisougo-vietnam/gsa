@@ -702,6 +702,7 @@ table.detail-tl tr.staff-last > td {
     </div>
     <button class="nav-btn" id="navDash" onclick="showPage('dashboard')">📊 Dashboard</button>
     <button class="nav-btn" id="navStaff" onclick="showPage('staff')">👥 Nhân sự</button>
+    <button class="nav-btn" id="navOrg" onclick="showPage('org')">🌐 Sơ đồ tổ chức</button>
     <button class="nav-btn" id="navSettings" onclick="showPage('settings')">⚙ Cài đặt</button>
   </div>
   <div class="hdr-search">
@@ -766,6 +767,15 @@ table.detail-tl tr.staff-last > td {
     <select class="sel-sm" id="staffMonth" onchange="renderStaffPage()" style="width:120px"></select>
   </div>
   <div id="staffContent"></div>
+</div>
+
+<!-- PAGE ORG CHART (Sơ đồ tổ chức) -->
+<div id="pageOrg" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <div><h2 style="font-size:17px;font-weight:700;color:var(--navy)">Sơ đồ tổ chức</h2>
+    <div style="font-size:11px;color:var(--gray4);margin-top:2px">Rê = phóng to · Click = cây tổ chức · Double-click = mở hồ sơ</div></div>
+  </div>
+  <div id="orgContent"></div>
 </div>
 
 <!-- PAGE SETTINGS -->
@@ -955,6 +965,8 @@ async function sbLoadAll() {
     { data: lateRows,    error: eLate },
     { data: tripRows,    error: eTrips },
     { data: photoRows,   error: ePhotos },
+    { data: orgUnitRows, error: eOrgU },
+    { data: asgRows,     error: eAsg },
   ] = await Promise.all([
     _sb.from('settings').select('*').single(),
     _sb.from('months').select('*'),
@@ -967,6 +979,8 @@ async function sbLoadAll() {
     _sb.from('staff_late_log').select('*'),
     _sb.from('business_trips').select('*'),
     _sb.from('project_photos').select('*'),
+    _sb.from('org_units').select('*'),
+    _sb.from('assignments').select('*'),
   ]);
   // DEBUG — xem console để kiểm tra RLS và data
   console.group('[sbLoadAll] Supabase fetch results');
@@ -1210,6 +1224,11 @@ async function sbLoadAll() {
   // Fallback về settings.active_month cũ nếu months rỗng (edge case app lần đầu)
   const _latestMid = _pickLatestMonth(result.months);
   if (_latestMid) result.activeMonth = _latestMid;
+  // Sơ đồ tổ chức (org_units + assignments) — chỉ ĐỌC, không ảnh hưởng dữ liệu cũ
+  result.orgUnits    = orgUnitRows || [];
+  result.assignments = asgRows || [];
+  result.staffById   = staffById;
+  console.log('[sbLoadAll] org_units:', (orgUnitRows||[]).length, '| assignments:', (asgRows||[]).length);
   console.log('[sbLoadAll] Done — months:', monthCount, '| projects:', pjCount, '| activeMonth:', result.activeMonth);
   return result;
 }
@@ -2090,7 +2109,7 @@ function showPage(pg) {
   if (sessionRole === 'edit' && (pg === 'dashboard' || pg === 'staff' || pg === 'settings')) return;
 
   activePage=pg;
-  ['main','dashboard','staff','settings'].forEach(p=>{
+  ['main','dashboard','staff','settings','org'].forEach(p=>{
     const el=document.getElementById('page'+p.charAt(0).toUpperCase()+p.slice(1));
     if(el) el.style.display = p===pg?(p==='main'?'flex':'block'):'none';
     const btn=document.getElementById('nav'+p.charAt(0).toUpperCase()+p.slice(1));
@@ -2106,6 +2125,7 @@ function showPage(pg) {
   if(pg==='dashboard') renderDashboard();
   else if(pg==='staff') renderStaffPage();
   else if(pg==='settings') renderSettings();
+  else if(pg==='org') renderOrgChart();
   else if(pg==='main') { activePjId=null; renderContent(); }
 }
 
@@ -9586,6 +9606,174 @@ function toggleStaffDetail(id) {
   if (btn) btn.innerHTML = isOpen ? '▼ Chi tiết (Lương, HĐ, Nghỉ phép)' : '▲ Thu gọn';
 }
 
+// ============================================================
+// SƠ ĐỒ TỔ CHỨC (radial/tree) — đọc org_units + assignments + staff
+// Click 1 lần = cây tổ chức · Double-click = mở modal nhân sự cũ
+// ============================================================
+// Phân công đang hiệu lực của 1 nhân sự
+function _asgInfo(name){
+  const sid=(window._sbStaffIdByName||{})[name];
+  const a=(D.assignments||[]).find(x=>x.staff_id===sid && !x.date_to);
+  return {sid:sid, a:a||null};
+}
+// Cập nhật phân công: đóng bản ghi cũ (date_to=hôm nay) + mở bản ghi mới (lưu lịch sử)
+async function saveStaffAssignment(name){
+  try{
+    const sid=(window._sbStaffIdByName||{})[name];
+    if(!sid){ alert('Nhân sự chưa có trong CSDL.'); return; }
+    const unitId=document.getElementById('asgUnit_modal').value;
+    const title=document.getElementById('asgTitle_modal').value;
+    const mgrSel=document.getElementById('asgMgr_modal').value;
+    const office=document.getElementById('asgOffice_modal').value;
+    const T2R={'取締役':0,'所長':0,'統括室長':1,'室長':1,'副室長':2,'主任':3,'副主任':4,'':5};
+    const rank=(T2R[title]!=null?T2R[title]:5);
+    const today=localDateStr(new Date());
+    const old=(D.assignments||[]).find(x=>x.staff_id===sid && !x.date_to);
+    let mgrId=null, rtt=false;
+    if(mgrSel==='__lead') rtt=true;
+    else if(mgrSel==='__none'){ mgrId=null; rtt=false; }
+    else if(mgrSel) mgrId=(window._sbStaffIdByName||{})[mgrSel]||null;
+    else if(old){ mgrId=old.manager_staff_id||null; rtt=!!old.reports_to_top; }
+    const bim=old?!!old.is_bim:false, sho=old?!!old.is_shoene:false, cop=(old?old.comanager_staff_id:null)||null;
+    if(old && window._sbReady){ const r1=await _sb.from('assignments').update({date_to:today}).eq('id',old.id); if(r1&&r1.error) throw r1.error; }
+    if(old) old.date_to=today;
+    const rec={staff_id:sid, unit_id:unitId, title_jp:title, rank:rank, is_primary:true, manager_staff_id:mgrId, comanager_staff_id:cop, reports_to_top:rtt, is_bim:bim, is_shoene:sho, office:office, date_from:today, note:'transfer'};
+    if(window._sbReady){ const ins=await _sb.from('assignments').insert(rec).select().single(); if(ins&&ins.error) throw ins.error; if(ins&&ins.data) rec.id=ins.data.id; }
+    (D.assignments=D.assignments||[]).push(rec);
+    try{ if(window._sbReady) await _sb.from('staff').update({office:office}).eq('full_name',name); }catch(e){}
+    if(D.staffById && D.staffById[sid]) D.staffById[sid].office=office;
+    if(typeof save==='function') save();
+    if(typeof refreshStaffDetailModal==='function') refreshStaffDetailModal();
+    if(typeof renderStaffPage==='function') renderStaffPage();
+    const po=document.getElementById('pageOrg'); if(po && po.style.display!=='none' && typeof renderOrgChart==='function') renderOrgChart();
+    alert('Đã cập nhật phân công: '+name);
+  }catch(e){ alert('Lỗi cập nhật phân công: '+(e&&e.message?e.message:e)); }
+}
+
+// Lấy phòng (gom nhóm -> phòng cha) + cấp bậc của từng nhân sự từ assignments (đang hiệu lực)
+function _staffOrgInfo(){
+  const units={}; (D.orgUnits||[]).forEach(u=>units[u.id]=u);
+  const sb=D.staffById||{}; const info={};
+  (D.assignments||[]).filter(a=>!a.date_to).forEach(a=>{
+    const s=sb[a.staff_id]; if(!s) return;
+    let u=units[a.unit_id]; if(u && u.kind==='group' && u.parent_id && units[u.parent_id]) u=units[u.parent_id];
+    info[s.full_name]={ deptName:(u?u.name_jp:'Chưa phân công'), deptSort:(u?u.sort_order:99), rank:(a.rank==null?5:a.rank) };
+  });
+  return info;
+}
+
+function renderOrgChart(){
+  const host=document.getElementById('orgContent'); if(!host) return;
+  if(window._orgRAF){ cancelAnimationFrame(window._orgRAF); window._orgRAF=null; }
+  const NS="http://www.w3.org/2000/svg";
+  const units={}; (D.orgUnits||[]).forEach(u=>units[u.id]=u);
+  const sb=D.staffById||{};
+  const asg=(D.assignments||[]).filter(a=>!a.date_to);
+  if(!asg.length){ host.innerHTML='<div style="padding:40px;text-align:center;color:#8a98b5;background:#0e1424;border-radius:14px">Chưa có dữ liệu sơ đồ tổ chức.<br>Hãy chạy GĐ1a + GĐ1b trên Supabase rồi tải lại trang.</div>'; return; }
+  function ucolor(uid){ const u=units[uid]; if(!u) return '#888'; return u.color||(u.parent_id&&units[u.parent_id]?units[u.parent_id].color:'#888'); }
+  const managed={}; asg.forEach(a=>{ if(a.manager_staff_id){ (managed[a.manager_staff_id]=managed[a.manager_staff_id]||new Set()).add(ucolor(a.unit_id)); }});
+  const KEIEI='#BA7517';
+  let _ix=0;
+  let people=asg.map(a=>{
+    const s=sb[a.staff_id]||{}; const fn=s.full_name||('?'+a.staff_id);
+    const prof=(D.settings.staffProfiles||{})[fn]||{};
+    const rank=(a.rank==null?5:a.rank); let cols;
+    if(rank===0) cols=['__lead'];
+    else { const set=new Set([ucolor(a.unit_id)]); if(managed[a.staff_id]) managed[a.staff_id].forEach(c=>set.add(c)); if(rank<=2) set.add(KEIEI); cols=[...set]; }
+    return { sid:a.staff_id, idx:_ix++, fn:fn, office:(a.office||s.office||''), short:(s.short_name||fn),
+      avatar:prof.avatarUrl||'', rank:rank, title:a.title_jp||'', cols:cols,
+      bim:!!a.is_bim, sho:!!a.is_shoene, rtt:!!a.reports_to_top, mgr:a.manager_staff_id||null, cop:a.comanager_staff_id||null,
+      r:(rank===0?24:rank===1?21:rank===2?17:rank===3?14:rank===4?12:10) };
+  });
+  // Ẩn nhân sự đã nghỉ việc (status='left') khỏi sơ đồ
+  people=people.filter(p=> !(typeof isStaffLeft==='function' && isStaffLeft(p.fn)));
+  const byId={}; people.forEach(p=>byId[p.sid]=p);
+  const CX=545,CY=430,TY=0.66,RAD=Math.PI/180,RL=72;
+  const RANKR={1:142,2:224,3:302,4:368,5:430};
+  const SPEED={0:0,1:0.020,2:0.022,3:0.024,4:0.026,5:0.028};
+  const NFS={0:12,1:11,2:10,3:9,4:8.5,5:8};
+  const offByR={0:0,1:0,2:30,3:55,4:85,5:8};
+  const byRank={}; people.forEach(p=>{(byRank[p.rank]=byRank[p.rank]||[]).push(p);});
+  Object.keys(byRank).forEach(rk=>{ const arr=byRank[rk]; if(rk==='0'){ arr.forEach((p,i)=>p.base=(arr.length===1?270:(i===0?180:0))); return; } const n=arr.length; arr.forEach((p,i)=>p.base=(offByR[rk]||0)+i*360/n); });
+  const leaders=people.filter(p=>p.rank===0);
+  function chainUp(id){const s=new Set();const st=[id];while(st.length){const c=st.pop();if(s.has(c))continue;s.add(c);const p=byId[c];if(!p)continue;if(p.rtt)leaders.forEach(l=>s.add(l.sid));if(p.mgr&&byId[p.mgr])st.push(p.mgr);if(p.cop&&byId[p.cop])st.push(p.cop);}return s;}
+  function subtree(id){const p0=byId[id];if(p0&&p0.rank===0)return new Set(people.map(p=>p.sid));const s=new Set([id]);let fr=[id];while(fr.length){const c=fr.pop();people.forEach(p=>{if((p.mgr===c||p.cop===c)&&!s.has(p.sid)){s.add(p.sid);fr.push(p.sid);}});}return s;}
+  function famOf(id){const a=chainUp(id);subtree(id).forEach(x=>a.add(x));return a;}
+  function computeTree(selId){const F=famOf(selId);const kids=id=>people.filter(p=>F.has(p.sid)&&(p.mgr===id||(p.cop===id&&!F.has(p.mgr)))).map(p=>p.sid);const lk=people.filter(p=>F.has(p.sid)&&!p.mgr&&p.rtt).map(p=>p.sid);let leaf=0;const col={};function lay(id){if(col[id]!==undefined)return;const ks=kids(id);if(!ks.length){col[id]=leaf++;}else{ks.forEach(lay);col[id]=ks.reduce((s,k)=>s+(col[k]||0),0)/ks.length;}}lk.forEach(lay);const tot=Math.max(1,leaf);const rootCol=(tot-1)/2;const cg=Math.min(110,980/Math.max(1,tot-1));const rg=126,topY=112;const tp={};Object.keys(col).forEach(id=>{tp[id]={x:CX+(col[id]-rootCol)*cg,y:topY+byId[id].rank*rg};});leaders.forEach((l,i)=>{tp[l.sid]={x:CX+(i===0?-28:28),y:topY};});return tp;}
+  function ini(s){const t=(s||'').split('.').pop();return t.slice(0,2);}
+  function proj(p,ang){const R=p.rank===0?RL:RANKR[p.rank];const a=ang*RAD;return{x:CX+R*Math.cos(a),y:CY+R*Math.sin(a)*TY,d:Math.sin(a)};}
+  // ---- DOM ----
+  host.innerHTML='';
+  const root=document.createElement('div'); root.id='orgRoot';
+  root.style.cssText="position:relative;width:100%;background:radial-gradient(120% 95% at 50% 14%,#1b2748 0%,#0e1424 55%,#070a12 100%);border-radius:14px;overflow:hidden;font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
+  root.innerHTML='<div id="orgHint" style="position:absolute;top:10px;right:14px;z-index:5;color:#cdd6ea;font-size:11px;background:#ffffff14;border:1px solid #ffffff22;padding:4px 9px;border-radius:20px;pointer-events:none">▶ đang xoay</div><svg id="orgSvg" viewBox="0 0 1100 830" style="width:100%;display:block"></svg>';
+  host.appendChild(root);
+  const svg=root.querySelector('#orgSvg');
+  const bg=document.createElementNS(NS,'g'); svg.appendChild(bg);
+  let stars=''; for(let i=0;i<150;i++){ stars+='<circle cx="'+(Math.random()*1100).toFixed(0)+'" cy="'+(Math.random()*830).toFixed(0)+'" r="'+(Math.random()*1.2+0.3).toFixed(1)+'" fill="#cdd8f0" opacity="'+(Math.random()*0.45+0.1).toFixed(2)+'"/>'; }
+  const RSTYLE={1:['#D69A3C',0.6],2:['#BE9A58',0.45],3:['#909078',0.33],4:['#626E92',0.24],5:['#465275',0.17]};
+  let guides=''; for(const k of [5,4,3,2,1]){ const st2=RSTYLE[k]; guides+='<ellipse cx="'+CX+'" cy="'+CY+'" rx="'+RANKR[k]+'" ry="'+(RANKR[k]*TY).toFixed(1)+'" fill="none" stroke="'+st2[0]+'" stroke-width="1.1" opacity="'+st2[1]+'"/>'; }
+  guides+='<ellipse cx="'+CX+'" cy="'+CY+'" rx="'+RL+'" ry="'+(RL*TY).toFixed(1)+'" fill="none" stroke="#FAC775" stroke-width="1.5" opacity="0.95"/>';
+  bg.innerHTML=stars+guides;
+  const linkLayer=document.createElementNS(NS,'g'); svg.appendChild(linkLayer);
+  const nodeLayer=document.createElementNS(NS,'g'); svg.appendChild(nodeLayer);
+  const links=[]; people.forEach(p=>{ if(p.mgr)links.push({c:p.sid,p:p.mgr}); else if(p.rtt)links.push({c:p.sid,p:'__ring'}); if(p.cop)links.push({c:p.sid,p:p.cop}); });
+  const linkEls=links.map(l=>{const e=document.createElementNS(NS,'path');e.setAttribute('fill','none');e.setAttribute('stroke','#FAC775');e.setAttribute('stroke-linecap','round');linkLayer.appendChild(e);return {c:l.c,p:l.p,el:e};});
+  function ringSvg(p){ const r=p.r,sw=r>=21?5:r>=16?4.5:3.4,cols=p.cols; if(cols[0]==='__lead')return '<circle r="'+r+'" fill="none" stroke="#FAC775" stroke-width="'+sw+'"/>'; if(cols.length===1)return '<circle r="'+r+'" fill="none" stroke="'+cols[0]+'" stroke-width="'+sw+'"/>'; const C=2*Math.PI*r,n=cols.length,seg=C/n; let s=''; for(let i=0;i<n;i++){ s+='<circle r="'+r+'" fill="none" stroke="'+cols[i]+'" stroke-width="'+sw+'" stroke-dasharray="'+(seg-2).toFixed(2)+' '+(C-seg+2).toFixed(2)+'" transform="rotate('+(i*360/n).toFixed(1)+')"/>'; } return s; }
+  function buildNode(p){
+    const g=document.createElementNS(NS,'g'); g.style.cursor='pointer'; const r=p.r;
+    const avg=document.createElementNS(NS,'g');
+    let inner;
+    if(p.avatar){ inner='<clipPath id="orgcp'+p.idx+'"><circle r="'+(r-2)+'"/></clipPath><image href="'+p.avatar+'" x="'+(-(r-2))+'" y="'+(-(r-2))+'" width="'+(2*(r-2))+'" height="'+(2*(r-2))+'" clip-path="url(#orgcp'+p.idx+')" preserveAspectRatio="xMidYMid slice"/>'; }
+    else { inner='<text y="'+(r*0.34).toFixed(1)+'" font-size="'+(r*0.72).toFixed(0)+'" fill="#FAC775" text-anchor="middle" font-weight="700">'+ini(p.short)+'</text>'; }
+    avg.innerHTML='<circle r="'+r+'" fill="#0f1729"/>'+ringSvg(p)+inner
+      +(p.bim?'<circle cx="'+(r*0.7).toFixed(1)+'" cy="'+(-r*0.7).toFixed(1)+'" r="3.2" fill="#378ADD" stroke="#0e1424" stroke-width="1"/>':'')
+      +(p.sho?'<circle cx="'+(r*0.7).toFixed(1)+'" cy="'+(r*0.7).toFixed(1)+'" r="3.2" fill="#639922" stroke="#0e1424" stroke-width="1"/>':'');
+    const lbl=document.createElementNS(NS,'g'); const nfs=NFS[p.rank]||8; let ly=r+11;
+    let lh='<text y="'+ly+'" font-size="'+nfs+'" fill="#fff" text-anchor="middle" font-weight="700" style="paint-order:stroke" stroke="#0b0f1a" stroke-width="2.4">'+orgEsc((p.office?p.office+' ':'')+p.short)+'</text>';
+    const _titles=p.title?String(p.title).split('・'):[];
+    _titles.forEach((t,i)=>{ const fs=(_titles.length>1?(i===0?nfs:nfs-1.5):nfs-0.5),h=fs+5,w=t.length*fs*1.08+10; ly+=h+2; lh+='<rect x="'+(-w/2).toFixed(1)+'" y="'+(ly-h+3).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+h.toFixed(1)+'" rx="'+(h/2).toFixed(1)+'" fill="#BA7517"/><text y="'+ly.toFixed(1)+'" font-size="'+fs.toFixed(1)+'" fill="#1b1206" text-anchor="middle" font-weight="700">'+orgEsc(t)+'</text>'; });
+    if(p.rank>=4){ const _pf=(window._orgPerf||{}),mp=(window._orgPerfMax||1); const pct=Math.max(0,Math.min(1,(_pf[p.fn]||0)/mp)); const bw=Math.max(2*r,30),bh=4; ly+=10; const fc=pct>=0.8?'#27AE60':pct>=0.5?'#F39C12':pct>=0.25?'#E67E22':'#E74C3C'; lh+='<rect x="'+(-bw/2).toFixed(1)+'" y="'+ly.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh+'" rx="2" fill="#2a3550"/>'+(pct>0?'<rect x="'+(-bw/2).toFixed(1)+'" y="'+ly.toFixed(1)+'" width="'+(bw*pct).toFixed(1)+'" height="'+bh+'" rx="2" fill="'+fc+'"/>':''); }
+    lbl.innerHTML=lh;
+    g.appendChild(avg); g.appendChild(lbl); p._av=avg; p._lbl=lbl; p._g=g; p._ax=null;
+    g.addEventListener('mouseenter',()=>{hoverId=p.sid;});
+    g.addEventListener('mouseleave',()=>{hoverId=null;});
+    g.addEventListener('pointerdown',e=>{e.stopPropagation();const now=performance.now();if(now-lastT<300&&lastIdD===p.sid){if(clickTimer){clearTimeout(clickTimer);clickTimer=null;}if(p.rank!==0&&typeof openStaffDetailModal==='function')openStaffDetailModal(p.fn);lastT=0;lastIdD=null;return;}lastT=now;lastIdD=p.sid;clickTimer=setTimeout(()=>{clickTimer=null;selectedId=(selectedId===p.sid?null:p.sid);applySel();},300);});
+    nodeLayer.appendChild(g);
+  }
+  function orgEsc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+  // KPI = hiệu suất tháng (tổng số mai) của tháng đang chọn
+  (function(){ const mid=D.activeMonth; const _sm=(D.months||{})[mid]||{projects:[],projectsVN:[]}; const pjs=[...(_sm.projects||[]),...(_sm.projectsVN||[])]; const perf={}; pjs.forEach(p=>(p.groups||[]).forEach(g=>(g.rows||[]).forEach(r=>{ if(r&&r.staff){ perf[r.staff]=(perf[r.staff]||0)+(r.qty||0); } }))); window._orgPerf=perf; window._orgPerfMax=Math.max(1, ...Object.values(perf)); })();
+  people.forEach(buildNode);
+  let tcount=0,hoverId=null,selectedId=null,curFam=null,treeP=null,clickTimer=null,lastT=0,lastIdD=null;
+  function applySel(){ if(selectedId&&byId[selectedId]){ treeP=computeTree(selectedId); curFam=famOf(selectedId);} else { selectedId=null; treeP=null; curFam=null; } const h=root.querySelector('#orgHint'); if(h)h.textContent=selectedId?'● cây tổ chức · click nền để thoát':'▶ đang xoay'; }
+  function reorder(){ [...people].sort((a,b)=>a._pri!==b._pri?a._pri-b._pri:a._ay-b._ay).forEach(p=>nodeLayer.appendChild(p._g)); }
+  function frame(){
+    if(!selectedId)tcount+=1; const F=curFam;
+    people.forEach(p=>{ p._orb=proj(p,p.rank===0?p.base:p.base+SPEED[p.rank]*tcount); });
+    people.forEach(p=>{ const orb=p._orb; let tx,ty,tsc,tao;
+      if(selectedId){ if(F.has(p.sid)){ const t=treeP[p.sid]||orb; tx=t.x;ty=t.y;tsc=selectedId===p.sid?1.45:1.0;tao=1; } else { tx=orb.x;ty=orb.y;tsc=0.8;tao=0; } }
+      else { tx=orb.x;ty=orb.y; const tn=p.rank===0?1:(orb.d+1)/2; tsc=(0.93+0.13*tn)*(hoverId===p.sid?1.42:1); tao=1; }
+      if(p._ax==null){p._ax=tx;p._ay=ty;p._asc=tsc;p._ao=tao;}
+      p._ax+=(tx-p._ax)*0.16;p._ay+=(ty-p._ay)*0.16;p._asc+=(tsc-p._asc)*0.16;p._ao+=(tao-p._ao)*0.16;
+      p._g.setAttribute('transform','translate('+p._ax.toFixed(1)+' '+p._ay.toFixed(1)+') scale('+p._asc.toFixed(3)+')');
+      p._av.setAttribute('opacity',p._ao.toFixed(2));
+      p._lbl.setAttribute('opacity',p._ao.toFixed(2)); p._lbl.style.display=p._ao<0.05?'none':'';
+      p._pri=(selectedId===p.sid||hoverId===p.sid)?2:((selectedId&&F.has(p.sid))?1:0);
+    });
+    reorder();
+    const la={x:(leaders[0]?leaders[0]._ax:CX),y:(leaders[0]?leaders[0]._ay:CY)};
+    if(leaders[1]){ la.x=(leaders[0]._ax+leaders[1]._ax)/2; la.y=(leaders[0]._ay+leaders[1]._ay)/2; }
+    linkEls.forEach(l=>{ const a=byId[l.c]; if(!a){l.el.setAttribute('opacity',0);return;} let bx,by; if(l.p==='__ring'){bx=la.x;by=la.y;} else { const bp=byId[l.p]; if(!bp){l.el.setAttribute('opacity',0);return;} bx=bp._ax;by=bp._ay; } const ax=a._ax,ay=a._ay;
+      if(selectedId){ const br=F.has(l.c)&&(l.p==='__ring'||F.has(l.p)); if(br){ const my=(ay+by)/2; l.el.setAttribute('d','M '+ax.toFixed(1)+' '+ay.toFixed(1)+' C '+ax.toFixed(1)+' '+my.toFixed(1)+' '+bx.toFixed(1)+' '+my.toFixed(1)+' '+bx.toFixed(1)+' '+by.toFixed(1)); l.el.setAttribute('opacity',0.5); l.el.setAttribute('stroke-width',1.15);} else l.el.setAttribute('opacity',0); }
+      else { const mx=(ax+bx)/2,my=(ay+by)/2; l.el.setAttribute('d','M '+ax.toFixed(1)+' '+ay.toFixed(1)+' Q '+mx.toFixed(1)+' '+(my-8).toFixed(1)+' '+bx.toFixed(1)+' '+by.toFixed(1)); l.el.setAttribute('opacity',0.085); l.el.setAttribute('stroke-width',1); }
+    });
+    window._orgRAF=requestAnimationFrame(frame);
+  }
+  svg.addEventListener('pointerdown',()=>{ selectedId=null; applySel(); });
+  window._orgRAF=requestAnimationFrame(frame);
+}
+
 function renderStaffPage() {
   const mid = document.getElementById('staffMonth')?.value || D.activeMonth;
   const sc = document.getElementById('staffContent'); if(!sc) return;
@@ -9594,7 +9782,7 @@ function renderStaffPage() {
 
   // Current month stats
   const sd = {};
-  D.settings.staffList.forEach(s=>sd[s]={n:0,r:0,ot:0,pjs:[]});
+  Array.from(new Set([...(D.settings.staffList||[]), ...Object.keys(D.settings.staffProfiles||{})])).forEach(s=>sd[s]={n:0,r:0,ot:0,pjs:[]});
   pjs.forEach(p=>{
     (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{
       if(r.staff&&sd[r.staff]){
@@ -9607,13 +9795,26 @@ function renderStaffPage() {
     (p.otLog||[]).forEach(e=>{if(e.staff&&sd[e.staff])sd[e.staff].ot+=(e.hours||0);});
   });
 
-  // Sort staff: HAN トゥアン luôn đứng đầu, sau đó theo profile order
-  const sortedStaff = [...D.settings.staffList].sort((a,b)=>{
-    if (a==='HAN トゥアン') return -1;
-    if (b==='HAN トゥアン') return 1;
+  // Lấy TẤT CẢ nhân sự (gồm cả 39 người trong Sơ đồ tổ chức) + gắn phòng/cấp bậc từ assignments
+  const _orgInfo = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
+  const _allNames = Array.from(new Set([...(D.settings.staffList||[]), ...Object.keys(D.settings.staffProfiles||{})])).filter(n=> !(_orgInfo[n] && _orgInfo[n].rank===0));
+  const sortedStaff = _allNames.sort((a,b)=>{
+    const ia=_orgInfo[a]||{}, ib=_orgInfo[b]||{};
+    const da=(ia.deptSort==null?99:ia.deptSort), db=(ib.deptSort==null?99:ib.deptSort);
+    if (da!==db) return da-db;                       // 1) theo phòng
+    const ra=(ia.rank==null?9:ia.rank), rb=(ib.rank==null?9:ib.rank);
+    if (ra!==rb) return ra-rb;                        // 2) cấp cao -> thấp
     const pa=getStaffProfile(a), pb=getStaffProfile(b);
     return (pa.order||99)-(pb.order||99);
   });
+
+  // Tab theo phòng (4 phòng chính + 省エネ; bỏ 経営企画室 và lãnh đạo)
+  const _deptEN={'国際設計室':'International Design Department','設計室':'Design Department','デザインスタジオ':'Design Studio','総務室':'General Affairs Department','省エネ':'Energy Saving','Chưa phân công':'Unassigned'};
+  const _seen={}; const _deptList=[];
+  sortedStaff.forEach(s=>{ const di=_orgInfo[s]; if(di&&di.rank===0) return; const dn=(di&&di.deptName)||'Chưa phân công'; if(dn==='経営企画室') return; if(!_seen[dn]){ _seen[dn]=1; _deptList.push({name:dn, sort:(di&&di.deptSort!=null?di.deptSort:99)}); } });
+  _deptList.sort((a,b)=>a.sort-b.sort);
+  if(!window._staffDeptTab || !_deptList.some(d=>d.name===window._staffDeptTab)) window._staffDeptTab=(_deptList[0]||{}).name||'';
+  const _deptTabHtml='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+_deptList.map(d=>{ const act=d.name===window._staffDeptTab; return '<button onclick="window._staffDeptTab=\''+d.name+'\';renderStaffPage()" style="padding:6px 12px;border-radius:9px;border:1px solid '+(act?'#1e40af':'#d1d5db')+';background:'+(act?'#1e40af':'#fff')+';color:'+(act?'#fff':'#374151')+';font-weight:'+(act?'600':'400')+';cursor:pointer;font-family:inherit;line-height:1.2;text-align:center"><div style="font-size:12.5px">'+d.name+'</div><div style="font-size:9.5px;opacity:.8">'+(_deptEN[d.name]||'')+'</div></button>'; }).join('')+'</div>';
 
   // Max for performance bar
   const maxTotal = Math.max(1, ...sortedStaff.map(s=>sd[s]?.n+sd[s]?.r||0));
@@ -9702,6 +9903,8 @@ function renderStaffPage() {
   if (window._staffOfficeFilter) {
     staffToShow = staffToShow.filter(function(s){ return s.startsWith(window._staffOfficeFilter); });
   }
+  // Lọc theo tab phòng (ẩn lãnh đạo + 経営企画室). Tab "Đã nghỉ" hiện tất cả các phòng để không bị mất người.
+  staffToShow = staffToShow.filter(function(s){ const di=_orgInfo[s]; if(di&&di.rank===0) return false; const dn=(di&&di.deptName)||'Chưa phân công'; if(dn==='経営企画室') return false; if(_staffTab==='left') return true; return dn===window._staffDeptTab; });
 
   // Header gradient + 4 KPI tiles
   const _headerHtml = `<div style="background:linear-gradient(135deg,#1e3a8a 0%,#312e81 100%); border-radius:12px; padding:20px 24px; color:#fff; margin-bottom:16px;">
@@ -9766,7 +9969,9 @@ function renderStaffPage() {
     </button>
   </div>`;
 
-  sc.innerHTML = _headerHtml + reminderHtml + _searchHtml + _tabHtml + `
+  let _prevDept=null;
+  const _deptHdr=(s)=>'';  // mỗi tab đã là 1 phòng nên không cần tiêu đề trong danh sách
+  sc.innerHTML = _headerHtml + reminderHtml + _searchHtml + (_staffTab==='left'?'':_deptTabHtml) + _tabHtml + `
   <!-- Staff grid -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px">
     ${staffToShow.length === 0 ? `<div style="grid-column:1/-1; padding:40px 16px; text-align:center; color:#9ca3af; font-size:14px;">${(window._staffSearch || window._staffOfficeFilter) ? '🔍 Không tìm thấy nhân sự phù hợp. <br><a href="#" onclick="window._staffSearch=\'\';window._staffOfficeFilter=\'\';renderStaffPage();return false;" style="color:#3b82f6;">Xóa filter</a>' : (_staffTab==='left' ? '🚪 Chưa có nhân sự nào đã nghỉ.' : '👥 Chưa có nhân sự đang làm.')}</div>` : ''}
@@ -9794,7 +9999,7 @@ function renderStaffPage() {
                     : s.startsWith('SGN')        ? '#F4FBF8'
                     : s.startsWith('HAN')        ? '#F8F7FE'
                     : '#fff';
-      return `<div class="staff-card" style="background:${_cardBg}; border:0.5px solid #e5e7eb; border-radius:12px; overflow:hidden;${isStaffLeft(s)?' opacity:0.7; background:#f3f4f6; border-left:4px solid #6b7280;':''}">
+      return _deptHdr(s) + `<div class="staff-card" style="background:${_cardBg}; border:0.5px solid #e5e7eb; border-radius:12px; overflow:hidden;${isStaffLeft(s)?' opacity:0.7; background:#f3f4f6; border-left:4px solid #6b7280;':''}">
 
         <!-- Color stripe -->
         <div style="height:4px; background:${leaveToday ? '#E74C3C' : _avt.text};"></div>
@@ -10840,6 +11045,21 @@ function renderStaffDetailModalContent(s) {
   const si = 'modal';
   const idx = (D.settings.staffList||[]).indexOf(s);
 
+  // Dữ liệu cho ô "Cập nhật phân công"
+  const _ai=(typeof _asgInfo==='function')?_asgInfo(s):{a:null};
+  const _ca=_ai.a||{};
+  const _curUnit=_ca.unit_id||'';
+  const _curTitle=_ca.title_jp||'';
+  const _curOffice=_ca.office||(s.indexOf('SGN')===0?'SGN':'HAN');
+  const _curMgr=(_ca.manager_staff_id&&(D.staffById||{})[_ca.manager_staff_id])?D.staffById[_ca.manager_staff_id].full_name:'';
+  const _selStyle="width:100%;padding:5px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:12px;margin-top:2px";
+  const _unitOpts=(D.orgUnits||[]).filter(u=>u.code!=='company').slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(u=>'<option value="'+u.id+'"'+(u.id===_curUnit?' selected':'')+'>'+(u.kind==='group'?'— ':'')+u.name_jp+'</option>').join('');
+  const _titleArr=['取締役','所長','統括室長','室長','副室長','主任','副主任'];
+  const _titleOpts='<option value=""'+(_curTitle===''?' selected':'')+'>(Nhân viên)</option>'+_titleArr.map(t=>'<option'+(t===_curTitle?' selected':'')+'>'+t+'</option>').join('');
+  const _mgrNames=Object.keys(D.settings.staffProfiles||{}).filter(n=>n!==s).sort();
+  const _mgrOpts='<option value="__lead"'+((!_curMgr&&_ca.reports_to_top)?' selected':'')+'>(Lãnh đạo — nối thẳng)</option><option value="__none"'+((!_curMgr&&!_ca.reports_to_top)?' selected':'')+'>(Không có)</option>'+_mgrNames.map(n=>'<option'+(n===_curMgr?' selected':'')+'>'+n+'</option>').join('');
+  const _officeOpts=['HAN','SGN'].map(o=>'<option'+(o===_curOffice?' selected':'')+'>'+o+'</option>').join('');
+
   return `
     <!-- Stripe -->
     <div style="height:6px; background:${leaveToday ? '#E74C3C' : _avt.text};"></div>
@@ -10878,6 +11098,18 @@ function renderStaffDetailModalContent(s) {
       ${getStaffStatus(s) === 'left'
         ? `<button onclick="restoreStaff('${x(s)}');refreshStaffDetailModal()" style="flex:1; padding:8px; background:#10b981; color:#fff; border:none; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit;">↩ Khôi phục</button>`
         : `<button onclick="openLeavingModal('${x(s)}')" style="flex:1; padding:8px; background:#fef3c7; color:#92400e; border:0.5px solid #fbbf24; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit;">${isStaffLeaving(s) ? '📅 Đổi ngày' : '🚪 Nghỉ việc'}</button>`}
+    </div>
+
+    <!-- Cập nhật phân công (đổi phòng/chức danh — lưu lịch sử) -->
+    <div style="padding:14px 24px; border-bottom:0.5px solid #e5e7eb;">
+      <div style="font-size:12px;font-weight:700;color:#312e81;margin-bottom:8px">🔄 Cập nhật phân công <span style="font-weight:400;color:#9ca3af;font-size:11px">(đổi phòng/chức danh · lưu lịch sử)</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px">
+        <label style="font-size:11px;color:#6b7280">Phòng / Nhóm<select id="asgUnit_modal" style="${_selStyle}">${_unitOpts}</select></label>
+        <label style="font-size:11px;color:#6b7280">Chức danh<select id="asgTitle_modal" style="${_selStyle}">${_titleOpts}</select></label>
+        <label style="font-size:11px;color:#6b7280">Quản lý trực tiếp<select id="asgMgr_modal" style="${_selStyle}">${_mgrOpts}</select></label>
+        <label style="font-size:11px;color:#6b7280">Văn phòng<select id="asgOffice_modal" style="${_selStyle}">${_officeOpts}</select></label>
+      </div>
+      <button onclick="saveStaffAssignment('${x(s)}')" style="margin-top:10px;width:100%;padding:8px;background:#312e81;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit">💾 Lưu thay đổi</button>
     </div>
 
     <!-- Hiệu suất tháng -->

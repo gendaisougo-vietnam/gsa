@@ -657,6 +657,33 @@ table.detail-tl tr.staff-last > td {
   transition: background .12s ease, color .12s ease;
 }
 
+/* ===== Bảng Chi tiết dự án kiểu 工程表 (Design Studio / JP) ===== */
+.kj-tbl{border-collapse:collapse;table-layout:fixed;font-size:11px;width:max-content}
+.kj-tbl td,.kj-tbl th{border:1px solid #ddd;padding:0;position:relative;overflow:visible}
+.kj-it-row:hover td{background:#fff8e1 !important}
+.kj-bikou-name{background:#fff5f5;padding:3px 6px;vertical-align:middle}
+.kj-bikou-name .nm{font-weight:800;color:var(--navy);font-size:13px;line-height:1.35;white-space:normal;word-break:break-word;cursor:pointer}
+.kj-bikou-line{background:#fff5f5;padding:2px 6px;vertical-align:middle;font-size:10px;color:#333}
+.kj-item{padding:2px 6px;vertical-align:middle;cursor:pointer;background:var(--table-bg)}
+.kj-item .nm{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25}
+.kj-tan{background:#fafbfc;text-align:center;vertical-align:top;padding:4px 2px;font-weight:700;color:#222;font-size:12px}
+.kj-empty{background:var(--table-bg);color:#aaa;font-size:9px;font-style:italic;padding:3px 6px}
+.kj-num{background:var(--table-bg);text-align:center;font-size:10px;font-weight:600;vertical-align:middle}
+#kjPrintOverlay{display:none}
+.kj-print-head{font-weight:800;text-align:center;font-size:16px;letter-spacing:.3em;padding:6px 0 10px;color:#000}
+.kj-print-foot{display:flex;justify-content:space-between;border:1px solid #000;border-top:none;font-size:11px;color:#000}
+.kj-print-foot .ft-l{padding:10px 12px;flex:1;border-right:1px solid #000}
+.kj-print-foot .ft-r{padding:5px 14px;text-align:right;min-width:200px;line-height:1.6}
+@media print{
+  body.kj-printing > *:not(#kjPrintOverlay){display:none !important}
+  body.kj-printing #kjPrintOverlay{display:block !important}
+  body.kj-printing .kj-tbl thead th{background:#fff !important;color:#000 !important}
+  body.kj-printing .kj-tbl td,body.kj-printing .kj-tbl th{border-color:#000 !important}
+  body.kj-printing .kj-bikou-name,body.kj-printing .kj-bikou-line,body.kj-printing .kj-tan,body.kj-printing .kj-item,body.kj-printing .kj-num,body.kj-printing .kj-empty{background:#fff !important}
+  body.kj-printing .kj-it-row:hover td{background:#fff !important}
+  @page{size:A3 landscape;margin:8mm}
+}
+
 </style>
 </head>
 <body>
@@ -1111,6 +1138,7 @@ async function sbLoadAll() {
           isCarryRef:  !!r.is_carry_ref,
           sourceRowId: r.source_row_id || null,
           sourceMonth: r.source_month  || null,
+          tentative:   !!r.tentative,
           _fromTlTask: tlStaffSet.size > 0 && r.staff && tlStaffSet.has(r.staff) ? true : undefined,
         }))
       };
@@ -1265,7 +1293,7 @@ async function sbPushAll() {
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
         _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++, manual: !!g._manual });
-        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, sort_order:_sr++ }); });
+        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, tentative:!!r.tentative, sort_order:_sr++ }); });
       });
     });
   });
@@ -1312,7 +1340,7 @@ function _sbSaveRowDebounced(groupId, rowId, colData) {
 const _COL_MAP = {
   staff:'staff', status:'status', qty:'qty', note:'note',
   ot:'ot', otNote:'ot_note', dateFrom:'date_from', dateTo:'date_to',
-  upTime:'up_time', doneAt:'done_at', upScore:'up_score',
+  upTime:'up_time', doneAt:'done_at', upScore:'up_score', tentative:'tentative',
   rate0:'rate0',rate1:'rate1',rate2:'rate2',rate3:'rate3',rate4:'rate4',
   rate5:'rate5',rate6:'rate6',rate7:'rate7',rate8:'rate8',rate9:'rate9',
   rate10:'rate10',rate11:'rate11',rate12:'rate12',rate13:'rate13',
@@ -1330,14 +1358,13 @@ async function _sbSaveProject(p, monthId, section) {
       main_staff: p.mainStaff || '', notes: p.notes || '',
       is_carryover: !!p._carryover,
     };
-    if (section === 'vn') {
-      _pjRow.client            = p.client            || null;
-      _pjRow.building_type     = p.buildingType      || null;
-      _pjRow.scope             = p.scope             || null;
-      _pjRow.area              = p.area              || null;
-      _pjRow.construction_start= p.constructionStart || null;
-      _pjRow.construction_end  = p.constructionEnd   || null;
-    }
+    // Lưu cột meta cho CẢ jp + vn (cột đã có sẵn; jp dùng cho khung tên 工程表)
+    _pjRow.client            = p.client            || null;
+    _pjRow.building_type     = p.buildingType      || null;
+    _pjRow.scope             = p.scope             || null;
+    _pjRow.area              = p.area              || null;
+    _pjRow.construction_start= p.constructionStart || null;
+    _pjRow.construction_end  = p.constructionEnd   || null;
     const { error } = await _sb.from('projects').upsert(_pjRow, { onConflict: 'id' });
     if (error) _sbReport('_sbSaveProject', error, {op:'upsert', table:'projects'});
   } catch(e) { _sbReport('_sbSaveProject', e, {op:'upsert', table:'projects'}); }
@@ -3017,6 +3044,224 @@ function _tlDayHeaderHtml(allDays, todayStr, holidaySet, cellWidth) {
   }).join('');
 }
 
+// ===== Chi tiết dự án kiểu 工程表 cho phía JP / Design Studio (read-only) =====
+function renderKouteiJP(pjs, win){
+  const W = win || _tlComputeWindow(D.activeMonth);
+  const { allDays, todayStr, holidaySet, monthSpans, yr, mo } = W;
+  const monthStartStr = W.monthStart || `${yr}-${String(mo).padStart(2,'0')}-01`;
+  const lastDay = allDays[allDays.length-1];
+  const bw = !!W.bw;  // chế độ in đen trắng
+  if(!pjs.length) return '<div style="padding:24px;text-align:center;color:#aaa;font-size:12px">Chưa có dự án trong tháng này.</div>';
+
+  const C_NEW=bw?'#000':'#5a9a35', C_REV=bw?'#000':'#d4900a', C_DONE=bw?'#9aa0a6':DONE_BAR_COLOR;
+  const NCOL=5; // 備考,項目,担当,作成,修正
+  const totCols = NCOL + allDays.length;
+  const WJ=['日','月','火','水','木','金','土'];
+  const SEP='2px solid #888';  // vạch đậm phân cách khối trái | timeline
+  // Header tháng (Nhật: 5月) + ngày/thứ (Nhật: 日月火...)
+  const monthCells = monthSpans.map(function(s,i){ return '<th colspan="'+s.span+'" style="background:var(--navy2);color:var(--gold2);font-size:10px;font-weight:700;text-align:center;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.15);border-left:'+(i===0?SEP:'1px solid rgba(255,255,255,.15)')+'">'+s.m+'月</th>'; }).join('');
+  const dayHeader = allDays.map(function(ds,di){ const dd=parseInt(ds.slice(8)); const dow=new Date(ds).getDay(); const isToday=ds===todayStr; const isRealHol=holidaySet.has(ds); const isWeekend=dow===0||dow===6; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const col=isToday?'var(--navy)':isRealHol?'#ff6b6b':isWeekend?'rgba(255,255,255,.45)':'rgba(255,255,255,.9)'; const bg=isToday?'var(--gold)':'var(--navy)'; const bL=di===0?SEP:(isToday||isAfterToday?_TL_TODAY_BORDER:_TL_CB); return '<th '+(isToday?'id="gantt-today-overview"':'')+' style="width:16px;padding:2px 0;text-align:center;color:'+col+';background:'+bg+';border-bottom:'+_TL_PB+';border-left:'+bL+';white-space:nowrap;line-height:1.1"><div style="font-size:8px;font-weight:500;opacity:.85">'+WJ[dow]+'</div><div style="font-size:10px;font-weight:'+(isToday?'800':'700')+'">'+dd+'</div></th>'; }).join('');
+  const HB='background:var(--navy);color:#fff;text-align:center;border-bottom:'+_TL_PB+';border-right:1px solid rgba(255,255,255,.18)';
+  // Header 2 hàng giống file gốc: (工事名称 | 担当 | 作成 | 修正 | tháng) rồi (備考 | 項目 | ngày)
+  const thead =
+    '<tr>'
+    + '<th colspan="2" style="'+HB+';font-size:11px;padding:3px 6px">工事名称</th>'
+    + '<th rowspan="2" style="'+HB+';font-size:11px;padding:3px 4px">担当</th>'
+    + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">作成</th>'
+    + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">修正</th>'
+    + monthCells
+    + '</tr>'
+    + '<tr>'
+    + '<th style="'+HB+';font-size:11px;padding:3px 6px">備考</th>'
+    + '<th style="'+HB+';font-size:11px;padding:3px 6px">項目</th>'
+    + dayHeader
+    + '</tr>';
+
+  function dayCells(g, isLastRow, isCarry){
+    const rb = isLastRow?_TL_PB:_TL_CB;
+    const cover={};  // 1 bar / mỗi DÒNG (UP) -> nét đứt nếu tentative
+    if(g){
+      (g.rows||[]).forEach(function(r){
+        if(!(r.dateFrom||r.dateTo)) return;
+        const from=r.dateFrom||r.dateTo, to=r.dateTo||r.dateFrom;
+        const done=!!r.doneAt, past= to && to<todayStr;
+        const color=(done||past)?C_DONE:(r.status==='new'?C_NEW:C_REV);
+        const dashed=!!r.tentative;
+        if(to<allDays[0] || from>lastDay){
+          if(isCarry && to<monthStartStr && !done){ const c=cover[0]||{}; c.color=color; c.dashed=dashed; c.isStart=true; c.isEnd=true; cover[0]=c; }
+          return;
+        }
+        let s=0; while(s<allDays.length && allDays[s]<from) s++;
+        let e=allDays.length-1; while(e>=0 && allDays[e]>to) e--;
+        for(let i=s;i<=e;i++){ const c=cover[i]||{}; c.color=color; c.dashed=dashed; if(i===s)c.isStart=(allDays[i]===from); if(i===e)c.isEnd=(allDays[i]===to); cover[i]=c; }
+      });
+    }
+    return allDays.map((ds,di)=>{
+      const dow=new Date(ds).getDay();
+      const isToday=ds===todayStr, isHol=holidaySet.has(ds)||dow===0||dow===6, isPrev=ds<monthStartStr;
+      const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr;
+      let bar=''; const c=cover[di];
+      if(c){
+        const L=c.isStart?'0':'-1px', R=c.isEnd?'0':'-1px';
+        bar = c.dashed
+          ? '<div style="position:absolute;top:50%;transform:translateY(-50%);left:'+L+';right:'+R+';height:5px;border-top:1.2px dashed '+c.color+';border-bottom:1.2px dashed '+c.color+';z-index:5"></div>'
+          : '<div style="position:absolute;top:50%;transform:translateY(-50%);left:'+L+';right:'+R+';height:'+GANTT_BAR_H+'px;background:'+c.color+';z-index:5"></div>';
+      }
+      let lbl='';
+      if(g){
+        const upRow=(g.rows||[]).find(r=>r.dateTo===ds);
+        if(upRow){
+          const upToday = (upRow.dateTo===todayStr && !upRow.doneAt);
+          const ud = upRow.doneAt || (upRow.dateTo<todayStr);
+          const lc = bw ? (ud?'#888':'#000') : (upToday?'#e74c3c':(ud?'#6b7280':(upRow.status==='new'?'#5a9a35':'#d4900a')));
+          const lt = upRow.status==='new'?'作成':'修正';
+          const tip = (upRow.staff?x(upRow.staff)+' ・ ':'')+'UP '+upRow.dateTo+(upRow.tentative?' ・ Dự kiến':'')+(upRow.doneAt?' ・ Đã UP':' ・ Chưa UP');
+          lbl='<div title="'+tip+'" style="position:absolute;bottom:calc(50% + 1px);right:1px;white-space:nowrap;font-size:9px;font-weight:900;color:'+lc+';line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff">'+lt+'</div>';
+        }
+      }
+      const bg = (bw && isToday) ? '#f0f0f0' : _tlCellBg(isToday,isHol,isPrev);
+      const bL=di===0?SEP:_tlBorderLeft(isToday,isAfterToday,isPrev);
+      return '<td style="width:16px;padding:0;background:'+bg+';border-left:'+bL+';border-bottom:'+rb+'"><div style="height:22px;position:relative;overflow:visible">'+bar+lbl+'</div></td>';
+    }).join('');
+  }
+
+  function projBlock(p){
+    const isCarry = !!p._carryover;
+    const grps=(p.groups||[]).filter(g=> g.type || (g.rows||[]).some(r=>r.qty>0||r.dateTo));
+    const meta=[ p.buildingType, p.scope,
+      p.constructionStart?('着工予定 '+p.constructionStart):'',
+      p.constructionEnd?('引渡予定 '+p.constructionEnd):'',
+      p.client?('（'+p.client+'）'):'' ].filter(Boolean);
+    const pm = p.area||'—';
+    const nRow = Math.max(grps.length, meta.length, 1);
+    const totalRows = nRow + 1; // hàng tên dự án + hàng hạng mục
+    const blankDays = allDays.map((ds,di)=>{ const dow=new Date(ds).getDay(); const isToday=ds===todayStr,isHol=holidaySet.has(ds)||dow===0||dow===6,isPrev=ds<monthStartStr; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const bg=(bw&&isToday)?'#f0f0f0':_tlCellBg(isToday,isHol,isPrev); const bL=di===0?SEP:_tlBorderLeft(isToday,isAfterToday,isPrev); return '<td style="width:16px;padding:0;background:'+bg+';border-left:'+bL+';border-bottom:'+_TL_CB+'"><div style="height:14px"></div></td>'; }).join('');
+
+    let rows='';
+    const pjName = x(p.nameJP||p.nameVN||'—');
+    const carryBadge = (isCarry && !bw) ? ' <span style="font-size:8px;color:#f39c12">↩ T.cũ</span>' : '';
+    rows += '<tr>'
+      + '<td class="kj-bikou-name" colspan="2"><div class="nm" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="Mở dự án">'+pjName+carryBadge+'</div></td>'
+      + '<td class="kj-tan" rowspan="'+totalRows+'" style="border-bottom:'+_TL_PB+'">'+x(pm)+'</td>'
+      + '<td class="kj-num" style="border-bottom:'+_TL_CB+'"></td>'
+      + '<td class="kj-num" style="border-bottom:'+_TL_CB+'"></td>'
+      + blankDays
+      + '</tr>';
+
+    for(let i=0;i<nRow;i++){
+      const isLastRow=(i===nRow-1);
+      const g=grps[i]||null;
+      const metaTxt = meta[i]!=null?meta[i]:'';
+      let gNew=0, gRev=0, nmStyle='color:'+(bw?'#000':'#666')+';font-weight:500', nmText='';
+      if(g){
+        gNew=(g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+        gRev=(g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+        const gDone=(g.rows||[]).length>0 && (g.rows||[]).every(r=>r.doneAt);
+        const gTodayUp=(g.rows||[]).some(r=>r.dateTo===todayStr && !r.doneAt);
+        const gPend=(g.rows||[]).some(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
+        const pr=(g.rows||[]).find(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
+        const c = bw ? (gDone?'#888':'#000') : (gDone?'#6b7280':gTodayUp?'#e74c3c':gPend?(pr&&pr.status==='new'?'#5a9a35':'#d4900a'):'#666');
+        nmStyle='color:'+c+';font-weight:'+(((gPend||gTodayUp)&&!gDone)?'700':'500');
+        nmText=x(g.type||'—')+((gTodayUp&&!bw)?' 🔴':'')+(gDone?' ✓':'');
+      }
+      const tipStaff = g ? x([...new Set((g.rows||[]).map(r=>r.staff).filter(Boolean))].join(', ')) : '';
+      const rb=isLastRow?_TL_PB:_TL_CB;
+      rows += '<tr class="kj-it-row">'
+        + '<td class="kj-bikou-line" style="border-bottom:'+rb+'">'+x(metaTxt)+'</td>'
+        + (g
+            ? '<td class="kj-item" style="border-bottom:'+rb+'" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="'+(tipStaff?tipStaff+' · ':'')+'Mở dự án"><div class="nm" style="'+nmStyle+'">'+nmText+'</div></td>'
+            : '<td class="kj-empty" style="border-bottom:'+rb+'"></td>')
+        + '<td class="kj-num" style="border-bottom:'+rb+';color:'+(bw?'#000':'#27ae60')+'">'+(gNew||'')+'</td>'
+        + '<td class="kj-num" style="border-bottom:'+rb+';color:'+(bw?'#000':'#e67e22')+'">'+(gRev||'')+'</td>'
+        + dayCells(g, isLastRow, isCarry)
+        + '</tr>';
+    }
+    return rows;
+  }
+
+  // Chia nhóm theo văn phòng: 大阪 trước, 東京 sau (kèm hàng tiêu đề VP)
+  const OFFICE_ORDER=['大阪','東京'];
+  const byOffice={}, order=[];
+  pjs.forEach(function(p){ const o=p.office||'（その他）'; if(!byOffice[o]){byOffice[o]=[];order.push(o);} byOffice[o].push(p); });
+  order.sort(function(a,b){const ia=OFFICE_ORDER.indexOf(a),ib=OFFICE_ORDER.indexOf(b);if(ia===-1&&ib===-1)return 0;if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;});
+  let body='';
+  order.forEach(function(o){
+    const offDays = allDays.map(function(ds,di){ const dow=new Date(ds).getDay(); const isToday=ds===todayStr,isHol=holidaySet.has(ds)||dow===0||dow===6,isPrev=ds<monthStartStr; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const bg=(bw&&isToday)?'#f0f0f0':_tlCellBg(isToday,isHol,isPrev); const bL=di===0?SEP:_tlBorderLeft(isToday,isAfterToday,isPrev); return '<td style="width:16px;padding:0;background:'+bg+';border-left:'+bL+';border-bottom:'+_TL_PB+'"><div style="height:18px"></div></td>'; }).join('');
+    body += '<tr><td colspan="'+NCOL+'" style="background:'+(bw?'#eee':'#dde3ee')+';color:'+(bw?'#000':'var(--navy)')+';font-weight:800;font-size:13px;letter-spacing:.4em;text-align:center;padding:4px 10px;border-bottom:'+_TL_PB+'">'+x(o)+'</td>'+offDays+'</tr>';
+    let oNew=0,oRev=0;
+    byOffice[o].forEach(function(p){
+      body += projBlock(p);
+      (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ if(r.isCarryRef)return; if(r.status==='new')oNew+=(r.qty||0); else oRev+=(r.qty||0); }); });
+    });
+    // Hàng TỔNG theo văn phòng — chỉ hiện ở bản in
+    if(bw){
+      body += '<tr>'
+        + '<td class="kj-bikou-line" style="border-bottom:'+_TL_PB+';font-weight:800;text-align:right;background:#eee">'+x(o)+' 合計</td>'
+        + '<td class="kj-item" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">パース 合計</td>'
+        + '<td class="kj-tan" style="border-bottom:'+_TL_PB+';background:#eee"></td>'
+        + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+oNew+'</td>'
+        + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+oRev+'</td>'
+        + offDays + '</tr>';
+    }
+  });
+
+  let cols='<col style="width:130px"><col style="width:165px"><col style="width:42px"><col style="width:30px"><col style="width:30px">';
+  allDays.forEach(()=>cols+='<col style="width:16px">');
+  return '<div style="overflow-x:auto"><table class="kj-tbl"><colgroup>'+cols+'</colgroup><thead>'+thead+'</thead><tbody>'+body+'</tbody></table></div>';
+}
+
+// Cửa sổ 3 tháng đầy đủ (tháng trước · hiện tại · sau) cho bản xuất PDF — giống file gốc
+function _koutei3MonthWindow(){
+  const parts = D.activeMonth.split('-').map(Number); const Y=parts[0], M=parts[1];
+  const months=[]; for(let k=-1;k<=1;k++){ let y=Y,m=M+k; while(m<1){m+=12;y--;} while(m>12){m-=12;y++;} months.push([y,m]); }
+  const allDays=[], monthSpans=[];
+  months.forEach(function(ym){ const y=ym[0],m=ym[1]; const dim=new Date(y,m,0).getDate(); monthSpans.push({m:m,span:dim,label:m+'月'}); for(let d=1;d<=dim;d++){ allDays.push(y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0')); } });
+  const todayStr = localDateStr(new Date());
+  let hs=new Set(); try{ if(typeof getHolidays==='function') getHolidays().forEach(h=>hs.add(h.date)); }catch(e){}
+  return { allDays:allDays, todayStr:todayStr, holidaySet:hs, monthSpans:monthSpans, yr:months[1][0], mo:months[1][1], monthStart:allDays[0] };
+}
+
+// Cửa sổ MÀN HÌNH mở rộng: từ đầu cửa sổ app -> HẾT tháng tiếp theo (lấp đầy bên phải)
+function _kouteiScreenWindow(){
+  const W=_tlComputeWindow(D.activeMonth);
+  const start=W.allDays[0];
+  const parts=D.activeMonth.split('-').map(Number); const Y=parts[0], M=parts[1];
+  let ny=Y, nm=M+1; if(nm>12){nm=1;ny++;}
+  const endDim=new Date(ny,nm,0).getDate();
+  const end=ny+'-'+String(nm).padStart(2,'0')+'-'+String(endDim).padStart(2,'0');
+  const allDays=[]; let d=new Date(start+'T00:00:00'); const ed=new Date(end+'T00:00:00');
+  while(d<=ed){ allDays.push(localDateStr(d)); d.setDate(d.getDate()+1); }
+  const monthSpans=[]; let cur=null; allDays.forEach(function(ds){ const mm=+ds.slice(5,7); if(!cur||cur.m!==mm){cur={m:mm,span:1};monthSpans.push(cur);} else cur.span++; });
+  let hs=new Set(); try{ if(typeof getHolidays==='function') getHolidays().forEach(h=>hs.add(h.date)); }catch(e){}
+  return { allDays:allDays, todayStr:W.todayStr, holidaySet:hs, monthSpans:monthSpans, yr:Y, mo:M, monthStart:Y+'-'+String(M).padStart(2,'0')+'-01' };
+}
+
+// Xuất PDF bảng 工程表 (JP) — 3 tháng, đen trắng, MỖI VĂN PHÒNG 1 TRANG, có footer
+function exportKouteiPdf(){
+  const all=(curMonth().projects||[]);
+  const OFFICE_ORDER=['大阪','東京'];
+  const byOffice={}, order=[];
+  all.forEach(function(p){ const o=p.office||'（その他）'; if(!byOffice[o]){byOffice[o]=[];order.push(o);} byOffice[o].push(p); });
+  order.sort(function(a,b){const ia=OFFICE_ORDER.indexOf(a),ib=OFFICE_ORDER.indexOf(b);if(ia===-1&&ib===-1)return 0;if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;});
+  const nowD=new Date(); const rw=nowD.getFullYear()-2018;
+  const dateStr='令和'+rw+'年'+String(nowD.getMonth()+1).padStart(2,'0')+'月'+String(nowD.getDate()).padStart(2,'0')+'日';
+  let pagesHtml='';
+  order.forEach(function(o,idx){
+    const win=_koutei3MonthWindow(); win.bw=true;
+    const tbl=renderKouteiJP(byOffice[o], win);
+    pagesHtml += '<div class="kj-page"'+(idx>0?' style="page-break-before:always"':'')+'>'
+      + '<div class="kj-print-head">実施設計工程表（3ヶ月）　'+x(o)+'　'+monthLabel(D.activeMonth)+'</div>'
+      + tbl
+      + '<div class="kj-print-foot"><div class="ft-l">特記事項</div><div class="ft-r"><div>作製</div><div style="font-weight:800">現代綜合設計ベトナム</div><div>'+dateStr+'</div></div></div>'
+      + '</div>';
+  });
+  let ov=document.getElementById('kjPrintOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='kjPrintOverlay'; document.body.appendChild(ov); }
+  ov.innerHTML=pagesHtml||'<div style="padding:20px">Không có dự án JP trong tháng.</div>';
+  document.body.classList.add('kj-printing');
+  setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; }, 400); }, 150);
+}
+
 function renderProjectTimeline(pjs) {
   const isVN = activeSection === 'vn';
   // Window + header tính qua helper chung
@@ -3383,17 +3628,18 @@ function renderMonthOverview(ci) {
 
   <div class="card">
     <div class="card-hd">
-      <span class="card-hd-title">${activeSection==="vn"?"🇻🇳":"🇯🇵"} Chi tiết dự án — ${monthLabel(D.activeMonth)}</span>
+      <span class="card-hd-title">${activeSection==="vn"?'🇻🇳 Chi tiết dự án':'実施設計工程表 <span style="font-size:10px;font-weight:500;opacity:.65;letter-spacing:.04em">Jisshi Sekkei Kōteihyō</span>'} — ${monthLabel(D.activeMonth)}</span>
       <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-overview')" title="Cuộn đến cột ngày hôm nay">📍 Hôm nay</button>
+      ${activeSection!=='vn'?`<button class="btn btn-sm" style="background:#eef3fb;color:#1F3864;border:1px solid #b3c6e6;font-size:11px;padding:3px 10px" onclick="exportKouteiPdf()" title="Xuất PDF 3 tháng (giống file gốc)">🖨 Xuất PDF (3 tháng)</button>`:''}
     </div>
-    <div id="overviewTlInner" style="overflow-x:auto">${renderProjectTimeline(pjsTimeline)}</div>
+    <div id="overviewTlInner" style="overflow-x:auto">${activeSection==='vn'?renderProjectTimeline(pjsTimeline):renderKouteiJP(pjsTimeline,_kouteiScreenWindow())}</div>
   </div>
 
   <div id="pjDetailArea"></div>
 
   <div class="card" id="monthGanttCard">
     <div class="card-hd">
-      <span class="card-hd-title">📅 Lịch công việc nhân sự</span>
+      <span class="card-hd-title">${activeSection==='vn'?'📅 Lịch công việc nhân sự':'担当者別工程表 <span style="font-size:10px;font-weight:500;opacity:.65;letter-spacing:.04em">Tantōsha-betsu Kōteihyō</span>'}</span>
       <span style="font-size:10px;color:rgba(255,255,255,.5);flex:1">${activeSection==='vn'?'🇻🇳 Nhân sự dự án VN':'🇯🇵 Nhân sự dự án Nhật'} · Ai đang làm gì · Deadline · Ai rảnh</span>
       <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-month')" title="Cuộn đến cột ngày hôm nay">📍 Hôm nay</button>
     </div>
@@ -3543,8 +3789,14 @@ function renderMonthGantt(pjs) {
   });
 
   // monthSpans + holidaySet + allDaysStr đã có từ _tlComputeWindow ở đầu hàm
-  const hdrMonths = _tlMonthHeaderCells(monthSpans);
-  const hdrDays = _tlDayHeaderHtml(allDaysStr, todayStr, holidaySet, 22);
+  const _jpG = (activeSection!=='vn');   // Design Studio -> header tiếng Nhật
+  const _WJG = ['日','月','火','水','木','金','土'];
+  const hdrMonths = _jpG
+    ? monthSpans.map(function(s){ const mm=(s.m!=null?s.m:String(s.label||'').replace(/[^0-9]/g,'')); return '<th colspan="'+s.span+'" style="background:var(--navy2);color:var(--gold2);font-size:10px;font-weight:700;text-align:center;padding:3px 0;border-right:1px solid rgba(255,255,255,.15);border-bottom:1px solid rgba(255,255,255,.15)">'+mm+'月</th>'; }).join('')
+    : _tlMonthHeaderCells(monthSpans);
+  const hdrDays = _jpG
+    ? allDaysStr.map(function(ds,di){ const dd=parseInt(ds.slice(8)); const dow=new Date(ds).getDay(); const isToday=ds===todayStr; const isRealHol=holidaySet.has(ds); const isWeekend=dow===0||dow===6; const prevDs=di>0?allDaysStr[di-1]:''; const isAfterToday=prevDs===todayStr; const col=isToday?'var(--navy)':isRealHol?'#ff6b6b':isWeekend?'rgba(255,255,255,.45)':'rgba(255,255,255,.9)'; const bg=isToday?'var(--gold)':'var(--navy)'; const bL=isToday||isAfterToday?_TL_TODAY_BORDER:_TL_CB; return '<th '+(isToday?'id="gantt-today-month"':'')+' style="width:22px;padding:2px 0;text-align:center;color:'+col+';background:'+bg+';border-bottom:'+_TL_PB+';border-left:'+bL+';white-space:nowrap;line-height:1.1"><div style="font-size:8px;font-weight:500;opacity:.85">'+_WJG[dow]+'</div><div style="font-size:10px;font-weight:'+(isToday?'800':'700')+'">'+dd+'</div></th>'; }).join('')
+    : _tlDayHeaderHtml(allDaysStr, todayStr, holidaySet, 22);
 
   // ── Inner helpers: 1 hạng mục = 1 <tr> (đồng bộ kiến trúc Chi tiết dự án) ──
   function buildTaskNameCell(r) {
@@ -3611,7 +3863,20 @@ function renderMonthGantt(pjs) {
           const isLast = to === dkStr || dkStr === endStr;
           const pos = isFirst && isLast ? 'only' : isFirst ? 'start' : isLast ? 'end' : 'mid';
           const bar = _tlBarHtml(bc, pos);
-          const upHtml = (!isTrip && task.dateTo === dkStr) ? _tlUpHtml(task, task.pjName || '') : '';
+          let upHtml = '';
+          if (!isTrip && task.dateTo === dkStr) {
+            if (task.isVN) {
+              upHtml = _tlUpHtml(task, task.pjName || '');
+            } else {
+              // JP (Design Studio): thay "UP" bằng 作成/修正 — vị trí & màu như bảng 工程表
+              const upToday = (task.dateTo===todayStr && !task.doneAt);
+              const ud = task.doneAt || (task.dateTo<todayStr);
+              const lc = upToday?'#e74c3c':(ud?'#6b7280':(task.status==='new'?'#5a9a35':'#d4900a'));
+              const lt = task.status==='new'?'作成':'修正';
+              const tip = (task.pjName||'')+' ・ UP '+task.dateTo+(task.doneAt?' ・ Đã UP':' ・ Chưa UP');
+              upHtml = '<div title="'+tip+'" style="position:absolute;bottom:calc(50% + 1px);right:1px;white-space:nowrap;font-size:9px;font-weight:900;color:'+lc+';line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff;cursor:help">'+lt+'</div>';
+            }
+          }
           inner = `${bar}${upHtml}`;
         }
       }
@@ -6242,7 +6507,11 @@ function renderGroups(p) {
                 : r.dateTo === today
                   ? '<div style="font-size:9px;color:#e74c3c;font-weight:700">⚡ UP hôm nay</div>'
                   : '<div style="font-size:9px;color:#2980b9;font-weight:700">⏳ Đang làm</div>'
-              ) : ''}`
+              ) : ''}
+              <label style="display:flex;align-items:center;justify-content:center;gap:3px;font-size:8.5px;color:#7c3aed;margin-top:2px;cursor:pointer" title="Lịch dự kiến: thanh tiến độ hiện nét đứt">
+                <input type="checkbox" ${r.tentative?'checked':''} style="width:11px;height:11px;margin:0;accent-color:#7c3aed"
+                  onchange="updRow('${p.id}','${g.id}','${r.id}','tentative',this.checked)"> Dự kiến
+              </label>`
           }
         </td>
         <td style="text-align:center;min-width:56px;${cellDim}">
@@ -6782,7 +7051,7 @@ function updRow(pjId,gid2,rid,field,val) {
     });
   }
   persistD();
-  if (['dateFrom','dateTo','doneAt','status','qty'].includes(field)) {
+  if (['dateFrom','dateTo','doneAt','status','qty','tentative'].includes(field)) {
     clearTimeout(_ovTlRefreshTimer[pjId]);
     _ovTlRefreshTimer[pjId] = setTimeout(function() { _refreshOverviewParts(); }, 1000);
   }
@@ -6832,7 +7101,7 @@ function _refreshOverviewParts() {
     : (curMonth().projects||[]).map(p=>p.id));
   const pjsTimeline = pjsAll.filter(p => curSectionIds.has(p.id));
   const tlDiv = document.getElementById('overviewTlInner');
-  if (tlDiv) tlDiv.innerHTML = renderProjectTimeline(pjsTimeline);
+  if (tlDiv) tlDiv.innerHTML = (activeSection==='vn'?renderProjectTimeline(pjsTimeline):renderKouteiJP(pjsTimeline,_kouteiScreenWindow()));
   const ganttBody = document.querySelector('#monthGanttCard .card-body');
   const pjsGantt = pjsAll.filter(p => p._section === activeSection);
   if (ganttBody) ganttBody.innerHTML = renderMonthGantt(pjsGantt);
@@ -6871,6 +7140,15 @@ function openAddProject() {
           ${sortedStaffOptionsHtml('')}
         </select>
       </div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#1F3864;margin:12px 0 8px;padding:4px 8px;background:#eef3fb;border-radius:4px">🏛 Khung tên dự án (工程表)</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>担当 (PM Nhật)</label><input id="ap-area" placeholder="例：小倉"></div>
+      <div class="field"><label>Quy cách công trình</label><input id="ap-buildingType" placeholder="例：15RC/SeniorFA/161戸"></div>
+      <div class="field" style="grid-column:1/-1"><label>Địa chỉ (所在地)</label><input id="ap-scope" placeholder="例：大津市今堅田3丁目"></div>
+      <div class="field"><label>着工予定 (Khởi công)</label><input id="ap-constructionStart" type="date"></div>
+      <div class="field"><label>引渡予定 (Bàn giao)</label><input id="ap-constructionEnd" type="date"></div>
+      <div class="field" style="grid-column:1/-1"><label>Chủ đầu tư (施主)</label><input id="ap-client" placeholder="例：ハイネスCORP"></div>
     </div>`;
 
   const vnForm = `
@@ -7082,14 +7360,13 @@ async function confirmAddPj() {
     groups:[],
     photos: hist?.photo ? [hist.photo] : [],
     otLog:[],notes:''};
-  if (isVN) {
-    pj.client           = (document.getElementById('ap-client')?.value||'').trim();
-    pj.buildingType     = (document.getElementById('ap-buildingType')?.value||'').trim();
-    pj.scope            = (document.getElementById('ap-scope')?.value||'').trim();
-    pj.area             = (document.getElementById('ap-area')?.value||'').trim();
-    pj.constructionStart= (document.getElementById('ap-constructionStart')?.value||'');
-    pj.constructionEnd  = (document.getElementById('ap-constructionEnd')?.value||'');
-  }
+  // Khung tên: đọc cho CẢ JP + VN (JP: area=担当 PM, scope=địa chỉ, buildingType=quy cách)
+  pj.client           = (document.getElementById('ap-client')?.value||'').trim();
+  pj.buildingType     = (document.getElementById('ap-buildingType')?.value||'').trim();
+  pj.scope            = (document.getElementById('ap-scope')?.value||'').trim();
+  pj.area             = (document.getElementById('ap-area')?.value||'').trim();
+  pj.constructionStart= (document.getElementById('ap-constructionStart')?.value||'');
+  pj.constructionEnd  = (document.getElementById('ap-constructionEnd')?.value||'');
   if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
   if(activeSection==='vn'){
     if(!D.months[D.activeMonth].projectsVN) D.months[D.activeMonth].projectsVN=[];
@@ -7133,6 +7410,15 @@ function openEditProject(id) {
       <div class="field"><label>Người triển khai chính</label>
         <select id="ep-st"><option value="">— Chọn —</option>
           ${sortedStaffOptionsHtml(p.mainStaff)}</select></div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:#1F3864;margin:12px 0 8px;padding:4px 8px;background:#eef3fb;border-radius:4px">🏛 Khung tên dự án (工程表)</div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>担当 (PM Nhật)</label><input id="ep-area" value="${x(p.area||'')}" placeholder="例：小倉"></div>
+      <div class="field"><label>Quy cách công trình</label><input id="ep-buildingType" value="${x(p.buildingType||'')}" placeholder="例：15RC/SeniorFA/161戸"></div>
+      <div class="field" style="grid-column:1/-1"><label>Địa chỉ (所在地)</label><input id="ep-scope" value="${x(p.scope||'')}" placeholder="例：大津市今堅田3丁目"></div>
+      <div class="field"><label>着工予定 (Khởi công)</label><input id="ep-constructionStart" type="date" value="${x(p.constructionStart||'')}"></div>
+      <div class="field"><label>引渡予定 (Bàn giao)</label><input id="ep-constructionEnd" type="date" value="${x(p.constructionEnd||'')}"></div>
+      <div class="field" style="grid-column:1/-1"><label>Chủ đầu tư (施主)</label><input id="ep-client" value="${x(p.client||'')}" placeholder="例：ハイネスCORP"></div>
     </div>
     <input type="hidden" id="ep-nJP-hidden" value="">`;
 
@@ -7225,14 +7511,13 @@ function confirmEditPj(id) {
   p.office=(document.getElementById('ep-off')?.value||'');
   p.contact=(document.getElementById('ep-ct')?.value||'').trim();
   p.mainStaff=(document.getElementById('ep-st')?.value||'');
-  if (isVN) {
-    p.client           = (document.getElementById('ep-client')?.value||'').trim();
-    p.buildingType     = (document.getElementById('ep-buildingType')?.value||'').trim();
-    p.scope            = (document.getElementById('ep-scope')?.value||'').trim();
-    p.area             = (document.getElementById('ep-area')?.value||'').trim();
-    p.constructionStart= (document.getElementById('ep-constructionStart')?.value||'');
-    p.constructionEnd  = (document.getElementById('ep-constructionEnd')?.value||'');
-  }
+  // Khung tên: lưu cho CẢ JP + VN (JP: area=担当 PM, scope=địa chỉ, buildingType=quy cách)
+  p.client           = (document.getElementById('ep-client')?.value||'').trim();
+  p.buildingType     = (document.getElementById('ep-buildingType')?.value||'').trim();
+  p.scope            = (document.getElementById('ep-scope')?.value||'').trim();
+  p.area             = (document.getElementById('ep-area')?.value||'').trim();
+  p.constructionStart= (document.getElementById('ep-constructionStart')?.value||'');
+  p.constructionEnd  = (document.getElementById('ep-constructionEnd')?.value||'');
 
   // Sync CHỈ NAME sang các projects khác (giữ office/contact/... riêng từng tháng)
   let syncedCount = 0;

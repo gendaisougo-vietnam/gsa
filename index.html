@@ -697,8 +697,8 @@ table.detail-tl tr.staff-last > td {
   </div>
   <div class="hdr-nav">
     <div style="display:flex;gap:0;background:rgba(0,0,0,.2);border-radius:8px;padding:2px" id="navMainGroup">
-      <button class="nav-btn active" id="navMain" onclick="showPage('main');setSection('jp')" style="border-radius:6px 0 0 6px;margin:0">🇯🇵 Dự án Nhật</button>
-      <button class="nav-btn" id="navMainVN" onclick="showPage('main');setSection('vn')" style="border-radius:0 6px 6px 0;margin:0;border-left:1px solid rgba(255,255,255,.15)">🇻🇳 Dự án Việt Nam</button>
+      <button class="nav-btn active" id="navMain" onclick="showPage('main');setSection('jp')" style="border-radius:6px 0 0 6px;margin:0;line-height:1.15;text-align:center">デザインスタジオ<div style="font-size:9px;opacity:.75;font-weight:400">Design Studio</div></button>
+      <button class="nav-btn" id="navMainVN" onclick="showPage('main');setSection('vn')" style="border-radius:0 6px 6px 0;margin:0;border-left:1px solid rgba(255,255,255,.15);line-height:1.15;text-align:center">設計室<div style="font-size:9px;opacity:.75;font-weight:400">Design Department</div></button>
     </div>
     <button class="nav-btn" id="navDash" onclick="showPage('dashboard')">📊 Dashboard</button>
     <button class="nav-btn" id="navStaff" onclick="showPage('staff')">👥 Nhân sự</button>
@@ -2042,14 +2042,18 @@ function allActiveProjects() {
   const todayStr   = localDateStr(new Date());
 
   // Dự án tháng hiện tại — luôn hiện (kể cả dateTo nằm trước monthStart vì được copy từ tháng cũ)
-  const cur = allCurProjects().map(p => ({...p, _carryover: false}));
+  const _cm = curMonth();
+  const cur = [
+    ...(_cm.projects||[]).map(p => ({...p, _carryover: false, _section: 'jp'})),
+    ...(_cm.projectsVN||[]).map(p => ({...p, _carryover: false, _section: 'vn'})),
+  ];
   const curIds = new Set(cur.map(p=>p.id));
 
   // Dự án từ các tháng khác có row timeline giao với tháng hiện tại HOẶC với hôm nay
   const carryover = [];
   Object.entries(D.months).forEach(([m2id, m2]) => {
     if (m2id === mid) return;
-    [...(m2.projects||[]), ...(m2.projectsVN||[])].forEach(p => {
+    [...(m2.projects||[]).map(p=>({p,sec:'jp'})), ...(m2.projectsVN||[]).map(p=>({p,sec:'vn'}))].forEach(({p,sec}) => {
       if (curIds.has(p.id)) return;
       const hasActive = (p.groups||[]).some(g =>
         (g.rows||[]).some(r => {
@@ -2060,7 +2064,7 @@ function allActiveProjects() {
         })
       );
       if (hasActive) {
-        carryover.push({...p, _carryover: true});
+        carryover.push({...p, _carryover: true, _section: sec});
         curIds.add(p.id);
       }
     });
@@ -2659,9 +2663,9 @@ function renderSidebar() {
   const pjs = curProjects();
   document.getElementById('pjCount').textContent = pjs.length;
   const _hdEl=document.getElementById('sidebarHd');
-  if(_hdEl&&_hdEl.childNodes[0]) _hdEl.childNodes[0].nodeValue=(activeSection==='vn'?'Dự án VN ':'Dự án JP ');
+  if(_hdEl&&_hdEl.childNodes[0]) _hdEl.childNodes[0].nodeValue=(activeSection==='vn'?'設計室 ':'デザインスタジオ ');
   const _addBtn=document.getElementById('addPjBtn');
-  if(_addBtn) _addBtn.textContent='\uFF0B '+(activeSection==='vn'?'Dự án VN 🇻🇳':'Dự án Nhật 🇯🇵');
+  if(_addBtn) _addBtn.textContent='\uFF0B '+(activeSection==='vn'?'設計室 🇻🇳':'デザインスタジオ 🇯🇵');
   const list = document.getElementById('pjList');
   if (!pjs.length) {
     list.innerHTML = '<div style="padding:20px 10px;text-align:center;color:var(--gray4);font-size:11px;line-height:1.7">Chưa có dự án<br><span style="font-size:10px">Nhấn + Thêm dự án</span></div>';
@@ -3244,6 +3248,8 @@ function renderMonthOverview(ci) {
       : (curMonth().projects||[]).map(p=>p.id)
   );
   const pjsTimeline = pjsAll.filter(p => curSectionIds.has(p.id));
+  // Lịch công việc nhân sự: chỉ nhân sự làm dự án ĐÚNG phía đang xem (JP/VN). Ai làm cả 2 sẽ hiện ở cả 2 tab.
+  const pjsGantt = pjsAll.filter(p => p._section === activeSection);
   const m=curMonth();
   const sumNew=pjs.reduce((s,p)=>s+totalNew(p),0);
   const sumRev=pjs.reduce((s,p)=>s+totalRev(p),0);
@@ -3269,6 +3275,17 @@ function renderMonthOverview(ci) {
   const maxPerf=Math.max(1,...Object.values(smPerf));
   const activePerf=D.settings.staffList.filter(s=>smPerf[s]>0).sort((a,b)=>smPerf[b]-smPerf[a]);
 
+  // Lọc hiển thị hiệu suất theo phòng của phía đang xem (Nhật=Design Studio, VN=Design Department)
+  const _oiB = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
+  const _oiBLoaded = Object.keys(_oiB).length>0;
+  const _deptB = activeSection==='vn' ? '設計室' : 'デザインスタジオ';
+  const _perfRoster = D.settings.staffList.filter(s=>{
+    if(!_oiBLoaded) return true;
+    if((_oiB[s]||{}).deptName===_deptB) return true;
+    if((smPerf[s]||0)>0 || (otMap[s]||0)>0) return true;
+    return false;
+  }).sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
+
   ci.innerHTML=`
   <div id="heroStatsRow" class="hero-row" style="grid-template-columns:160px 160px 1fr 220px">
 
@@ -3292,10 +3309,12 @@ function renderMonthOverview(ci) {
     <div class="hero-box navy" style="overflow:hidden">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--gold2);font-weight:700;margin-bottom:7px">⚡ Hiệu suất nhân sự</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">
-        ${[0,1].map(col=>{
+        ${(function(){
+        const _perCol = Math.max(6, Math.ceil(_perfRoster.length/2));
+        return [0,1].map(col=>{
           const items = [];
-          for(let i=0;i<6;i++){
-            const s = D.settings.staffList[col*6+i];
+          for(let i=0;i<_perCol;i++){
+            const s = _perfRoster[col*_perCol+i];
             if(s){
               const v=smPerf[s]||0, pct=maxPerf>0?Math.round(v/maxPerf*100):0, ot=otMap[s]||0;
               items.push(`<div class="perf-bar" style="margin-bottom:3px">
@@ -3313,7 +3332,8 @@ function renderMonthOverview(ci) {
             }
           }
           return items.join('');
-        }).join('')}
+        }).join('');
+        })()}
       </div>
     </div>
 
@@ -3374,11 +3394,11 @@ function renderMonthOverview(ci) {
   <div class="card" id="monthGanttCard">
     <div class="card-hd">
       <span class="card-hd-title">📅 Lịch công việc nhân sự</span>
-      <span style="font-size:10px;color:rgba(255,255,255,.5);flex:1">Tất cả dự án · Ai đang làm gì · Deadline · Ai rảnh</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.5);flex:1">${activeSection==='vn'?'🇻🇳 Nhân sự dự án VN':'🇯🇵 Nhân sự dự án Nhật'} · Ai đang làm gì · Deadline · Ai rảnh</span>
       <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-month')" title="Cuộn đến cột ngày hôm nay">📍 Hôm nay</button>
     </div>
     <div class="card-body" style="padding:0">
-      ${renderMonthGantt(pjsAll)}
+      ${renderMonthGantt(pjsGantt)}
     </div>
   </div>
   `;
@@ -3601,7 +3621,20 @@ function renderMonthGantt(pjs) {
 
   // ── Staff rows — sắp xếp + restructure mỗi hạng mục = 1 sub-row ──
   const STAFF_ORDER = ['HAN トゥアン','SGN ヒエン','SGN L.フォン','HAN M.フオン','SGN ズエン','HAN ハー','HAN T.タイン','HAN H.タイン','HAN D.チュン','HAN ニュー'];
-  const sortedStaff = [...D.settings.staffList].sort((a,b)=>{
+  // Lọc nhân sự theo phòng của tab đang xem:
+  //  - Tab Nhật = phòng Design Studio (デザインスタジオ); Tab VN = phòng Design Department (設計室)
+  //  - Hiện = (thành viên đúng phòng đó) ∪ (người có việc thật ở phía đang xem)
+  //  - Nếu chưa tải được dữ liệu phòng (assignments) thì GIỮ NGUYÊN để không ẩn nhầm ai.
+  const _orgInfo2 = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
+  const _orgLoaded = Object.keys(_orgInfo2).length>0;
+  const _targetDept = activeSection==='vn' ? '設計室' : 'デザインスタジオ';
+  const _rosterBase = [...D.settings.staffList].filter(s=>{
+    if(!_orgLoaded) return true;
+    if((_orgInfo2[s]||{}).deptName === _targetDept) return true;
+    if((staffMap[s]||[]).length>0) return true;
+    return false;
+  });
+  const sortedStaff = _rosterBase.sort((a,b)=>{
     const ia=STAFF_ORDER.indexOf(a),ib=STAFF_ORDER.indexOf(b);
     if(ia===-1&&ib===-1)return 0;if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;
   });
@@ -3622,9 +3655,9 @@ function renderMonthGantt(pjs) {
     const summary = leaveParts+tripParts || '';
     const nameBg = tasks.length>0||trips.length>0 ? 'var(--gray1)' : '#e8fdf0';
 
-    // OT total
+    // OT total — chỉ tính giờ của phía đang xem (jp/vn) cho khớp bảng lọc theo phòng
     let otTotal = 0;
-    [...(m.projects||[]),...(m.projectsVN||[])].forEach(p=>{
+    (activeSection==='vn' ? (m.projectsVN||[]) : (m.projects||[])).forEach(p=>{
       (p.groups||[]).forEach(g=>{
         (g.rows||[]).forEach(r=>{
           if(r.staff===staff && r.ot) otTotal += (r.ot||0);
@@ -6801,7 +6834,8 @@ function _refreshOverviewParts() {
   const tlDiv = document.getElementById('overviewTlInner');
   if (tlDiv) tlDiv.innerHTML = renderProjectTimeline(pjsTimeline);
   const ganttBody = document.querySelector('#monthGanttCard .card-body');
-  if (ganttBody) ganttBody.innerHTML = renderMonthGantt(pjsAll);
+  const pjsGantt = pjsAll.filter(p => p._section === activeSection);
+  if (ganttBody) ganttBody.innerHTML = renderMonthGantt(pjsGantt);
 }
 
 /* PROJECT CRUD */
@@ -8012,8 +8046,8 @@ function renderDashboard() {
     <div class="chart-box"><h4>OT nhân sự</h4><canvas id="cOT" height="150"></canvas></div>
     <div class="chart-box"><h4>Thực tế vs Mục tiêu</h4><canvas id="cTarget" height="150"></canvas></div>
   </div>
-  ${buildPerfTable(activeSJP, staffAnnJP, RATING_JP, 'Hiệu suất Dự án Nhật — ' + year, '🇯🇵', 'jp')}
-  ${buildPerfTable(activeSVN, staffAnnVN, RATING_VN, 'Hiệu suất Dự án Việt Nam — ' + year, '🇻🇳', 'vn')}
+  ${buildPerfTable(activeSJP, staffAnnJP, RATING_JP, 'Hiệu suất デザインスタジオ (Design Studio) — ' + year, '🇯🇵', 'jp')}
+  ${buildPerfTable(activeSVN, staffAnnVN, RATING_VN, 'Hiệu suất 設計室 (Design Department) — ' + year, '🇻🇳', 'vn')}
   ${buildCombinedTable(activeS, staffAnn)}
   `;
   setTimeout(()=>{
@@ -9716,6 +9750,16 @@ function _staffOrgInfo(){
   return info;
 }
 
+// Quy tắc tính số mai theo phía của phòng (anh Tuấn chốt):
+//  - Design Studio (デザインスタジオ) -> chỉ tính việc Nhật ('jp')
+//  - Design Department (設計室)      -> chỉ tính việc VN ('vn')
+//  - Các phòng khác / chưa có dữ liệu phòng -> tính CẢ 2 phía
+function _staffSideAllowed(deptName, side){
+  if(deptName==='デザインスタジオ') return side==='jp';
+  if(deptName==='設計室')        return side==='vn';
+  return true;
+}
+
 function renderOrgChart(){
   const host=document.getElementById('orgContent'); if(!host) return;
   if(window._orgRAF){ cancelAnimationFrame(window._orgRAF); window._orgRAF=null; }
@@ -9797,7 +9841,7 @@ function renderOrgChart(){
   }
   function orgEsc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
   // KPI = hiệu suất tháng (tổng số mai) của tháng đang chọn
-  (function(){ const mid=D.activeMonth; const _sm=(D.months||{})[mid]||{projects:[],projectsVN:[]}; const pjs=[...(_sm.projects||[]),...(_sm.projectsVN||[])]; const perf={}; pjs.forEach(p=>(p.groups||[]).forEach(g=>(g.rows||[]).forEach(r=>{ if(r&&r.staff){ perf[r.staff]=(perf[r.staff]||0)+(r.qty||0); } }))); window._orgPerf=perf; window._orgPerfMax=Math.max(1, ...Object.values(perf)); })();
+  (function(){ const mid=D.activeMonth; const _sm=(D.months||{})[mid]||{projects:[],projectsVN:[]}; const _oiD=(typeof _staffOrgInfo==='function')?_staffOrgInfo():{}; const perf={}; [['jp',_sm.projects||[]],['vn',_sm.projectsVN||[]]].forEach(function(sv){ var side=sv[0]; (sv[1]||[]).forEach(function(p){ (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ if(r&&r.staff&&_staffSideAllowed((_oiD[r.staff]||{}).deptName, side)){ perf[r.staff]=(perf[r.staff]||0)+(r.qty||0); } }); }); }); }); window._orgPerf=perf; window._orgPerfMax=Math.max(1, ...Object.values(perf)); })();
   people.forEach(buildNode);
   let tcount=0,hoverId=null,selectedId=null,curFam=null,treeP=null,clickTimer=null,lastT=0,lastIdD=null;
   function applySel(){ if(selectedId&&byId[selectedId]){ treeP=computeTree(selectedId); curFam=famOf(selectedId);} else { selectedId=null; treeP=null; curFam=null; } const h=root.querySelector('#orgHint'); if(h)h.textContent=selectedId?'● cây tổ chức · click nền để thoát':'▶ đang xoay'; }
@@ -9834,19 +9878,23 @@ function renderStaffPage() {
   const _sm=(D.months[mid]||{projects:[],projectsVN:[]}); const pjs=[...(_sm.projects||[]),...(_sm.projectsVN||[])];
   const today = localDateStr(new Date());
 
-  // Current month stats
+  // Current month stats — tính số mai theo phía của phòng (Studio=Nhật, Department=VN, khác=cả 2)
   const sd = {};
   Array.from(new Set([...(D.settings.staffList||[]), ...Object.keys(D.settings.staffProfiles||{})])).forEach(s=>sd[s]={n:0,r:0,ot:0,pjs:[]});
-  pjs.forEach(p=>{
-    (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{
-      if(r.staff&&sd[r.staff]){
-        if(r.status==='new') sd[r.staff].n+=(r.qty||0); else sd[r.staff].r+=(r.qty||0);
-        sd[r.staff].ot+=(r.ot||0);
-        const nm=p.nameVN||p.nameJP||'?';
-        if(!sd[r.staff].pjs.includes(nm)) sd[r.staff].pjs.push(nm);
-      }
+  const _oiC = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
+  [['jp', _sm.projects||[]], ['vn', _sm.projectsVN||[]]].forEach(([side, plist])=>{
+    plist.forEach(p=>{
+      (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{
+        if(r.staff&&sd[r.staff]){
+          if(!_staffSideAllowed((_oiC[r.staff]||{}).deptName, side)) return;
+          if(r.status==='new') sd[r.staff].n+=(r.qty||0); else sd[r.staff].r+=(r.qty||0);
+          sd[r.staff].ot+=(r.ot||0);
+          const nm=p.nameVN||p.nameJP||'?';
+          if(!sd[r.staff].pjs.includes(nm)) sd[r.staff].pjs.push(nm);
+        }
+      });
+      (p.otLog||[]).forEach(e=>{if(e.staff&&sd[e.staff]&&_staffSideAllowed((_oiC[e.staff]||{}).deptName, side))sd[e.staff].ot+=(e.hours||0);});
     });
-    (p.otLog||[]).forEach(e=>{if(e.staff&&sd[e.staff])sd[e.staff].ot+=(e.hours||0);});
   });
 
   // Lấy TẤT CẢ nhân sự (gồm cả 39 người trong Sơ đồ tổ chức) + gắn phòng/cấp bậc từ assignments
@@ -10489,7 +10537,7 @@ function renderSettings() {
 
         <!-- JP -->
         <div>
-          <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid var(--navy)">🇯🇵 Dự án Nhật — Diễn họa kiến trúc</div>
+          <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid var(--navy)">🇯🇵 デザインスタジオ (Design Studio) — Diễn họa kiến trúc</div>
           <div style="margin-bottom:8px">
             <span style="background:#e8f4fd;color:#1a5276;padding:2px 8px;border-radius:4px;font-weight:600;font-size:11px">Nhóm A: Kỹ thuật diễn họa — 40%</span>
             <ul style="margin:4px 0 0 16px;color:#555">
@@ -10527,7 +10575,7 @@ function renderSettings() {
 
         <!-- VN -->
         <div>
-          <div style="font-weight:700;font-size:13px;color:#27ae60;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid #27ae60">🇻🇳 Dự án Việt Nam — Kiến trúc & Nội thất</div>
+          <div style="font-weight:700;font-size:13px;color:#27ae60;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid #27ae60">🇻🇳 設計室 (Design Department) — Kiến trúc & Nội thất</div>
           <div style="margin-bottom:8px">
             <span style="background:#e8f4fd;color:#1a5276;padding:2px 8px;border-radius:4px;font-weight:600;font-size:11px">Nhóm A: Quy trình thiết kế — 45%</span>
             <ul style="margin:4px 0 0 16px;color:#555">
@@ -12167,14 +12215,14 @@ function openExportMenu() {
 
     <div style="font-size:11px;font-weight:700;color:#1F3864;letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">📋 Báo cáo Dự án</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-      ${card('🇯🇵','Dự án Nhật','Hạng mục · Mới / Sửa<br>Tổng từng dự án JP',`${cntJP} dự án`,'#1F3864','#EEF3FB',`exportProjectReport('jp')`)}
-      ${card('🇻🇳','Dự án Việt Nam','Hạng mục · Mới / Sửa<br>Tổng từng dự án VN',`${cntVN} dự án`,'#C8292A','#FFF0F0',`exportProjectReport('vn')`)}
+      ${card('🇯🇵','デザインスタジオ Design Studio','Hạng mục · Mới / Sửa<br>Tổng từng dự án JP',`${cntJP} dự án`,'#1F3864','#EEF3FB',`exportProjectReport('jp')`)}
+      ${card('🇻🇳','設計室 Design Department','Hạng mục · Mới / Sửa<br>Tổng từng dự án VN',`${cntVN} dự án`,'#C8292A','#FFF0F0',`exportProjectReport('vn')`)}
     </div>
 
     <div style="font-size:11px;font-weight:700;color:#C55A11;letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">⏱ Báo cáo OT</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-      ${card('🇯🇵','OT Dự án Nhật','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otJP.toFixed(1)}h`,'#ED7D31','#FFF5EE',`exportOTReport('jp')`)}
-      ${card('🇻🇳','OT Dự án Việt Nam','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otVN.toFixed(1)}h`,'#C55A11','#FFF5EE',`exportOTReport('vn')`)}
+      ${card('🇯🇵','OT デザインスタジオ Design Studio','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otJP.toFixed(1)}h`,'#ED7D31','#FFF5EE',`exportOTReport('jp')`)}
+      ${card('🇻🇳','OT 設計室 Design Department','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otVN.toFixed(1)}h`,'#C55A11','#FFF5EE',`exportOTReport('vn')`)}
     </div>
 
     <div style="padding:9px 12px;background:#f7f7f7;border-radius:6px;font-size:11px;color:#999">
@@ -12195,7 +12243,7 @@ function exportProjectReport(section) {
   const now = new Date().toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'});
   const sumNew = pjs.reduce((s,p)=>s+totalNew(p),0);
   const sumRev = pjs.reduce((s,p)=>s+totalRev(p),0);
-  const sectionLabel = isVN ? '🇻🇳 Dự án Việt Nam' : '🇯🇵 Dự án Nhật';
+  const sectionLabel = isVN ? '🇻🇳 設計室 (Design Department)' : '🇯🇵 デザインスタジオ (Design Studio)';
   const headerColor  = isVN ? '#C8292A' : '#1F3864';
   const newColor     = isVN ? '#1A7A3A' : '#375623';
   const revColor     = isVN ? '#7F4000' : '#7F6000';
@@ -12277,7 +12325,7 @@ function exportOTReport(section) {
     : (D.months[D.activeMonth]?.projects   || []);
   const ml = monthLabel(D.activeMonth);
   const now = new Date().toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'});
-  const sectionLabel = isVN ? '🇻🇳 Dự án Việt Nam' : '🇯🇵 Dự án Nhật';
+  const sectionLabel = isVN ? '🇻🇳 設計室 (Design Department)' : '🇯🇵 デザインスタジオ (Design Studio)';
   const headerColor  = isVN ? '#C55A11' : '#ED7D31';
   const staffOT = {};
   D.settings.staffList.forEach(s=>staffOT[s]={total:0,entries:[]});

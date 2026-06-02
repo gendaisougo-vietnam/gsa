@@ -3457,7 +3457,9 @@ function renderMonthGantt(pjs) {
           pjName:    p.nameVN||p.nameJP||'—',
           groupName: g.type||'—',
           pjNum:     pIdx + 1,
-          isVN:      vnIds.has(p.id)
+          isVN:      vnIds.has(p.id),
+          _pjCarry:  !!p._carryover,
+          pjId:      p.id
         }))
     )
   );
@@ -3486,12 +3488,26 @@ function renderMonthGantt(pjs) {
             groupName: t.name || '—',
             pjNum:     pjs.indexOf(p) + 1,
             isVN:      true,
-            _fromTl:   true   // flag để phân biệt nguồn
+            _fromTl:   true,   // flag để phân biệt nguồn
+            pjId:      p.id
           }))
         )
     );
 
-  const allTasks = [...groupTasks, ...tlTasks];
+  let allTasks = [...groupTasks, ...tlTasks];
+  // FIX trùng lặp Lịch CV: 1 hạng mục carryover hiện ở CẢ dự án tháng hiện tại lẫn dự án gốc tháng trước
+  // -> cùng nhân sự + cùng hạng mục + cùng giờ UP = cùng 1 việc. Giữ bản ở dự án THÁNG HIỆN TẠI
+  // (số thứ tự đúng), bỏ bản carryover. CHỈ sửa hiển thị, KHÔNG đổi dữ liệu.
+  (function(){
+    const seen={}, out=[];
+    allTasks.forEach(function(t){
+      const key=(t.staff||'')+'|'+(t.pjName||'')+'|'+(t.groupName||'')+'|'+(t.upTime||t.dateTo||t.dateFrom||'');
+      const ex=seen[key];
+      if(!ex){ seen[key]=t; out.push(t); }
+      else if(ex._pjCarry && !t._pjCarry){ const i=out.indexOf(ex); if(i>=0) out[i]=t; seen[key]=t; }
+    });
+    allTasks=out;
+  })();
 
   function overlaps(r) {
     const from=r.dateFrom||r.dateTo||'', to=r.dateTo||r.dateFrom||'';
@@ -3528,7 +3544,7 @@ function renderMonthGantt(pjs) {
       : isDoneByDate ? DONE_COLOR
       : 'inherit';
     const prefix = isTrip ? '✈' : `[${r.pjNum||'?'}]`;
-    return `<td style="padding:2px 6px;border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px">
+    return `<td ${r.pjId?`onclick="selectPj('${r.pjId}')"`:''} title="${r.pjId?'Mở dự án':''}" style="padding:2px 6px;border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
       <div class="grp-name-text" style="font-size:11px;color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:18px">
         <span style="font-weight:800;color:${numColor}">${prefix}</span> ${typeName}${isTodayUp?' 🔴':''}${isUrgent?' ⚡':''}${isActuallyDone?' <span style="color:#27ae60;font-size:9px">✓</span>':''}
       </div>
@@ -6069,8 +6085,8 @@ function renderGroups(p) {
         </td>
       </tr>`;
     }
-    const gNew = rows.filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
-    const gRev = rows.filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
+    const gNew = rows.filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+    const gRev = rows.filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
     const gOT  = rows.reduce((s,r)=>s+(r.ot||0),0);
     const gTot = gNew+gRev;
     const gc   = GRP[gi % GRP.length];
@@ -6160,6 +6176,8 @@ function renderGroups(p) {
         <td style="text-align:center;${cellDim}">
           ${rIsDone
             ? `<span style="font-size:11px;color:${DONE_COLOR};font-weight:600">${r.qty||0}</span>`
+            : r.isCarryRef
+            ? `<span title="So mai da tinh o thang goc - khong cong vao thang nay" style="font-size:11px;color:#999;font-weight:600">🔒 ${r.qty||0}</span>`
             : `<input class="qty-inp" type="number" min="0" value="${r.qty||0}" style="width:54px"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','qty',+this.value);refreshPjTotals('${p.id}')">`}
         </td>
@@ -6688,12 +6706,48 @@ async function updGroup(pjId,gid2,field,val) {
     } catch(e) { _sbReport('updGroup', e, {op:'update', table:'groups'}); }
   }
 }
+// Ghi 1 trường sang 1 row ở tháng khác (dùng cho đồng bộ carryover 2 chiều)
+function _syncCarryRow(monthId, rowId, field, col, val){
+  const mm=D.months[monthId]; if(!mm) return;
+  let tgt=null;
+  [...(mm.projects||[]),...(mm.projectsVN||[])].forEach(function(p){ (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ if(r.id===rowId) tgt=r; }); }); });
+  if(!tgt) return;
+  tgt[field]=val;
+  if(col && window._sbReady){ _sb.from('rows').update({[col]:(val===''||val===undefined)?null:val}).eq('id', rowId).then(function(){},function(){}); }
+}
 function updRow(pjId,gid2,rid,field,val) {
   const p=getPjGlobal(pjId)||getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
   const r=g.rows.find(r=>r.id===rid); if(!r) return;
   if (_rowIsLocked(r)) { console.warn('[updRow] Row locked (đã UP):', rid); return; }
+  const _oldStaff = (field==='staff') ? r.staff : null;
   r[field]=val;
+  // FIX đồng bộ: đổi staff ở row -> cập nhật luôn tl_task.staff[] (tránh syncTlTaskToGroup tạo row trùng/sót tên cũ)
+  if (field==='staff' && g.tlTaskId) {
+    const _t=(p.tlTasks||[]).find(function(t){ return t.id===g.tlTaskId; });
+    if (_t) {
+      if(!Array.isArray(_t.staff)) _t.staff=[];
+      const _i=_t.staff.indexOf(_oldStaff);
+      if(_i>=0){ if(val) _t.staff[_i]=val; else _t.staff.splice(_i,1); }
+      else if(val && _t.staff.indexOf(val)<0){ _t.staff.push(val); }
+      _t.staff=Array.from(new Set(_t.staff.filter(Boolean)));
+      if (typeof _sbUpsertTlTask==='function' && !(typeof _needsApproval==='function' && _needsApproval())) _sbUpsertTlTask(pjId, _t);
+    }
+  }
+  // Đồng bộ 2 chiều hạng mục carryover (staff/ngày/giờ UP) — KHÔNG đồng bộ số mai (chỉ tính ở tháng gốc)
+  if (['staff','dateFrom','dateTo','upTime'].includes(field)) {
+    const _scol = _COL_MAP[field];
+    // (a) đang sửa row carryRef -> ghi về row GỐC tháng cũ
+    if (r.isCarryRef && r.sourceMonth && r.sourceRowId) _syncCarryRow(r.sourceMonth, r.sourceRowId, field, _scol, val);
+    // (b) đang sửa row GỐC -> ghi sang mọi row carryRef trỏ tới nó (mọi tháng)
+    Object.keys(D.months).forEach(function(m2){
+      [...(D.months[m2].projects||[]),...(D.months[m2].projectsVN||[])].forEach(function(p2){
+        (p2.groups||[]).forEach(function(g2){ (g2.rows||[]).forEach(function(r2){
+          if(r2.isCarryRef && r2.sourceRowId===rid && r2.id!==rid){ r2[field]=val; if(_scol && window._sbReady) _sb.from('rows').update({[_scol]:(val===''||val===undefined)?null:val}).eq('id', r2.id).then(function(){},function(){}); }
+        }); });
+      });
+    });
+  }
   persistD();
   if (['dateFrom','dateTo','doneAt','status','qty'].includes(field)) {
     clearTimeout(_ovTlRefreshTimer[pjId]);
@@ -12153,12 +12207,12 @@ function exportProjectReport(section) {
 
     // Group rows: only type name + new count + rev count
     const groupRows = groups.filter(g=>{
-      const gNew = (g.rows||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
-      const gRev = (g.rows||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
+      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
       return gNew+gRev > 0;
     }).map(g => {
-      const gNew = (g.rows||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
-      const gRev = (g.rows||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
+      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
       return `<tr>
         <td style="padding:5px 10px;border-bottom:1px solid #f0f0f0">${x(g.type||'—')}</td>
         <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;color:#375623;font-weight:600">${gNew||'—'}</td>

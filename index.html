@@ -3062,9 +3062,14 @@ function renderKouteiJP(pjs, win){
   const monthCells = monthSpans.map(function(s,i){ return '<th colspan="'+s.span+'" style="background:var(--navy2);color:var(--gold2);font-size:10px;font-weight:700;text-align:center;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.15);border-left:'+(i===0?SEP:'1px solid rgba(255,255,255,.15)')+'">'+s.m+'月</th>'; }).join('');
   const dayHeader = allDays.map(function(ds,di){ const dd=parseInt(ds.slice(8)); const dow=new Date(ds).getDay(); const isToday=ds===todayStr; const isRealHol=holidaySet.has(ds); const isWeekend=dow===0||dow===6; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const col=isToday?'var(--navy)':isRealHol?'#ff6b6b':isWeekend?'rgba(255,255,255,.45)':'rgba(255,255,255,.9)'; const bg=isToday?'var(--gold)':'var(--navy)'; const bL=di===0?SEP:(isToday||isAfterToday?_TL_TODAY_BORDER:_TL_CB); return '<th '+(isToday?'id="gantt-today-overview"':'')+' style="width:16px;padding:2px 0;text-align:center;color:'+col+';background:'+bg+';border-bottom:'+_TL_PB+';border-left:'+bL+';white-space:nowrap;line-height:1.1"><div style="font-size:8px;font-weight:500;opacity:.85">'+WJ[dow]+'</div><div style="font-size:10px;font-weight:'+(isToday?'800':'700')+'">'+dd+'</div></th>'; }).join('');
   const HB='background:var(--navy);color:#fff;text-align:center;border-bottom:'+_TL_PB+';border-right:1px solid rgba(255,255,255,.18)';
+  // Bản in: dải tên VP nằm TRÊN CÙNG (trên cả hàng tiêu đề cột) — giống file gốc
+  const officeTop = W.officeTop;
+  const bandRow = officeTop
+    ? ('<tr><td colspan="'+NCOL+'" style="background:#eee;color:#000;font-weight:800;font-size:14px;letter-spacing:.5em;text-align:center;padding:5px 10px;border-bottom:'+_TL_PB+';border-right:'+SEP+'">'+x(officeTop)+'</td><td colspan="'+allDays.length+'" style="border-bottom:'+_TL_PB+'"></td></tr>')
+    : '';
   // Header 2 hàng giống file gốc: (工事名称 | 担当 | 作成 | 修正 | tháng) rồi (備考 | 項目 | ngày)
-  const thead =
-    '<tr>'
+  const thead = bandRow
+    + '<tr>'
     + '<th colspan="2" style="'+HB+';font-size:11px;padding:3px 6px">工事名称</th>'
     + '<th rowspan="2" style="'+HB+';font-size:11px;padding:3px 4px">担当</th>'
     + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">作成</th>'
@@ -3187,7 +3192,7 @@ function renderKouteiJP(pjs, win){
   let body='';
   order.forEach(function(o){
     const offDays = allDays.map(function(ds,di){ const dow=new Date(ds).getDay(); const isToday=ds===todayStr,isHol=holidaySet.has(ds)||dow===0||dow===6,isPrev=ds<monthStartStr; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const bg=(bw&&isToday)?'#f0f0f0':_tlCellBg(isToday,isHol,isPrev); const bL=di===0?SEP:_tlBorderLeft(isToday,isAfterToday,isPrev); return '<td style="width:16px;padding:0;background:'+bg+';border-left:'+bL+';border-bottom:'+_TL_PB+'"><div style="height:18px"></div></td>'; }).join('');
-    body += '<tr><td colspan="'+NCOL+'" style="background:'+(bw?'#eee':'#dde3ee')+';color:'+(bw?'#000':'var(--navy)')+';font-weight:800;font-size:13px;letter-spacing:.4em;text-align:center;padding:4px 10px;border-bottom:'+_TL_PB+'">'+x(o)+'</td>'+offDays+'</tr>';
+    if(!officeTop){ body += '<tr><td colspan="'+NCOL+'" style="background:'+(bw?'#eee':'#dde3ee')+';color:'+(bw?'#000':'var(--navy)')+';font-weight:800;font-size:13px;letter-spacing:.4em;text-align:center;padding:4px 10px;border-bottom:'+_TL_PB+'">'+x(o)+'</td>'+offDays+'</tr>'; }
     let oNew=0,oRev=0;
     byOffice[o].forEach(function(p){
       body += projBlock(p);
@@ -3247,10 +3252,10 @@ function exportKouteiPdf(){
   const dateStr='令和'+rw+'年'+String(nowD.getMonth()+1).padStart(2,'0')+'月'+String(nowD.getDate()).padStart(2,'0')+'日';
   let pagesHtml='';
   order.forEach(function(o,idx){
-    const win=_koutei3MonthWindow(); win.bw=true;
+    const win=_koutei3MonthWindow(); win.bw=true; win.officeTop=o;
     const tbl=renderKouteiJP(byOffice[o], win);
     pagesHtml += '<div class="kj-page"'+(idx>0?' style="page-break-before:always"':'')+'>'
-      + '<div class="kj-print-head">実施設計工程表（3ヶ月）　'+x(o)+'　'+monthLabel(D.activeMonth)+'</div>'
+      + '<div class="kj-print-head">実施設計工程表（3ヶ月）　'+monthLabel(D.activeMonth)+'</div>'
       + tbl
       + '<div class="kj-print-foot"><div class="ft-l">特記事項</div><div class="ft-r"><div>作製</div><div style="font-weight:800">現代綜合設計ベトナム</div><div>'+dateStr+'</div></div></div>'
       + '</div>';
@@ -7036,8 +7041,9 @@ function updRow(pjId,gid2,rid,field,val) {
       if (typeof _sbUpsertTlTask==='function' && !(typeof _needsApproval==='function' && _needsApproval())) _sbUpsertTlTask(pjId, _t);
     }
   }
-  // Đồng bộ 2 chiều hạng mục carryover (staff/ngày/giờ UP) — KHÔNG đồng bộ số mai (chỉ tính ở tháng gốc)
-  if (['staff','dateFrom','dateTo','upTime'].includes(field)) {
+  // Đồng bộ 2 chiều hạng mục carryover (staff/ngày/giờ UP + số mai để HIỂN THỊ).
+  // Số mai vẫn CHỈ tính ở tháng gốc (row carryRef bị loại khỏi tổng), nhưng giá trị hiển thị cần khớp.
+  if (['staff','dateFrom','dateTo','upTime','qty'].includes(field)) {
     const _scol = _COL_MAP[field];
     // (a) đang sửa row carryRef -> ghi về row GỐC tháng cũ
     if (r.isCarryRef && r.sourceMonth && r.sourceRowId) _syncCarryRow(r.sourceMonth, r.sourceRowId, field, _scol, val);

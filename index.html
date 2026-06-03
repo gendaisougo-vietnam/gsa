@@ -725,6 +725,7 @@ table.detail-tl tr.staff-last > td {
   <div class="hdr-nav">
     <div style="display:flex;gap:0;background:rgba(0,0,0,.2);border-radius:8px;padding:2px" id="navMainGroup">
       <button class="nav-btn active" id="navMain" onclick="showPage('main');setSection('jp')" style="border-radius:6px 0 0 6px;margin:0;line-height:1.15;text-align:center">デザインスタジオ<div style="font-size:9px;opacity:.75;font-weight:400">Design Studio</div></button>
+      <button class="nav-btn" id="navMainIntl" onclick="showPage('main');setSection('intl')" style="border-radius:0;margin:0;border-left:1px solid rgba(255,255,255,.15);line-height:1.15;text-align:center">国際設計室<div style="font-size:9px;opacity:.75;font-weight:400">International Design</div></button>
       <button class="nav-btn" id="navMainVN" onclick="showPage('main');setSection('vn')" style="border-radius:0 6px 6px 0;margin:0;border-left:1px solid rgba(255,255,255,.15);line-height:1.15;text-align:center">設計室<div style="font-size:9px;opacity:.75;font-weight:400">Design Department</div></button>
     </div>
     <button class="nav-btn" id="navDash" onclick="showPage('dashboard')">📊 Dashboard</button>
@@ -1037,6 +1038,7 @@ async function sbLoadAll() {
     settings: {
       staffList:     settingsRows?.staff_list || [],
       typeList:      settingsRows?.type_list || [],
+      typeListIntl:  settingsRows?.type_list_intl || [],
       typeListVN:    settingsRows?.type_list_vn || [],
       contactList:   settingsRows?.contact_list || [],
       contactListVN: settingsRows?.contact_list_vn || [],
@@ -1122,7 +1124,7 @@ async function sbLoadAll() {
       const tlTaskRaw = g.tl_task_id ? _pTlList.find(t => t.id === g.tl_task_id) : null;
       const tlStaffSet = new Set(Array.isArray(tlTaskRaw?.staff) ? tlTaskRaw.staff : []);
       return {
-        id: g.id, type: g.type, tlTaskId: g.tl_task_id, _manual: !!g.manual,
+        id: g.id, type: g.type, tlTaskId: g.tl_task_id, _manual: !!g.manual, dept: (g.dept||'studio'),
         rows: (rowsByGroup[g.id] || []).map(r => ({
           id: r.id, staff: r.staff, status: r.status, qty: r.qty,
           dateFrom: r.date_from || '', dateTo: r.date_to || '',
@@ -1192,6 +1194,7 @@ async function sbLoadAll() {
       id: p.id, nameVN: p.name_vn, nameJP: p.name_jp,
       office: p.office, contact: p.contact, mainStaff: p.main_staff,
       notes: p.notes, _carryover: p.is_carryover,
+      studioOn: (p.studio_on===undefined ? true : p.studio_on), intlOn: (p.intl_on===undefined ? true : p.intl_on),
       client: p.client||'', buildingType: p.building_type||'',
       scope: p.scope||'', area: p.area||'',
       constructionStart: p.construction_start||'', constructionEnd: p.construction_end||'',
@@ -1270,6 +1273,7 @@ async function sbPushAll() {
     try {
       await _sb.from('settings').update({
         staff_list: D.settings.staffList||[], type_list: D.settings.typeList||[],
+        type_list_intl: D.settings.typeListIntl||[],
         type_list_vn: D.settings.typeListVN||[], contact_list: D.settings.contactList||[],
         contact_list_vn: D.settings.contactListVN||[], holidays: D.settings.holidays||[],
         active_month: D.activeMonth,
@@ -1283,7 +1287,7 @@ async function sbPushAll() {
   var _pRecs = []; var _si = 0;
   Object.entries(D.months||{}).forEach(function(kv){ var mid=kv[0],m=kv[1];
     [['jp',m.projects||[]],['vn',m.projectsVN||[]]].forEach(function(sv){ var sec=sv[0],pjs=sv[1];
-      pjs.forEach(function(p){ _pRecs.push({ id:p.id, month_id:mid, section:sec, name_vn:p.nameVN||'', name_jp:p.nameJP||'', office:p.office||'', contact:p.contact||'', main_staff:p.mainStaff||'', notes:p.notes||'', is_carryover:!!p._carryover, client:p.client||'', building_type:p.buildingType||'', scope:p.scope||'', area:p.area||'', construction_start:p.constructionStart||null, construction_end:p.constructionEnd||null, sort_order:_si++ }); });
+      pjs.forEach(function(p){ _pRecs.push({ id:p.id, month_id:mid, section:sec, name_vn:p.nameVN||'', name_jp:p.nameJP||'', office:p.office||'', contact:p.contact||'', main_staff:p.mainStaff||'', notes:p.notes||'', is_carryover:!!p._carryover, client:p.client||'', building_type:p.buildingType||'', scope:p.scope||'', area:p.area||'', construction_start:p.constructionStart||null, construction_end:p.constructionEnd||null, studio_on:(p.studioOn!==false), intl_on:!!p.intlOn, sort_order:_si++ }); });
     });
   });
   if (_pRecs.length) try { await _sb.from('projects').upsert(_pRecs, {onConflict:'id'}); } catch(e) { _errs.push('projects: '+e.message); }
@@ -1292,7 +1296,7 @@ async function sbPushAll() {
   Object.values(D.months||{}).forEach(function(m){
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
-        _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++, manual: !!g._manual });
+        _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++, manual: !!g._manual, dept:(g.dept||'studio') });
         (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, tentative:!!r.tentative, sort_order:_sr++ }); });
       });
     });
@@ -1365,6 +1369,8 @@ async function _sbSaveProject(p, monthId, section) {
     _pjRow.area              = p.area              || null;
     _pjRow.construction_start= p.constructionStart || null;
     _pjRow.construction_end  = p.constructionEnd   || null;
+    _pjRow.studio_on         = (p.studioOn !== false);
+    _pjRow.intl_on           = !!p.intlOn;
     const { error } = await _sb.from('projects').upsert(_pjRow, { onConflict: 'id' });
     if (error) _sbReport('_sbSaveProject', error, {op:'upsert', table:'projects'});
   } catch(e) { _sbReport('_sbSaveProject', e, {op:'upsert', table:'projects'}); }
@@ -1737,6 +1743,10 @@ function freshData() {
         'ラウンジパース','スタイルラウンジ','内観パース','大浴場パース',
         '和室パース','浴室パース','集会室パース','レストランパース','着色立面作成',
         'スカイラウンジ','中庭パース','風除室パース','バルコニーパース','住戸内パース'],
+      typeListIntl: ['平面図','立面図','断面図','EV断面図','芯線図','矩計図','断面詳細図',
+        '階段詳細図','共用部平面詳細図','共用部展開図','住戸平面詳細図','住戸展開図',
+        '天井伏図','建具平面図','建具表','面積表','タイプ別面積表','基準法床面積表',
+        '施工床面積表','植栽計画図','断熱範囲図','外構計画図','外構詳細図','構造図チェック','立面図はめ込み'],
       contactList: ['ソン','フン','ニャー','TT.チエン','N.ビン','ニュン','カイン','Inamura','Ogura','Okuda'],
       contactListVN: ['HAN X.グエン','HAN ソン','HAN トゥアン','SGN ニャー'],
       typeListVN: [],
@@ -1818,6 +1828,7 @@ function persistD() {
   // Migrate: init new lists nếu chưa có (data cũ)
   if (!D.settings.contactListVN) D.settings.contactListVN = ['HAN X.グエン','HAN ソン','HAN トゥアン','SGN ニャー'];
   if (!D.settings.typeListVN) D.settings.typeListVN = [];
+  if (!D.settings.typeListIntl) D.settings.typeListIntl = [];
   const json = JSON.stringify(D);
   // Check storage level after every save (throttled 30s)
   const now30 = Date.now();
@@ -2049,9 +2060,26 @@ function monthLabel(mid) {
 }
 
 function curMonth() { return D.months[D.activeMonth]||{projects:[],projectsVN:[],targetNew:0,targetRev:0}; }
+// ===== Section model: 'jp'(Design Studio) + 'intl'(International Design) DÙNG CHUNG m.projects; 'vn'(Design Dept) = m.projectsVN =====
+function _sectionPool(sec){ return (sec==='vn') ? 'vn' : 'jp'; }           // jp & intl chung 1 pool dự án
+function _activeDept(){ return activeSection==='intl' ? 'intl' : (activeSection==='vn' ? null : 'studio'); } // null = không lọc theo phòng (VN)
+function _groupInDept(g){ const d=_activeDept(); return d===null ? true : ((g&&g.dept||'studio')===d); }
+function _sectionDeptJP(){ return activeSection==='vn' ? '設計室' : (activeSection==='intl' ? '国際設計室' : 'デザインスタジオ'); }
+// Cờ hiển thị dự án theo phòng (studioOn mặc định true, intlOn mặc định false)
+function _pjStudioOn(p){ return p && p.studioOn !== false; }
+function _pjIntlOn(p){ return p && p.intlOn !== false; }  // mặc định hiện ở cả 2 phòng
+function _pjVisibleHere(p){ return activeSection==='intl' ? _pjIntlOn(p) : (activeSection==='vn' ? true : _pjStudioOn(p)); }
+// Tổng số mai theo phòng đang xem (loại trừ carryRef) — dùng cho hero/perf của tab hiện tại
+function _rowCountDept(p, status){
+  let s=0;
+  (p.groups||[]).forEach(function(g){ if(!_groupInDept(g)) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef) s+=(r.qty||0); }); });
+  (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
+  return s;
+}
 function curProjects() {
   const m = curMonth();
-  return activeSection==='vn' ? (m.projectsVN||[]) : (m.projects||[]);
+  if (activeSection==='vn') return m.projectsVN||[];
+  return (m.projects||[]).filter(_pjVisibleHere);
 }
 function allCurProjects() {  // used by gantt/stats that need BOTH sections
   const m = curMonth();
@@ -2152,6 +2180,7 @@ function showPage(pg) {
   if(btnVN&&btnJP&&pg==='main'){
     btnVN.classList.toggle('active', activeSection==='vn');
     btnJP.classList.toggle('active', activeSection==='jp');
+    const btnIntl=document.getElementById('navMainIntl'); if(btnIntl) btnIntl.classList.toggle('active', activeSection==='intl');
   }
   if(pg==='dashboard') renderDashboard();
   else if(pg==='staff') renderStaffPage();
@@ -2168,6 +2197,7 @@ function setSection(sec) {
   const btnJP=document.getElementById('navMain');
   if(btnVN) btnVN.classList.toggle('active', sec==='vn');
   if(btnJP) btnJP.classList.toggle('active', sec==='jp');
+  const btnIntl=document.getElementById('navMainIntl'); if(btnIntl) btnIntl.classList.toggle('active', sec==='intl');
   renderSidebar();
   renderContent();
 }
@@ -2631,6 +2661,8 @@ async function doAddMonth(prevMid, newMid) {
         area:              p.area              || '',
         constructionStart: p.constructionStart || '',
         constructionEnd:   p.constructionEnd   || '',
+        studioOn:  (p.studioOn !== false),  // giữ cờ hiển thị phòng sang tháng mới
+        intlOn:    !!p.intlOn,
         groups:    newGroups,
         tlTasks:   newTlTasks,
         photos:    (p.photos||[]).filter(Boolean), // copy ảnh sang tháng mới
@@ -2690,9 +2722,9 @@ function renderSidebar() {
   const pjs = curProjects();
   document.getElementById('pjCount').textContent = pjs.length;
   const _hdEl=document.getElementById('sidebarHd');
-  if(_hdEl&&_hdEl.childNodes[0]) _hdEl.childNodes[0].nodeValue=(activeSection==='vn'?'設計室 ':'デザインスタジオ ');
+  if(_hdEl&&_hdEl.childNodes[0]) _hdEl.childNodes[0].nodeValue=(activeSection==='vn'?'設計室 ':activeSection==='intl'?'国際設計室 ':'デザインスタジオ ');
   const _addBtn=document.getElementById('addPjBtn');
-  if(_addBtn) _addBtn.textContent='\uFF0B '+(activeSection==='vn'?'設計室 🇻🇳':'デザインスタジオ 🇯🇵');
+  if(_addBtn) _addBtn.textContent='\uFF0B '+(activeSection==='vn'?'設計室 🇻🇳':activeSection==='intl'?'国際設計室 🇯🇵':'デザインスタジオ 🇯🇵');
   const list = document.getElementById('pjList');
   if (!pjs.length) {
     list.innerHTML = '<div style="padding:20px 10px;text-align:center;color:var(--gray4);font-size:11px;line-height:1.7">Chưa có dự án<br><span style="font-size:10px">Nhấn + Thêm dự án</span></div>';
@@ -2788,6 +2820,9 @@ function renderSidebar() {
         <button onclick="event.stopPropagation();deletePj('${p.id}')" title="Xóa dự án"
           style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.55);border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;line-height:1;z-index:5;opacity:0;transition:opacity .15s"
           class="pj-del-btn">✕</button>
+        ${activeSection!=='vn' ? `<button onclick="event.stopPropagation();hidePjFromDept('${p.id}')" title="Ẩn khỏi danh sách phòng này (không xóa dữ liệu)"
+          style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;line-height:1;z-index:5;opacity:0;transition:opacity .15s"
+          class="pj-del-btn">⊘</button>` : ''}
       </div>
       <div class="pj-card-body">
         <div class="pj-card-name">${x(p.nameVN || p.nameJP || '—')}</div>
@@ -2807,6 +2842,18 @@ function renderSidebar() {
 }
 
 function selectPj(id) { activePjId=id; renderSidebar(); renderContent(); }
+
+// Ẩn dự án khỏi danh sách của phòng đang xem (CHỈ ẩn hiển thị, KHÔNG xóa dữ liệu)
+function hidePjFromDept(pjId){
+  const p = getPj(pjId); if(!p) return;
+  const lbl = activeSection==='intl' ? 'Bản vẽ (International)' : 'Phối cảnh (Studio)';
+  if(!confirm('Ẩn dự án "'+(p.nameJP||p.nameVN||'')+'" khỏi danh sách phòng '+lbl+'?\n\nChỉ ẩn HIỂN THỊ, KHÔNG xóa dữ liệu. Muốn hiện lại: bấm "＋ Thêm dự án" rồi gõ đúng tên dự án.')) return;
+  if(activeSection==='intl') p.intlOn=false; else p.studioOn=false;
+  if(activePjId===pjId) activePjId=null;
+  save(); renderSidebar(); renderContent();
+  toast('✓ Đã ẩn khỏi phòng '+lbl+' (dữ liệu vẫn còn).');
+  if(!_needsApproval()) _sbSaveProject(p, D.activeMonth, 'jp');
+}
 
 /* CONTENT */
 function renderContent() {
@@ -3051,6 +3098,7 @@ function renderKouteiJP(pjs, win){
   const monthStartStr = W.monthStart || `${yr}-${String(mo).padStart(2,'0')}-01`;
   const lastDay = allDays[allDays.length-1];
   const bw = !!W.bw;  // chế độ in đen trắng
+  const combine = !!W.combineDepts;  // PDF: gộp cả phối cảnh (studio) + bản vẽ (intl) trong 1 dự án
   if(!pjs.length) return '<div style="padding:24px;text-align:center;color:#aaa;font-size:12px">Chưa có dự án trong tháng này.</div>';
 
   const C_NEW=bw?'#000':'#5a9a35', C_REV=bw?'#000':'#d4900a', C_DONE=bw?'#9aa0a6':DONE_BAR_COLOR;
@@ -3132,7 +3180,10 @@ function renderKouteiJP(pjs, win){
 
   function projBlock(p){
     const isCarry = !!p._carryover;
-    const grps=(p.groups||[]).filter(g=> g.type || (g.rows||[]).some(r=>r.qty>0||r.dateTo));
+    const _grpHas=function(g){ return g.type || (g.rows||[]).some(r=>r.qty>0||r.dateTo); };
+    const grps = combine
+      ? (p.groups||[]).filter(_grpHas).sort(function(a,b){ return ((a.dept||'studio')==='intl'?1:0)-((b.dept||'studio')==='intl'?1:0); }) // phối cảnh trên, bản vẽ dưới
+      : (p.groups||[]).filter(g=> _groupInDept(g) && _grpHas(g));
     const meta=[ p.buildingType, p.scope,
       p.constructionStart?('着工予定 '+p.constructionStart):'',
       p.constructionEnd?('引渡予定 '+p.constructionEnd):'',
@@ -3193,20 +3244,30 @@ function renderKouteiJP(pjs, win){
   order.forEach(function(o){
     const offDays = allDays.map(function(ds,di){ const dow=new Date(ds).getDay(); const isToday=ds===todayStr,isHol=holidaySet.has(ds)||dow===0||dow===6,isPrev=ds<monthStartStr; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const bg=(bw&&isToday)?'#f0f0f0':_tlCellBg(isToday,isHol,isPrev); const bL=di===0?SEP:_tlBorderLeft(isToday,isAfterToday,isPrev); return '<td style="width:16px;padding:0;background:'+bg+';border-left:'+bL+';border-bottom:'+_TL_PB+'"><div style="height:18px"></div></td>'; }).join('');
     if(!officeTop){ body += '<tr><td colspan="'+NCOL+'" style="background:'+(bw?'#eee':'#dde3ee')+';color:'+(bw?'#000':'var(--navy)')+';font-weight:800;font-size:13px;letter-spacing:.4em;text-align:center;padding:4px 10px;border-bottom:'+_TL_PB+'">'+x(o)+'</td>'+offDays+'</tr>'; }
-    let oNew=0,oRev=0;
+    let sNew=0,sRev=0,iNew=0,iRev=0;  // studio (パース) vs intl (図面)
     byOffice[o].forEach(function(p){
       body += projBlock(p);
-      (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ if(r.isCarryRef)return; if(r.status==='new')oNew+=(r.qty||0); else oRev+=(r.qty||0); }); });
+      (p.groups||[]).forEach(function(g){ const isI=(g.dept||'studio')==='intl'; (g.rows||[]).forEach(function(r){ if(r.isCarryRef)return;
+        if(isI){ if(r.status==='new')iNew+=(r.qty||0); else iRev+=(r.qty||0); }
+        else   { if(r.status==='new')sNew+=(r.qty||0); else sRev+=(r.qty||0); } }); });
     });
-    // Hàng TỔNG theo văn phòng — chỉ hiện ở bản in
+    // Hàng TỔNG theo văn phòng — chỉ hiện ở bản in. Tách riêng パース / 図面.
     if(bw){
-      body += '<tr>'
+      const _totRow=function(label,nn,rr){ return '<tr>'
         + '<td class="kj-bikou-line" style="border-bottom:'+_TL_PB+';font-weight:800;text-align:right;background:#eee">'+x(o)+' 合計</td>'
-        + '<td class="kj-item" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">パース 合計</td>'
+        + '<td class="kj-item" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+label+'</td>'
         + '<td class="kj-tan" style="border-bottom:'+_TL_PB+';background:#eee"></td>'
-        + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+oNew+'</td>'
-        + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+oRev+'</td>'
-        + offDays + '</tr>';
+        + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+nn+'</td>'
+        + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+rr+'</td>'
+        + offDays + '</tr>'; };
+      if(combine){
+        body += _totRow('パース 合計', sNew, sRev);
+        body += _totRow('図面 合計', iNew, iRev);
+      } else if(_activeDept()==='intl'){
+        body += _totRow('図面 合計', iNew, iRev);
+      } else {
+        body += _totRow('パース 合計', sNew, sRev);
+      }
     }
   });
 
@@ -3252,7 +3313,7 @@ function exportKouteiPdf(){
   const dateStr='令和'+rw+'年'+String(nowD.getMonth()+1).padStart(2,'0')+'月'+String(nowD.getDate()).padStart(2,'0')+'日';
   let pagesHtml='';
   order.forEach(function(o,idx){
-    const win=_koutei3MonthWindow(); win.bw=true; win.officeTop=o;
+    const win=_koutei3MonthWindow(); win.bw=true; win.officeTop=o; win.combineDepts=true;
     const tbl=renderKouteiJP(byOffice[o], win);
     pagesHtml += '<div class="kj-page"'+(idx>0?' style="page-break-before:always"':'')+'>'
       + '<div class="kj-print-head">実施設計工程表（3ヶ月）　'+monthLabel(D.activeMonth)+'</div>'
@@ -3265,6 +3326,85 @@ function exportKouteiPdf(){
   ov.innerHTML=pagesHtml||'<div style="padding:20px">Không có dự án JP trong tháng.</div>';
   document.body.classList.add('kj-printing');
   setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; }, 400); }, 150);
+}
+
+// ===== Tra lịch sử dự án -> PDF (toàn bộ hạng mục mọi tháng, cả phối cảnh + bản vẽ) =====
+function openProjectHistoryLookup(){
+  const names=new Set();
+  Object.values(D.months||{}).forEach(function(m){ [].concat(m.projects||[],m.projectsVN||[]).forEach(function(p){ var nm=p.nameJP||p.nameVN; if(nm) names.add(nm); }); });
+  const opts=[...names].sort().map(function(n){ return '<option value="'+x(n)+'">'; }).join('');
+  showModal('<h3>📜 Tra lịch sử dự án</h3>'
+    +'<p style="font-size:11px;color:#888;margin-bottom:8px">Chọn/gõ tên dự án → xuất PDF toàn bộ hạng mục đã làm qua các tháng (cả phối cảnh + bản vẽ), kèm người làm, số mai, ngày.</p>'
+    +'<input id="phl-name" list="phl-list" placeholder="Tên dự án (JP/VN)…" style="width:100%;padding:8px;font-size:13px;box-sizing:border-box">'
+    +'<datalist id="phl-list">'+opts+'</datalist>'
+    +'<div class="modal-ft" style="margin-top:12px"><button class="btn" onclick="closeModal()">Hủy</button>'
+    +'<button class="btn btn-gold" onclick="_phlExport()">🖨 Xuất PDF lịch sử</button></div>');
+}
+function _phlExport(){ exportProjectHistoryPdf(document.getElementById('phl-name').value); }
+function exportProjectHistoryPdf(name){
+  name=(name||'').trim(); if(!name){ alert('Vui lòng nhập tên dự án'); return; }
+  const monthsSorted=Object.keys(D.months||{}).sort();
+  const rows=[]; let info=null; let totS={n:0,r:0}, totI={n:0,r:0};
+  monthsSorted.forEach(function(mid){
+    const m=D.months[mid];
+    [].concat(m.projects||[],m.projectsVN||[]).forEach(function(p){
+      if((p.nameJP||'')!==name && (p.nameVN||'')!==name) return;
+      if(!info) info={nm:p.nameJP||p.nameVN||'', nm2:(p.nameJP&&p.nameVN)?p.nameVN:'', spec:p.buildingType||'', addr:p.scope||'', start:p.constructionStart||'', hand:p.constructionEnd||'', client:p.client||'', pm:p.area||'', office:p.office||''};
+      (p.groups||[]).forEach(function(g){
+        const dept=(g.dept||'studio');
+        (g.rows||[]).forEach(function(r){
+          if(r.isCarryRef) return;
+          if(!r.staff && !r.dateTo && !(r.qty>0)) return;
+          rows.push({mid:mid,dept:dept,type:g.type||'',staff:r.staff||'',status:r.status||'',qty:r.qty||0,from:r.dateFrom||'',to:r.dateTo||'',done:r.doneAt||''});
+          if(dept==='intl'){ if(r.status==='new')totI.n+=(r.qty||0); else totI.r+=(r.qty||0); }
+          else { if(r.status==='new')totS.n+=(r.qty||0); else totS.r+=(r.qty||0); }
+        });
+      });
+    });
+  });
+  if(!rows.length){ alert('Không tìm thấy lịch sử hạng mục cho dự án "'+name+'"'); return; }
+  rows.sort(function(a,b){ if(a.mid!==b.mid) return a.mid<b.mid?-1:1; const da=(a.dept==='intl'?1:0),db=(b.dept==='intl'?1:0); if(da!==db)return da-db; return (a.type<b.type?-1:a.type>b.type?1:0); });
+  const TD='border:1px solid #000;padding:3px 6px;font-size:11px';
+  const TH='border:1px solid #000;padding:4px 6px;font-size:11px;font-weight:800;background:#eee;text-align:center';
+  const body=rows.map(function(r){
+    const deptLbl=r.dept==='intl'?'図面 Bản vẽ':'パース Phối cảnh';
+    const st=r.status==='new'?'作成':(r.status==='rev'?'修正':'—');
+    return '<tr>'
+      +'<td style="'+TD+';text-align:center">'+monthLabel(r.mid)+'</td>'
+      +'<td style="'+TD+'">'+deptLbl+'</td>'
+      +'<td style="'+TD+'">'+x(r.type)+'</td>'
+      +'<td style="'+TD+'">'+x(r.staff)+'</td>'
+      +'<td style="'+TD+';text-align:center">'+st+'</td>'
+      +'<td style="'+TD+';text-align:center">'+(r.qty||'')+'</td>'
+      +'<td style="'+TD+';text-align:center">'+(r.from||'')+'</td>'
+      +'<td style="'+TD+';text-align:center">'+(r.to||'')+'</td>'
+      +'<td style="'+TD+';text-align:center">'+(r.done||'')+'</td>'
+      +'</tr>';
+  }).join('');
+  const infoHtml = info ? ('<div style="font-size:12px;margin:6px 0 12px;line-height:1.7">'
+    +'<b style="font-size:15px">'+x(info.nm)+'</b>'+(info.nm2?' <span style="color:#666">'+x(info.nm2)+'</span>':'')+'<br>'
+    +(info.spec?'仕様: '+x(info.spec)+' ｜ ':'')+(info.office?'VP: '+x(info.office)+' ｜ ':'')+(info.pm?'担当: '+x(info.pm):'')+'<br>'
+    +(info.addr?'所在地: '+x(info.addr)+'<br>':'')
+    +(info.start?'着工予定: '+x(info.start)+' ｜ ':'')+(info.hand?'引渡予定: '+x(info.hand):'')+(info.client?' ｜ 施主: '+x(info.client):'')
+    +'</div>') : '';
+  var nowD=new Date(); var rw=nowD.getFullYear()-2018; var dateStr='令和'+rw+'年'+String(nowD.getMonth()+1).padStart(2,'0')+'月'+String(nowD.getDate()).padStart(2,'0')+'日';
+  const html='<div class="kj-page">'
+    +'<div class="kj-print-head">プロジェクト履歴 — Lịch sử dự án</div>'
+    +infoHtml
+    +'<table style="border-collapse:collapse;width:100%"><thead><tr>'
+    +'<th style="'+TH+'">月 Tháng</th><th style="'+TH+'">区分 Phòng</th><th style="'+TH+'">項目 Hạng mục</th><th style="'+TH+'">担当 Người làm</th><th style="'+TH+'">作成/修正</th><th style="'+TH+'">数 Số mai</th><th style="'+TH+'">開始</th><th style="'+TH+'">UP予定</th><th style="'+TH+'">UP済</th>'
+    +'</tr></thead><tbody>'+body+'</tbody>'
+    +'<tfoot>'
+    +'<tr><td colspan="5" style="'+TD+';text-align:right;font-weight:800;background:#f3f3f3">パース 合計 (Phối cảnh)</td><td style="'+TD+';text-align:center;font-weight:800;background:#f3f3f3">作 '+totS.n+' / 修 '+totS.r+'</td><td colspan="3" style="'+TD+';background:#f3f3f3"></td></tr>'
+    +'<tr><td colspan="5" style="'+TD+';text-align:right;font-weight:800;background:#f3f3f3">図面 合計 (Bản vẽ)</td><td style="'+TD+';text-align:center;font-weight:800;background:#f3f3f3">作 '+totI.n+' / 修 '+totI.r+'</td><td colspan="3" style="'+TD+';background:#f3f3f3"></td></tr>'
+    +'</tfoot></table>'
+    +'<div class="kj-print-foot"><div class="ft-l">特記事項</div><div class="ft-r"><div>作製</div><div style="font-weight:800">現代綜合設計ベトナム</div><div>'+dateStr+'</div></div></div>'
+    +'</div>';
+  let ov=document.getElementById('kjPrintOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='kjPrintOverlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; closeModal();
+  document.body.classList.add('kj-printing');
+  setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; },400); },150);
 }
 
 function renderProjectTimeline(pjs) {
@@ -3492,17 +3632,13 @@ function renderMonthOverview(ci) {
   const pjs = curProjects();          // chỉ tháng hiện tại — dùng cho stats/tổng
   const pjsAll = allActiveProjects(); // tháng hiện tại + carryover — dùng cho Lịch nhân sự
   // Bảng Chi tiết dự án: CHỈ hiện đúng section đang xem
-  const curSectionIds = new Set(
-    activeSection==='vn'
-      ? (curMonth().projectsVN||[]).map(p=>p.id)
-      : (curMonth().projects||[]).map(p=>p.id)
-  );
+  const curSectionIds = new Set(curProjects().map(p=>p.id));  // đã lọc theo cờ studioOn/intlOn
   const pjsTimeline = pjsAll.filter(p => curSectionIds.has(p.id));
   // Lịch công việc nhân sự: chỉ nhân sự làm dự án ĐÚNG phía đang xem (JP/VN). Ai làm cả 2 sẽ hiện ở cả 2 tab.
-  const pjsGantt = pjsAll.filter(p => p._section === activeSection);
+  const pjsGantt = pjsAll.filter(p => p._section === _sectionPool(activeSection) && _pjVisibleHere(p));
   const m=curMonth();
-  const sumNew=pjs.reduce((s,p)=>s+totalNew(p),0);
-  const sumRev=pjs.reduce((s,p)=>s+totalRev(p),0);
+  const sumNew=pjs.reduce((s,p)=>s+_rowCountDept(p,'new'),0);
+  const sumRev=pjs.reduce((s,p)=>s+_rowCountDept(p,'rev'),0);
   const tgtNew=m.targetNew||0, tgtRev=m.targetRev||0;
   const tgtAll=tgtNew+tgtRev;
   const pctNew=tgtNew>0?Math.min(100,Math.round(sumNew/tgtNew*100)):0;
@@ -3512,14 +3648,14 @@ function renderMonthOverview(ci) {
   D.settings.staffList.forEach(s=>otMap[s]=0);
   pjs.forEach(p=>{
     (p.otLog||[]).forEach(e=>{if(otMap[e.staff]!==undefined)otMap[e.staff]+=(e.hours||0);});
-    (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{if(r.staff&&r.ot>0&&otMap[r.staff]!==undefined)otMap[r.staff]+=(r.ot||0);});
+    (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).forEach(r=>{if(r.staff&&r.ot>0&&otMap[r.staff]!==undefined)otMap[r.staff]+=(r.ot||0);});
   });
   const staffWithOT=D.settings.staffList.filter(s=>otMap[s]>0);
 
   const smPerf={};
   D.settings.staffList.forEach(s=>smPerf[s]=0);
   pjs.forEach(p=>{
-    (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{ if(r.staff&&smPerf[r.staff]!==undefined) smPerf[r.staff]+=(r.qty||0); });
+    (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).forEach(r=>{ if(r.staff&&smPerf[r.staff]!==undefined) smPerf[r.staff]+=(r.qty||0); });
     (p.records||[]).forEach(r=>{ if(r.staff&&smPerf[r.staff]!==undefined) smPerf[r.staff]+=(r.qty||0); });
   });
   const maxPerf=Math.max(1,...Object.values(smPerf));
@@ -3527,10 +3663,8 @@ function renderMonthOverview(ci) {
 
   // Lọc hiển thị hiệu suất theo phòng của phía đang xem (Nhật=Design Studio, VN=Design Department)
   const _oiB = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
-  const _oiBLoaded = Object.keys(_oiB).length>0;
-  const _deptB = activeSection==='vn' ? '設計室' : 'デザインスタジオ';
+  const _deptB = _sectionDeptJP();
   const _perfRoster = D.settings.staffList.filter(s=>{
-    if(!_oiBLoaded) return true;
     if((_oiB[s]||{}).deptName===_deptB) return true;
     if((smPerf[s]||0)>0 || (otMap[s]||0)>0) return true;
     return false;
@@ -3636,6 +3770,7 @@ function renderMonthOverview(ci) {
       <span class="card-hd-title">${activeSection==="vn"?'🇻🇳 Chi tiết dự án':'実施設計工程表 <span style="font-size:10px;font-weight:500;opacity:.65;letter-spacing:.04em">Jisshi Sekkei Kōteihyō</span>'} — ${monthLabel(D.activeMonth)}</span>
       <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-overview')" title="Cuộn đến cột ngày hôm nay">📍 Hôm nay</button>
       ${activeSection!=='vn'?`<button class="btn btn-sm" style="background:#eef3fb;color:#1F3864;border:1px solid #b3c6e6;font-size:11px;padding:3px 10px" onclick="exportKouteiPdf()" title="Xuất PDF 3 tháng (giống file gốc)">🖨 Xuất PDF (3 tháng)</button>`:''}
+      <button class="btn btn-sm" style="background:#fff7e6;color:#8a5a00;border:1px solid #f0d8a8;font-size:11px;padding:3px 10px" onclick="openProjectHistoryLookup()" title="Tra lịch sử 1 dự án - xuất PDF toàn bộ hạng mục đã làm">📜 Tra lịch sử</button>
     </div>
     <div id="overviewTlInner" style="overflow-x:auto">${activeSection==='vn'?renderProjectTimeline(pjsTimeline):renderKouteiJP(pjsTimeline,_kouteiScreenWindow())}</div>
   </div>
@@ -3720,7 +3855,7 @@ function renderMonthGantt(pjs) {
   const vnIds = new Set((m.projectsVN||[]).map(p=>p.id));
   // Đọc từ groups/rows (JP + VN cũ)
   const groupTasks = pjs.flatMap((p, pIdx) =>
-    (p.groups||[]).flatMap(g =>
+    (p.groups||[]).filter(_groupInDept).flatMap(g =>
       (g.rows||[])
         .filter(r => r.staff && (r.dateFrom||r.dateTo))
         .map(r => ({
@@ -3896,10 +4031,10 @@ function renderMonthGantt(pjs) {
   //  - Hiện = (thành viên đúng phòng đó) ∪ (người có việc thật ở phía đang xem)
   //  - Nếu chưa tải được dữ liệu phòng (assignments) thì GIỮ NGUYÊN để không ẩn nhầm ai.
   const _orgInfo2 = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
-  const _orgLoaded = Object.keys(_orgInfo2).length>0;
-  const _targetDept = activeSection==='vn' ? '設計室' : 'デザインスタジオ';
+  const _targetDept = _sectionDeptJP();
+  // CÁCH LY CHẶT 2 phòng: chỉ hiện nhân sự ĐÚNG phòng + người có việc thật Ở PHÒNG NÀY (task đã lọc theo dept).
+  // Bỏ nhánh "show all khi chưa tải org" để không lộ nhân sự phòng khác.
   const _rosterBase = [...D.settings.staffList].filter(s=>{
-    if(!_orgLoaded) return true;
     if((_orgInfo2[s]||{}).deptName === _targetDept) return true;
     if((staffMap[s]||[]).length>0) return true;
     return false;
@@ -5192,7 +5327,7 @@ function renderProjectDetail(ci, p) {
 
   <div class="card">
     <div class="card-hd">
-      <span class="card-hd-title">${activeSection==='vn' ? '👥 Tiến độ nhân sự' : '🎨 Hạng mục phối cảnh'}</span>
+      <span class="card-hd-title">${activeSection==='vn' ? '👥 Tiến độ nhân sự' : activeSection==='intl' ? '📐 Hạng mục bản vẽ (図面)' : '🎨 Hạng mục phối cảnh'}</span>
       <button class="btn btn-gold btn-sm" onclick="addGroup('${p.id}')">＋ Thêm hạng mục</button>
     </div>
     <div style="overflow-x:auto">
@@ -6334,6 +6469,7 @@ function renderGroups(p) {
 
   const groups = [...(p.groups||[])]
     .filter(function(g) {
+      if (!_groupInDept(g)) return false;  // chỉ hạng mục của phòng đang xem (studio/intl)
       if (g._manual) return true;  // group thêm thủ công qua addGroup → luôn hiển thị (không phụ thuộc tlTasks)
       if (g.tlTaskId) {
         return _tlIdRGSet.has(g.tlTaskId);
@@ -6437,7 +6573,7 @@ function renderGroups(p) {
               onchange="updGroup('${p.id}','${g.id}','type',this.value)"
               style="background:var(--navy);border-color:rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:11px;width:100%"
               placeholder="外観パース…">
-            <datalist id="tl-${p.id}">${D.settings.typeList.map(t=>`<option value="${x(t)}">`).join('')}</datalist>
+            <datalist id="tl-${p.id}">${((activeSection==='intl'?D.settings.typeListIntl:D.settings.typeList)||[]).map(t=>`<option value="${x(t)}">`).join('')}</datalist>
           </div>
           <div style="padding:3px 8px 5px;display:flex;align-items:center;justify-content:space-between;background:var(--navy2);gap:6px;flex-wrap:nowrap">
             <div style="display:flex;gap:4px;align-items:center;min-width:0;overflow:hidden">
@@ -6858,7 +6994,7 @@ function refreshStaffSched(pjId) {
 async function addGroup(pjId) {
   const p=getPj(pjId); if(!p) return;
   if(!p.groups) p.groups=[];
-  p.groups.push({id:gid(),type:'',_manual:true,rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
+  p.groups.push({id:gid(),type:'',_manual:true,dept:(_activeDept()||'studio'),rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
   _sbAuditLog('create', 'groups', p.groups[p.groups.length-1] && p.groups[p.groups.length-1].id || '', 'Thêm hạng mục cho "' + (p.nameVN||p.nameJP||pjId) + '"');
   setTimeout(()=>{ const inputs=document.querySelectorAll(`#rbody-${pjId} .grp-hd .tbl-input-dark`); if(inputs.length) inputs[inputs.length-1].focus(); },50);
@@ -6873,7 +7009,7 @@ async function addGroup(pjId) {
         'rows', 'insert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
     } else {
       try {
-        const { error: err1 } = await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true });
+        const { error: err1 } = await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true, dept: (g.dept||'studio') });
         if (err1) _sbReport('addGroup (groups)', err1, {op: 'insert', table: 'groups'});
         const { error: err2 } = await _sb.from('rows').insert({ id: g.rows[0].id, group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' });
         if (err2) _sbReport('addGroup (rows)', err2, {op: 'insert', table: 'rows'});
@@ -7102,14 +7238,12 @@ function _refreshVnTimeline(pjId) {
 function _refreshOverviewParts() {
   if (activePjId) return;
   const pjsAll = allActiveProjects();
-  const curSectionIds = new Set(activeSection==='vn'
-    ? (curMonth().projectsVN||[]).map(p=>p.id)
-    : (curMonth().projects||[]).map(p=>p.id));
+  const curSectionIds = new Set(curProjects().map(p=>p.id));  // đã lọc theo cờ studioOn/intlOn
   const pjsTimeline = pjsAll.filter(p => curSectionIds.has(p.id));
   const tlDiv = document.getElementById('overviewTlInner');
   if (tlDiv) tlDiv.innerHTML = (activeSection==='vn'?renderProjectTimeline(pjsTimeline):renderKouteiJP(pjsTimeline,_kouteiScreenWindow()));
   const ganttBody = document.querySelector('#monthGanttCard .card-body');
-  const pjsGantt = pjsAll.filter(p => p._section === activeSection);
+  const pjsGantt = pjsAll.filter(p => p._section === _sectionPool(activeSection) && _pjVisibleHere(p));
   if (ganttBody) ganttBody.innerHTML = renderMonthGantt(pjsGantt);
 }
 
@@ -7323,7 +7457,43 @@ async function confirmAddPj() {
   if(!nVN&&!nJP){alert('Vui lòng nhập tên dự án');return;}
   const isVN = activeSection === 'vn';
 
-  // ── FULL LOAD path (JP only): clone từ D với groups/rows/photos ──
+  // ── Nếu dự án ĐÃ CÓ trong tháng hiện tại (kể cả đang ẩn ở phòng này) -> BỎ ẨN + mở, không tạo trùng ──
+  if (!isVN) {
+    const _cm = curMonth();
+    const _exist = (_cm.projects||[]).find(p => (nJP && (p.nameJP||'')===nJP) || (nVN && (p.nameVN||'')===nVN));
+    if (_exist) {
+      if (activeSection==='intl') _exist.intlOn = true; else _exist.studioOn = true;
+      save(); closeModal(); activePjId=_exist.id; renderSidebar(); renderContent();
+      toast('✅ Đã hiển thị lại dự án "'+(_exist.nameJP||_exist.nameVN||'')+'" ở phòng này');
+      if (!_needsApproval()) _sbSaveProject(_exist, D.activeMonth, 'jp');
+      return;
+    }
+  }
+  // ── International: tải từ lịch sử CHỈ THÔNG TIN dự án (không kéo hạng mục phối cảnh) ──
+  if (activeSection==='intl' && window._apFullSource && window._apFullSource.project) {
+    const src = window._apFullSource.project;
+    const pj = { id:gid(), nameVN: nVN||src.nameVN||'', nameJP: nJP||src.nameJP||'',
+      office: document.getElementById('ap-off').value || src.office || '',
+      contact: (document.getElementById('ap-ct')?.value||'').trim(),
+      mainStaff: (document.getElementById('ap-st')?.value||''),
+      client: (document.getElementById('ap-client')?.value||'').trim() || src.client || '',
+      buildingType: (document.getElementById('ap-buildingType')?.value||'').trim() || src.buildingType || '',
+      scope: (document.getElementById('ap-scope')?.value||'').trim() || src.scope || '',
+      area: (document.getElementById('ap-area')?.value||'').trim() || src.area || '',
+      constructionStart: (document.getElementById('ap-constructionStart')?.value||'') || src.constructionStart || '',
+      constructionEnd: (document.getElementById('ap-constructionEnd')?.value||'') || src.constructionEnd || '',
+      groups:[], tlTasks:[], photos:[], otLog:[], notes:'',
+      studioOn: false, intlOn: true };  // tải từ lịch sử về International -> chỉ hiện ở bản vẽ
+    if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
+    D.months[D.activeMonth].projects.push(pj);
+    save(); closeModal(); activePjId=pj.id; renderSidebar(); renderContent();
+    toast('✅ Đã tạo dự án bản vẽ từ lịch sử: "'+(pj.nameJP||pj.nameVN)+'" (chỉ thông tin, chưa có hạng mục)', 3500);
+    _sbAuditLog('create','projects',pj.id,'International tải thông tin từ lịch sử: "'+(pj.nameJP||pj.nameVN)+'"');
+    if (!_needsApproval()) _sbSaveProject(pj, D.activeMonth, 'jp');
+    window._apFullSource = null;
+    return;
+  }
+  // ── FULL LOAD path (Studio): clone từ D với groups/rows/photos ──
   if (!isVN && window._apFullSource && window._apFullSource.project) {
     const src = window._apFullSource.project;
     const srcMid = window._apFullSource.monthId;
@@ -7334,6 +7504,7 @@ async function confirmAddPj() {
     pj.office    = document.getElementById('ap-off').value || pj.office;
     pj.contact   = (document.getElementById('ap-ct')?.value||'').trim() || pj.contact;
     pj.mainStaff = (document.getElementById('ap-st')?.value||'') || pj.mainStaff;
+    pj.studioOn = true; pj.intlOn = false;  // tải từ lịch sử về Studio -> chỉ hiện ở phối cảnh
 
     if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
     D.months[D.activeMonth].projects.push(pj);
@@ -7373,6 +7544,9 @@ async function confirmAddPj() {
   pj.area             = (document.getElementById('ap-area')?.value||'').trim();
   pj.constructionStart= (document.getElementById('ap-constructionStart')?.value||'');
   pj.constructionEnd  = (document.getElementById('ap-constructionEnd')?.value||'');
+  // Tạo mới dự án -> mặc định hiện ở CẢ 2 phòng (sau đó phòng nào không cần thì ẩn thủ công)
+  pj.studioOn = true;
+  pj.intlOn   = true;
   if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
   if(activeSection==='vn'){
     if(!D.months[D.activeMonth].projectsVN) D.months[D.activeMonth].projectsVN=[];
@@ -10787,16 +10961,23 @@ function renderSettings() {
       <div class="card-body"><div class="tag-cloud" id="contactVNTags">
         ${(D.settings.contactListVN||[]).map(c=>`<div class="tag-edit"><input value="${x(c)}" style="width:80px"><span class="tag-del" onclick="this.parentElement.remove()">×</span></div>`).join('')}
       </div><button class="btn btn-sm" style="margin-top:9px" onclick="addTag('contactVNTags',80)">+ Thêm</button></div></div>
-    <div class="card"><div class="card-hd"><span class="card-hd-title">🏷 Danh mục hạng mục Nhật</span></div>
+    <div class="card"><div class="card-hd"><span class="card-hd-title">🎨 Hạng mục Phối cảnh — デザインスタジオ (Design Studio)</span></div>
       <div class="card-body">
-        <p style="font-size:11px;color:var(--gray4);margin-bottom:9px">Hạng mục dự án Nhật (JP)</p>
+        <p style="font-size:11px;color:var(--gray4);margin-bottom:9px">Hạng mục phối cảnh (パース) — phòng Design Studio</p>
         <div class="tag-cloud" id="typeTags">
           ${D.settings.typeList.map(t=>`<div class="tag-edit"><input value="${x(t)}" style="width:140px"><span class="tag-del" onclick="this.parentElement.remove()">×</span></div>`).join('')}
         </div><button class="btn btn-sm" style="margin-top:9px" onclick="addTag('typeTags',140)">+ Thêm hạng mục</button>
       </div></div>
-    <div class="card"><div class="card-hd"><span class="card-hd-title">🏷 Danh mục hạng mục Việt Nam</span></div>
+    <div class="card"><div class="card-hd"><span class="card-hd-title">📐 Hạng mục Bản vẽ — 国際設計室 (International Design)</span></div>
       <div class="card-body">
-        <p style="font-size:11px;color:var(--gray4);margin-bottom:9px">Hạng mục dự án Việt Nam (VN)</p>
+        <p style="font-size:11px;color:var(--gray4);margin-bottom:9px">Hạng mục bản vẽ (図面) — phòng International Design</p>
+        <div class="tag-cloud" id="typeIntlTags">
+          ${(D.settings.typeListIntl||[]).map(t=>`<div class="tag-edit"><input value="${x(t)}" style="width:140px"><span class="tag-del" onclick="this.parentElement.remove()">×</span></div>`).join('')}
+        </div><button class="btn btn-sm" style="margin-top:9px" onclick="addTag('typeIntlTags',140)">+ Thêm hạng mục</button>
+      </div></div>
+    <div class="card"><div class="card-hd"><span class="card-hd-title">🏗 Hạng mục — 設計室 (Design Department / VN)</span></div>
+      <div class="card-body">
+        <p style="font-size:11px;color:var(--gray4);margin-bottom:9px">Hạng mục dự án Việt Nam — phòng Design Department</p>
         <div class="tag-cloud" id="typeVNTags">
           ${(D.settings.typeListVN||[]).map(t=>`<div class="tag-edit"><input value="${x(t)}" style="width:140px"><span class="tag-del" onclick="this.parentElement.remove()">×</span></div>`).join('')}
         </div><button class="btn btn-sm" style="margin-top:9px" onclick="addTag('typeVNTags',140)">+ Thêm hạng mục</button>
@@ -11187,6 +11368,7 @@ function addTag(cid,w) {
 async function saveSettings() {
   D.settings.staffList=[...document.querySelectorAll('#staffTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
   D.settings.typeList=[...document.querySelectorAll('#typeTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
+  D.settings.typeListIntl=[...document.querySelectorAll('#typeIntlTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
   D.settings.typeListVN=[...document.querySelectorAll('#typeVNTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
   D.settings.contactList=[...document.querySelectorAll('#contactTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
   D.settings.contactListVN=[...document.querySelectorAll('#contactVNTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
@@ -11202,6 +11384,7 @@ async function saveSettings() {
       const { error } = await _sb.from('settings').update({
         staff_list: D.settings.staffList,
         type_list: D.settings.typeList,
+        type_list_intl: D.settings.typeListIntl,
         type_list_vn: D.settings.typeListVN,
         contact_list: D.settings.contactList,
         contact_list_vn: D.settings.contactListVN,

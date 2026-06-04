@@ -1797,6 +1797,12 @@ function _needsApproval() {
   var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
   return r === 'edit' || r === 'view';
 }
+// Chỉ admin (chủ) mới được xem tính năng ĐÁNH GIÁ nhân sự (KPI/rating)
+function _isAdmin() {
+  var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
+  return r === 'admin';
+}
+function _canSeeKPI() { return _isAdmin(); }
 
 // SPLASH_PW removed in Phase 9 — auth dùng hash qua Supabase (xem injectSyncHashes)
 
@@ -2065,6 +2071,39 @@ function _sectionPool(sec){ return (sec==='vn') ? 'vn' : 'jp'; }           // jp
 function _activeDept(){ return activeSection==='intl' ? 'intl' : (activeSection==='vn' ? null : 'studio'); } // null = không lọc theo phòng (VN)
 function _groupInDept(g){ const d=_activeDept(); return d===null ? true : ((g&&g.dept||'studio')===d); }
 function _sectionDeptJP(){ return activeSection==='vn' ? '設計室' : (activeSection==='intl' ? '国際設計室' : 'デザインスタジオ'); }
+// Danh sách nhân sự ĐÚNG phòng đang xem (lấy từ bảng Nhân sự / assignments). Dùng cho roster + ô chọn người.
+function _deptStaffNames(asOf){
+  const o = (typeof _staffOrgInfo==='function') ? _staffOrgInfo(asOf) : {};
+  const target = _sectionDeptJP();
+  const names = Object.keys(o).filter(n => o[n].deptName===target && o[n].rank!==0);
+  return names.length ? names : [...(D.settings.staffList||[])];  // fallback nếu chưa có dữ liệu phòng
+}
+// Nhân sự phòng đang xem CHIA THEO NHÓM (sub-unit): mỗi nhóm trưởng nhóm đứng đầu; nhóm xếp theo sort_order đơn vị (Sơn→Nhã→Hùng…)
+function _deptStaffTeams(asOf){
+  const target = _sectionDeptJP();
+  const units = {}; (D.orgUnits||[]).forEach(u=>units[u.id]=u);
+  const sb = D.staffById||{};
+  const asg = (typeof _activeAssignmentsAt==='function') ? _activeAssignmentsAt(asOf) : (D.assignments||[]).filter(a=>!a.date_to);
+  const byUnit = {};
+  asg.forEach(function(a){
+    const s = sb[a.staff_id]; if(!s) return;
+    const u = units[a.unit_id]; if(!u) return;
+    let dept = u; if(u.kind==='group' && u.parent_id && units[u.parent_id]) dept = units[u.parent_id];
+    if(!dept || dept.name_jp !== target) return;
+    const rank = (a.rank==null?5:a.rank); if(rank===0) return;
+    if(!byUnit[a.unit_id]) byUnit[a.unit_id] = { sort:(u.sort_order==null?99:u.sort_order), members:[] };
+    byUnit[a.unit_id].members.push({ name:s.full_name, rank:rank, order:(((D.settings.staffProfiles||{})[s.full_name]||{}).order||99) });
+  });
+  const keys = Object.keys(byUnit).sort(function(a,b){ return byUnit[a].sort - byUnit[b].sort; });
+  const teams = keys.map(function(k){
+    const m = byUnit[k].members.sort(function(a,b){ return (a.rank-b.rank) || (a.order-b.order) || (a.name<b.name?-1:1); });
+    return m.map(function(x){ return x.name; });
+  });
+  // Ưu tiên thứ tự nhóm theo TRƯỞNG NHÓM (国際設計室): Sơn → Nhã → Hùng → các nhóm còn lại (giữ sort_order)
+  const LEADER_PRIORITY = ['HAN ソン','SGN ニャー','HAN LV.フン'];
+  teams.sort(function(A,B){ var ia=LEADER_PRIORITY.indexOf(A[0]||''); var ib=LEADER_PRIORITY.indexOf(B[0]||''); if(ia<0)ia=99; if(ib<0)ib=99; return ia-ib; });
+  return teams.length ? teams : [_deptStaffNames()];  // fallback: 1 nhóm
+}
 // Cờ hiển thị dự án theo phòng (studioOn mặc định true, intlOn mặc định false)
 function _pjStudioOn(p){ return p && p.studioOn !== false; }
 function _pjIntlOn(p){ return p && p.intlOn !== false; }  // mặc định hiện ở cả 2 phòng
@@ -2163,9 +2202,9 @@ function totalOT(p) {
 
 /* PAGE NAV */
 function showPage(pg) {
-  // Block restricted pages for non-admin roles
+  // Block restricted pages for non-admin roles (edit = quản lý Bản vẽ: được vào Cài đặt — chỉ hạng mục bản vẽ)
   const sessionRole = sessionStorage.getItem('splash_role') || 'admin';
-  if (sessionRole === 'edit' && (pg === 'dashboard' || pg === 'staff' || pg === 'settings')) return;
+  if (sessionRole === 'edit' && (pg === 'dashboard' || pg === 'staff' || pg === 'org')) return;
 
   activePage=pg;
   ['main','dashboard','staff','settings','org'].forEach(p=>{
@@ -3664,11 +3703,19 @@ function renderMonthOverview(ci) {
   // Lọc hiển thị hiệu suất theo phòng của phía đang xem (Nhật=Design Studio, VN=Design Department)
   const _oiB = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
   const _deptB = _sectionDeptJP();
-  const _perfRoster = D.settings.staffList.filter(s=>{
-    if((_oiB[s]||{}).deptName===_deptB) return true;
-    if((smPerf[s]||0)>0 || (otMap[s]||0)>0) return true;
-    return false;
-  }).sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
+  let _perfRoster;
+  if (activeSection==='jp' || activeSection==='intl') {
+    _perfRoster = _deptStaffNames().slice().sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
+  } else {
+    const _otherDeptsB = ['デザインスタジオ','設計室','国際設計室'].filter(d=>d!==_deptB);
+    _perfRoster = D.settings.staffList.filter(s=>{
+      const dn=(_oiB[s]||{}).deptName;
+      if(dn===_deptB) return true;
+      if(_otherDeptsB.indexOf(dn)>=0) return false;
+      if((smPerf[s]||0)>0 || (otMap[s]||0)>0) return true;
+      return false;
+    }).sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
+  }
 
   ci.innerHTML=`
   <div id="heroStatsRow" class="hero-row" style="grid-template-columns:160px 160px 1fr 220px">
@@ -3925,7 +3972,7 @@ function renderMonthGantt(pjs) {
   const staffMap = {};
   D.settings.staffList.forEach(s=>staffMap[s]=[]);
   allTasks.filter(overlaps).forEach(r=>{
-    if(r.staff && staffMap[r.staff]) staffMap[r.staff].push(r);
+    if(r.staff){ if(!staffMap[r.staff]) staffMap[r.staff]=[]; staffMap[r.staff].push(r); }
   });
 
   // monthSpans + holidaySet + allDaysStr đã có từ _tlComputeWindow ở đầu hàm
@@ -4030,20 +4077,35 @@ function renderMonthGantt(pjs) {
   //  - Tab Nhật = phòng Design Studio (デザインスタジオ); Tab VN = phòng Design Department (設計室)
   //  - Hiện = (thành viên đúng phòng đó) ∪ (người có việc thật ở phía đang xem)
   //  - Nếu chưa tải được dữ liệu phòng (assignments) thì GIỮ NGUYÊN để không ẩn nhầm ai.
-  const _orgInfo2 = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
+  const _asOfM = (typeof _monthAsOf==='function') ? _monthAsOf() : undefined;  // phân nhóm THEO THỜI ĐIỂM tháng đang xem
+  const _orgInfo2 = (typeof _staffOrgInfo==='function') ? _staffOrgInfo(_asOfM) : {};
   const _targetDept = _sectionDeptJP();
   // CÁCH LY CHẶT 2 phòng: chỉ hiện nhân sự ĐÚNG phòng + người có việc thật Ở PHÒNG NÀY (task đã lọc theo dept).
   // Bỏ nhánh "show all khi chưa tải org" để không lộ nhân sự phòng khác.
-  const _rosterBase = [...D.settings.staffList].filter(s=>{
-    if((_orgInfo2[s]||{}).deptName === _targetDept) return true;
-    if((staffMap[s]||[]).length>0) return true;
-    return false;
-  });
-  const sortedStaff = _rosterBase.sort((a,b)=>{
-    const ia=STAFF_ORDER.indexOf(a),ib=STAFF_ORDER.indexOf(b);
-    if(ia===-1&&ib===-1)return 0;if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;
-  });
+  let sortedStaff; const _teamBreaks = new Set();
+  if (activeSection==='jp' || activeSection==='intl') {
+    // Studio / International: roster CHIA THEO NHÓM (trưởng nhóm đứng đầu); đánh dấu đầu mỗi nhóm để vẽ vạch phân cách
+    const _teams = _deptStaffTeams(_asOfM);
+    sortedStaff = [];
+    _teams.forEach(function(team, ti){ team.forEach(function(n, ni){ if(ti>0 && ni===0) _teamBreaks.add(n); sortedStaff.push(n); }); });
+    if(!sortedStaff.length) sortedStaff = _deptStaffNames(_asOfM);
+  } else {
+    // VN: thành viên 設計室 + người có việc, loại người thuộc phòng thiết kế khác
+    const _otherDesignDepts = ['デザインスタジオ','設計室','国際設計室'].filter(d=>d!==_targetDept);
+    sortedStaff = [...D.settings.staffList].filter(s=>{
+      const dn=(_orgInfo2[s]||{}).deptName;
+      if(dn === _targetDept) return true;
+      if(_otherDesignDepts.indexOf(dn)>=0) return false;
+      if((staffMap[s]||[]).length>0) return true;
+      return false;
+    }).sort((a,b)=>{
+      const ia=STAFF_ORDER.indexOf(a),ib=STAFF_ORDER.indexOf(b);
+      if(ia===-1&&ib===-1)return 0;if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;
+    });
+  }
+  const _sepRow = '<tr><td colspan="'+(3+allDaysStr.length)+'" style="border-top:3px solid #9aa3b2;height:7px;padding:0;background:#eef0f4"></td></tr>';
   const staffRows = sortedStaff.map(staff => {
+    const _sep = _teamBreaks.has(staff) ? _sepRow : '';  // vạch phân cách đầu nhóm
     const tasks = staffMap[staff]||[];
 
     const activeLeaveList = getStaffLeaves(staff).filter(l=>{
@@ -4105,11 +4167,11 @@ function renderMonthGantt(pjs) {
       const emptyTaskNameCell = `<td style="padding:2px 6px;border-bottom:1px solid #ddd;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px">
         <div style="font-size:10px;color:#aaa;font-style:italic">—</div>
       </td>`;
-      return `<tr class="grp-row staff-last">${nameCell}${otCell}${emptyTaskNameCell}${buildDayCellsForTask(null, staff)}</tr>`;
+      return _sep + `<tr class="grp-row staff-last">${nameCell}${otCell}${emptyTaskNameCell}${buildDayCellsForTask(null, staff)}</tr>`;
     }
 
     // Render N task rows (1 row per task) — row cuối có class staff-last → border đậm phân tách NV
-    return displayTasks.map((r, idx) => {
+    return _sep + displayTasks.map((r, idx) => {
       const isLastOfStaff = idx === displayTasks.length - 1;
       const leftCells = idx === 0 ? `${nameCell}${otCell}` : '';
       const trClass = isLastOfStaff ? 'grp-row staff-last' : 'grp-row';
@@ -5565,6 +5627,7 @@ function getAllRatingFields() {
 
 // ── Rating collapse toggle (localStorage, default collapsed) ──
 function _isRatingCollapsed() {
+  if (!_canSeeKPI()) return true;  // non-admin: luôn gộp 1 cột (sẽ là ô khóa)
   const v = localStorage.getItem('rating_collapsed');
   return v === null ? true : v === '1';
 }
@@ -5728,6 +5791,9 @@ function getStaffMonthlyKPIs(staffName, section) {
 /* ── Rating cell: save on oninput so navigation doesn’t lose data ── */
 /* ── Rating Group rendering: 3 compact columns + popup detail ── */
 function renderRatingGroups(pjId, gId, row, dimStyle) {
+  if (!_canSeeKPI()) {
+    return `<td style="padding:3px 6px;min-width:60px;text-align:center;vertical-align:middle;color:#cbd1da;${dimStyle||''}" title="Đánh giá KPI chỉ dành cho quản trị">🔒</td>`;
+  }
   if (_isRatingCollapsed()) {
     const kpi = calcKPI([row], activeSection, 0, 0, 0);
     const breakdown = _rowKpiBreakdown(row, activeSection);
@@ -5793,6 +5859,7 @@ function renderRatingGroups(pjId, gId, row, dimStyle) {
 }
 
 function openRatingModal(pjId, gId, rowId, groupId, label, emoji) {
+  if (!_canSeeKPI()) { toast('Chỉ quản trị (admin) mới xem/đánh giá KPI nhân sự', 2500); return; }
   // Find project, group, row
   const pj = curProjects().find(p=>p.id===pjId) || allCurProjects().find(p=>p.id===pjId);
   if (!pj) return;
@@ -6105,6 +6172,7 @@ function recalcStaffUpKPI(staffName) {
 }
 
 function openUpRatingModal(pjId, gId, rowId, upLabel, timeStr) {
+  if (!_canSeeKPI()) { toast('Chỉ quản trị (admin) mới đánh giá KPI', 2500); return; }
   var pj = getPjGlobal(pjId) || getPj(pjId);
   if (!pj) return;
   var g = (pj.groups||[]).find(function(g){ return g.id===gId; });
@@ -6770,6 +6838,7 @@ function renderStaffSchedule(p) {
   const _linkedTlNamesSS = new Set((p.tlTasks||[]).filter(function(t){ return _linkedTlIdsSS.has(t.id); }).map(function(t){ return t.name; }));
   const _sortedGroupsSS = [...(p.groups||[])]
     .filter(function(g) {
+      if (!_groupInDept(g)) return false;   // chỉ hạng mục của phòng đang xem (studio/intl)
       if (g.tlTaskId) return _tlIdSSSet.has(g.tlTaskId);
       if (!_hasTlSS) return true;
       if (!_tlNameSSSet.has(g.type)) return false;
@@ -6804,8 +6873,9 @@ function renderStaffSchedule(p) {
     allTasks.filter(r=>!overlaps(r)).map(r=>r.staff).filter(Boolean)
       .filter(s=>!pjStaffActive.includes(s))
   )];
-  // Sắp xếp theo thứ tự trong staffList
-  const sortStaff = arr => D.settings.staffList.filter(s=>arr.includes(s));
+  // Sắp xếp theo thứ tự nhân sự ĐÚNG PHÒNG (Studio/International lấy từ bảng Nhân sự) -> loại người phòng khác
+  const _allStaffOrder = (activeSection==='jp'||activeSection==='intl') ? _deptStaffNames((typeof _monthAsOf==='function')?_monthAsOf():undefined) : D.settings.staffList;
+  const sortStaff = arr => _allStaffOrder.filter(s=>arr.includes(s));
   const activeStaffList = sortStaff(pjStaffActive);
   const pastStaffList   = sortStaff(pjStaffPast);
 
@@ -8712,7 +8782,11 @@ function staffShortName(fullName) {
 // Leaving → cam + ⏰ + (còn N ngày)
 function sortedStaffOptionsHtml(selectedName) {
   var html = '';
-  sortedStaffList().forEach(function(name) {
+  // Chỉ liệt kê nhân sự ĐÚNG phòng đang xem; vẫn giữ giá trị đang chọn (kể cả người phòng khác) để không mất dữ liệu cũ
+  var _names = _deptStaffNames();
+  if (selectedName && _names.indexOf(selectedName) < 0) _names = _names.concat([selectedName]);
+  _names = _names.slice().sort(function(a,b){ if(a==='HAN トゥアン')return -1; if(b==='HAN トゥアン')return 1; var pa=getStaffProfile(a),pb=getStaffProfile(b); return (pa.order||99)-(pb.order||99); });
+  _names.forEach(function(name) {
     var status = getStaffStatus(name);
     var sel = (name === selectedName) ? ' selected' : '';
     if (status === 'left') {
@@ -9323,6 +9397,7 @@ function _srRenderRadar(selfRates, teamRates) {
 
 // Modal full-screen báo cáo
 function openStaffReviewModal(staffName) {
+  if (!_canSeeKPI()) { toast('Chỉ quản trị (admin) mới xem báo cáo đánh giá nhân sự', 2500); return; }
   const period = _getCurrentContractPeriod(staffName);
   const overlay = document.createElement('div');
   overlay.id = 'staffReviewOverlay';
@@ -10204,15 +10279,39 @@ async function saveStaffAssignment(name){
 }
 
 // Lấy phòng (gom nhóm -> phòng cha) + cấp bậc của từng nhân sự từ assignments (đang hiệu lực)
-function _staffOrgInfo(){
+// Phân công ĐANG hiệu lực TẠI THỜI ĐIỂM `asOf` (mặc định = hôm nay), theo lịch sử date_from/date_to.
+// Đổi nhóm/phòng chỉ ảnh hưởng từ thời điểm đó trở đi; tháng cũ giữ phân công cũ.
+function _activeAssignmentsAt(asOf){
+  const day = asOf || localDateStr(new Date());
+  const byStaff={};
+  (D.assignments||[]).forEach(function(a){ (byStaff[a.staff_id]=byStaff[a.staff_id]||[]).push(a); });
+  const out=[];
+  Object.keys(byStaff).forEach(function(sid){
+    const list=byStaff[sid].slice().sort(function(a,b){ return (a.date_from||'').localeCompare(b.date_from||''); });
+    let chosen=list.find(function(a){ return (a.date_from||'0000-00-00')<=day && (!a.date_to || a.date_to>day); });
+    // asOf trước mốc phân công đầu: CHỈ người gốc (seed) mới coi như đã ở phòng đó từ trước (baseline);
+    // người mới thêm sau (note khác seed) thì KHÔNG hiện ở tháng cũ trước khi vào.
+    if(!chosen && day < (list[0].date_from||'9999') && /seed/i.test(list[0].note||'')) chosen=list[0];
+    // nếu đã đóng hết trước asOf (nghỉ/chuyển đi) -> không có phòng tại thời điểm đó -> bỏ
+    if(chosen) out.push(chosen);
+  });
+  return out;
+}
+function _staffOrgInfo(asOf){
   const units={}; (D.orgUnits||[]).forEach(u=>units[u.id]=u);
   const sb=D.staffById||{}; const info={};
-  (D.assignments||[]).filter(a=>!a.date_to).forEach(a=>{
+  _activeAssignmentsAt(asOf).forEach(function(a){
     const s=sb[a.staff_id]; if(!s) return;
     let u=units[a.unit_id]; if(u && u.kind==='group' && u.parent_id && units[u.parent_id]) u=units[u.parent_id];
     info[s.full_name]={ deptName:(u?u.name_jp:'Chưa phân công'), deptSort:(u?u.sort_order:99), rank:(a.rank==null?5:a.rank) };
   });
   return info;
+}
+// Ngày đại diện của tháng đang xem (cuối tháng) để tra phân công tại thời điểm đó
+function _monthAsOf(){
+  const p=(D.activeMonth||'').split('-').map(Number); if(p.length<2) return localDateStr(new Date());
+  const dim=new Date(p[0], p[1], 0).getDate();
+  return p[0]+'-'+String(p[1]).padStart(2,'0')+'-'+String(dim).padStart(2,'0');
 }
 
 // Quy tắc tính số mai theo phía của phòng (anh Tuấn chốt):
@@ -10296,7 +10395,7 @@ function renderOrgChart(){
     let lh='<text y="'+ly+'" font-size="'+nfs+'" fill="#fff" text-anchor="middle" font-weight="700" style="paint-order:stroke" stroke="#0b0f1a" stroke-width="2.4">'+orgEsc((p.office?p.office+' ':'')+p.short)+'</text>';
     const _titles=p.title?String(p.title).split('・'):[];
     _titles.forEach((t,i)=>{ const fs=(_titles.length>1?(i===0?nfs:nfs-1.5):nfs-0.5),h=fs+5,w=t.length*fs*1.08+10; ly+=h+2; lh+='<rect x="'+(-w/2).toFixed(1)+'" y="'+(ly-h+3).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+h.toFixed(1)+'" rx="'+(h/2).toFixed(1)+'" fill="#BA7517"/><text y="'+ly.toFixed(1)+'" font-size="'+fs.toFixed(1)+'" fill="#1b1206" text-anchor="middle" font-weight="700">'+orgEsc(t)+'</text>'; });
-    if(p.rank>=4){ const _pf=(window._orgPerf||{}),mp=(window._orgPerfMax||1); const pct=Math.max(0,Math.min(1,(_pf[p.fn]||0)/mp)); const bw=Math.max(2*r,30),bh=4; ly+=10; const fc=pct>=0.8?'#27AE60':pct>=0.5?'#F39C12':pct>=0.25?'#E67E22':'#E74C3C'; lh+='<rect x="'+(-bw/2).toFixed(1)+'" y="'+ly.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh+'" rx="2" fill="#2a3550"/>'+(pct>0?'<rect x="'+(-bw/2).toFixed(1)+'" y="'+ly.toFixed(1)+'" width="'+(bw*pct).toFixed(1)+'" height="'+bh+'" rx="2" fill="'+fc+'"/>':''); }
+    if(p.rank>=4 && _canSeeKPI()){ const _pf=(window._orgPerf||{}),mp=(window._orgPerfMax||1); const pct=Math.max(0,Math.min(1,(_pf[p.fn]||0)/mp)); const bw=Math.max(2*r,30),bh=4; ly+=10; const fc=pct>=0.8?'#27AE60':pct>=0.5?'#F39C12':pct>=0.25?'#E67E22':'#E74C3C'; lh+='<rect x="'+(-bw/2).toFixed(1)+'" y="'+ly.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh+'" rx="2" fill="#2a3550"/>'+(pct>0?'<rect x="'+(-bw/2).toFixed(1)+'" y="'+ly.toFixed(1)+'" width="'+(bw*pct).toFixed(1)+'" height="'+bh+'" rx="2" fill="'+fc+'"/>':''); }
     lbl.innerHTML=lh;
     g.appendChild(avg); g.appendChild(lbl); p._av=avg; p._lbl=lbl; p._g=g; p._ax=null;
     g.addEventListener('mouseenter',()=>{hoverId=p.sid;});
@@ -10939,6 +11038,20 @@ function updThemeColorPickers() {
 
 function renderSettings() {
   const sc=document.getElementById('settingsContent'); if(!sc) return;
+  // Tài khoản không phải admin (vd quản lý phòng Bản vẽ): CHỈ hiện bảng điền hạng mục bản vẽ
+  if (!_isAdmin()) {
+    sc.innerHTML = '<div style="max-width:640px;margin:0 auto">'
+      + '<h2 style="font-size:16px;font-weight:700;color:var(--navy);margin:0 0 12px">⚙ Cài đặt — Phòng Bản vẽ (International Design)</h2>'
+      + '<div class="card"><div class="card-hd"><span class="card-hd-title">📐 Danh mục Hạng mục Bản vẽ — 国際設計室 (図面)</span></div>'
+      + '<div class="card-body"><p style="font-size:11px;color:var(--gray4);margin-bottom:9px">Thêm/sửa danh sách hạng mục bản vẽ để gợi ý khi nhập hạng mục.</p>'
+      + '<div class="tag-cloud" id="typeIntlTags">'
+      + (D.settings.typeListIntl||[]).map(function(t){ return '<div class="tag-edit"><input value="'+x(t)+'" style="width:140px"><span class="tag-del" onclick="this.parentElement.remove()">×</span></div>'; }).join('')
+      + '</div><button class="btn btn-sm" style="margin-top:9px" onclick="addTag(\'typeIntlTags\',140)">+ Thêm hạng mục</button>'
+      + '</div></div>'
+      + '<button class="btn btn-gold" style="margin-top:14px" onclick="saveSettingsIntlOnly()">💾 Lưu danh mục bản vẽ</button>'
+      + '</div>';
+    return;
+  }
   sc.innerHTML=`
   <div style="background:#f0fff4;border:1px solid #a9dfbf;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
     <span style="font-size:20px">🟢</span>
@@ -11364,6 +11477,17 @@ function addTag(cid,w) {
   const c=document.createElement('div'); c.className='tag-edit';
   c.innerHTML=`<input style="width:${w}px" placeholder="Nhập…"><span class="tag-del" onclick="this.parentElement.remove()">×</span>`;
   document.getElementById(cid).appendChild(c); c.querySelector('input').focus();
+}
+// Lưu CHỈ danh mục hạng mục bản vẽ (cho tài khoản quản lý phòng Bản vẽ) — không đụng các list khác
+async function saveSettingsIntlOnly() {
+  D.settings.typeListIntl = [...document.querySelectorAll('#typeIntlTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
+  save(); toast('✓ Đã lưu danh mục hạng mục bản vẽ');
+  if (window._sbReady && window._sbSettingsId) {
+    try {
+      const { error } = await _sb.from('settings').update({ type_list_intl: D.settings.typeListIntl }).eq('id', window._sbSettingsId);
+      if (error) _sbReport('saveSettingsIntlOnly', error, {op:'update', table:'settings'});
+    } catch(e) { _sbReport('saveSettingsIntlOnly', e, {op:'update', table:'settings'}); }
+  }
 }
 async function saveSettings() {
   D.settings.staffList=[...document.querySelectorAll('#staffTags .tag-edit input')].map(e=>e.value.trim()).filter(Boolean);
@@ -12902,8 +13026,8 @@ function applyRoleUI(role) {
     return;
   }
   if (role === 'edit') {
-    // Hide Dashboard, Nhân sự, Cài đặt tabs
-    ['navDash','navStaff','navSettings'].forEach(id => {
+    // Tài khoản quản lý PHÒNG BẢN VẼ (International): chỉ thấy tab International + Cài đặt (chỉ hạng mục bản vẽ)
+    ['navDash','navStaff','navMain','navMainVN','navOrg'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -12913,7 +13037,8 @@ function applyRoleUI(role) {
       if (oc.includes('openExportMenu') || oc.includes('openThemePicker'))
         btn.style.display = 'none';
     });
-    // Make sure we're on main page
+    // Vào thẳng phòng Bản vẽ
+    try { setSection('intl'); } catch(e) { activeSection='intl'; }
     if (activePage !== 'main') showPage('main');
   }
   if (role === 'view') {

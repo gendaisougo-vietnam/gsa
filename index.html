@@ -2078,6 +2078,18 @@ function _deptStaffNames(asOf){
   const names = Object.keys(o).filter(n => o[n].deptName===target && o[n].rank!==0);
   return names.length ? names : [...(D.settings.staffList||[])];  // fallback nếu chưa có dữ liệu phòng
 }
+// Nhân sự ĐƯỢC PHÉP GÁN việc ở phòng đang xem:
+//  - Studio (デザインスタジオ) & Design Department (設計室): hỗ trợ chéo nhau -> gộp nhân sự CẢ 2 phòng
+//  - International (国際設計室): chỉ nhân sự phòng mình
+function _assignableStaffNames(asOf){
+  const o = (typeof _staffOrgInfo==='function') ? _staffOrgInfo(asOf) : {};
+  if (activeSection==='intl') {
+    const n1 = Object.keys(o).filter(n => o[n].deptName==='国際設計室' && o[n].rank!==0);
+    return n1.length ? n1 : [...(D.settings.staffList||[])];
+  }
+  const names = Object.keys(o).filter(n => (o[n].deptName==='デザインスタジオ' || o[n].deptName==='設計室') && o[n].rank!==0);
+  return names.length ? names : [...(D.settings.staffList||[])];
+}
 // Nhân sự phòng đang xem CHIA THEO NHÓM (sub-unit): mỗi nhóm trưởng nhóm đứng đầu; nhóm xếp theo sort_order đơn vị (Sơn→Nhã→Hùng…)
 function _deptStaffTeams(asOf){
   const target = _sectionDeptJP();
@@ -3704,14 +3716,20 @@ function renderMonthOverview(ci) {
   const _oiB = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
   const _deptB = _sectionDeptJP();
   let _perfRoster;
-  if (activeSection==='jp' || activeSection==='intl') {
+  if (activeSection==='intl') {
     _perfRoster = _deptStaffNames().slice().sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
+  } else if (activeSection==='jp') {
+    // Studio: + người 設計室 có việc ở phòng này (hỗ trợ chéo)
+    const _baseP = _deptStaffNames();
+    D.settings.staffList.forEach(function(s){ if(_baseP.indexOf(s)<0 && (_oiB[s]||{}).deptName==='設計室' && ((smPerf[s]||0)>0||(otMap[s]||0)>0)) _baseP.push(s); });
+    _perfRoster = _baseP.sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
   } else {
-    const _otherDeptsB = ['デザインスタジオ','設計室','国際設計室'].filter(d=>d!==_deptB);
+    // VN (設計室): + người Studio có việc (hỗ trợ chéo); chặn 国際設計室
     _perfRoster = D.settings.staffList.filter(s=>{
       const dn=(_oiB[s]||{}).deptName;
       if(dn===_deptB) return true;
-      if(_otherDeptsB.indexOf(dn)>=0) return false;
+      if(dn==='デザインスタジオ') return (smPerf[s]||0)>0 || (otMap[s]||0)>0;
+      if(dn==='国際設計室') return false;
       if((smPerf[s]||0)>0 || (otMap[s]||0)>0) return true;
       return false;
     }).sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
@@ -3949,12 +3967,14 @@ function renderMonthGantt(pjs) {
 
   let allTasks = [...groupTasks, ...tlTasks];
   // FIX trùng lặp Lịch CV: 1 hạng mục carryover hiện ở CẢ dự án tháng hiện tại lẫn dự án gốc tháng trước
-  // -> cùng nhân sự + cùng hạng mục + cùng giờ UP = cùng 1 việc. Giữ bản ở dự án THÁNG HIỆN TẠI
-  // (số thứ tự đúng), bỏ bản carryover. CHỈ sửa hiển thị, KHÔNG đổi dữ liệu.
+  // -> CHỈ gộp khi TRÙNG HOÀN TOÀN lịch (cùng người + hạng mục + ngày bắt đầu + ngày UP + giờ UP).
+  // Giữ bản ở dự án THÁNG HIỆN TẠI (số thứ tự đúng), bỏ bản carryover. CHỈ sửa hiển thị, KHÔNG đổi dữ liệu.
+  // LƯU Ý: khóa PHẢI gồm cả NGÀY — trước đây chỉ dùng giờ UP (vd 18:00) nên 2 đợt UP khác ngày
+  // của cùng 1 người trong cùng hạng mục bị gộp nhầm -> mất lịch đang làm trên 担当者別工程表.
   (function(){
     const seen={}, out=[];
     allTasks.forEach(function(t){
-      const key=(t.staff||'')+'|'+(t.pjName||'')+'|'+(t.groupName||'')+'|'+(t.upTime||t.dateTo||t.dateFrom||'');
+      const key=(t.staff||'')+'|'+(t.pjName||'')+'|'+(t.groupName||'')+'|'+(t.dateFrom||'')+'|'+(t.dateTo||'')+'|'+(t.upTime||'');
       const ex=seen[key];
       if(!ex){ seen[key]=t; out.push(t); }
       else if(ex._pjCarry && !t._pjCarry){ const i=out.indexOf(ex); if(i>=0) out[i]=t; seen[key]=t; }
@@ -4089,13 +4109,18 @@ function renderMonthGantt(pjs) {
     sortedStaff = [];
     _teams.forEach(function(team, ti){ team.forEach(function(n, ni){ if(ti>0 && ni===0) _teamBreaks.add(n); sortedStaff.push(n); }); });
     if(!sortedStaff.length) sortedStaff = _deptStaffNames(_asOfM);
+    // Studio <-> 設計室 hỗ trợ chéo: người 設計室 CÓ VIỆC ở Studio -> hiện thêm (nhóm riêng cuối bảng)
+    if (activeSection==='jp') {
+      const _extra = Object.keys(staffMap).filter(function(s){ return (staffMap[s]||[]).length>0 && sortedStaff.indexOf(s)<0 && (_orgInfo2[s]||{}).deptName==='設計室'; });
+      if (_extra.length){ _teamBreaks.add(_extra[0]); _extra.forEach(function(s){ sortedStaff.push(s); }); }
+    }
   } else {
-    // VN: thành viên 設計室 + người có việc, loại người thuộc phòng thiết kế khác
-    const _otherDesignDepts = ['デザインスタジオ','設計室','国際設計室'].filter(d=>d!==_targetDept);
+    // VN (設計室): thành viên phòng + người Studio được điều sang hỗ trợ (có việc); vẫn chặn 国際設計室
     sortedStaff = [...D.settings.staffList].filter(s=>{
       const dn=(_orgInfo2[s]||{}).deptName;
       if(dn === _targetDept) return true;
-      if(_otherDesignDepts.indexOf(dn)>=0) return false;
+      if(dn === 'デザインスタジオ') return (staffMap[s]||[]).length>0;  // hỗ trợ chéo Studio <-> 設計室
+      if(dn === '国際設計室') return false;
       if((staffMap[s]||[]).length>0) return true;
       return false;
     }).sort((a,b)=>{
@@ -6874,7 +6899,10 @@ function renderStaffSchedule(p) {
       .filter(s=>!pjStaffActive.includes(s))
   )];
   // Sắp xếp theo thứ tự nhân sự ĐÚNG PHÒNG (Studio/International lấy từ bảng Nhân sự) -> loại người phòng khác
-  const _allStaffOrder = (activeSection==='jp'||activeSection==='intl') ? _deptStaffNames((typeof _monthAsOf==='function')?_monthAsOf():undefined) : D.settings.staffList;
+  const _asOfSS = (typeof _monthAsOf==='function')?_monthAsOf():undefined;
+  const _allStaffOrder = (activeSection==='intl') ? _deptStaffNames(_asOfSS)
+    : (activeSection==='jp') ? _assignableStaffNames(_asOfSS)   // Studio: gộp cả 設計室 (hỗ trợ chéo)
+    : D.settings.staffList;
   const sortStaff = arr => _allStaffOrder.filter(s=>arr.includes(s));
   const activeStaffList = sortStaff(pjStaffActive);
   const pastStaffList   = sortStaff(pjStaffPast);
@@ -8782,8 +8810,9 @@ function staffShortName(fullName) {
 // Leaving → cam + ⏰ + (còn N ngày)
 function sortedStaffOptionsHtml(selectedName) {
   var html = '';
-  // Chỉ liệt kê nhân sự ĐÚNG phòng đang xem; vẫn giữ giá trị đang chọn (kể cả người phòng khác) để không mất dữ liệu cũ
-  var _names = _deptStaffNames();
+  // Studio & Design Department: liệt kê nhân sự CẢ 2 phòng (hỗ trợ chéo); International: chỉ phòng mình.
+  // Vẫn giữ giá trị đang chọn (kể cả người phòng khác) để không mất dữ liệu cũ.
+  var _names = _assignableStaffNames();
   if (selectedName && _names.indexOf(selectedName) < 0) _names = _names.concat([selectedName]);
   _names = _names.slice().sort(function(a,b){ if(a==='HAN トゥアン')return -1; if(b==='HAN トゥアン')return 1; var pa=getStaffProfile(a),pb=getStaffProfile(b); return (pa.order||99)-(pb.order||99); });
   _names.forEach(function(name) {
@@ -12218,18 +12247,21 @@ async function sbReloadData() {
   }
 }
 
-function checkMorningNotification() {
+function checkMorningNotification(force) {
   var now = new Date();
   var today = now.toISOString().slice(0,10);
-  if (localStorage.getItem('morning_notif_date') === today) return;
-  var hour = now.getHours();
-  if (hour < 7 || hour >= 12) return;
-  localStorage.setItem('morning_notif_date', today);
+  if (!force) {
+    if (localStorage.getItem('morning_notif_date') === today) return;
+    var hour = now.getHours();
+    if (hour < 7 || hour >= 12) return;
+    localStorage.setItem('morning_notif_date', today);
+  }
 
   var day3 = new Date(now); day3.setDate(day3.getDate()+3);
   var day3Str = day3.toISOString().slice(0,10);
 
   var ups = [], leaves = [], deadlines = [];
+  var _seenMN = {};   // chống đếm đôi hạng mục carryover (hiện ở cả tháng cũ lẫn tháng mới)
 
   Object.values(D.months||{}).forEach(function(m) {
     [].concat(m.projects||[], m.projectsVN||[]).forEach(function(p) {
@@ -12237,9 +12269,14 @@ function checkMorningNotification() {
       (p.groups||[]).forEach(function(g) {
         var gName = g.type || '';
         (g.rows||[]).forEach(function(r) {
-          if (r.upTime && r.upTime.slice(0,10) === today && !r.doneAt)
+          if (!r.dateTo || r.doneAt) return;
+          var k = pName + '|' + gName + '|' + (r.staff||'') + '|' + r.dateTo;
+          if (_seenMN[k]) return;
+          if (r.dateTo === today) {
+            _seenMN[k] = 1;
             ups.push({pj: pName, grp: gName, staff: r.staff||''});
-          if (r.dateTo && !r.doneAt && r.dateTo >= today && r.dateTo <= day3Str) {
+          } else if (r.dateTo > today && r.dateTo <= day3Str) {
+            _seenMN[k] = 1;
             var daysLeft = Math.round((new Date(r.dateTo)-now)/(1000*60*60*24));
             deadlines.push({pj: pName, grp: gName, staff: r.staff||'', date: r.dateTo, days: daysLeft});
           }
@@ -12247,6 +12284,24 @@ function checkMorningNotification() {
       });
     });
   });
+
+  // Gộp theo CÔNG TRÌNH (+ ngày với deadline): 1 công trình 1 dòng, bên dưới liệt kê hạng mục — người làm
+  function _groupByPjMN(arr) {
+    var order = [], map = {};
+    arr.forEach(function(it) {
+      var key = it.pj + '|' + (it.date||'');
+      if (!map[key]) { map[key] = {pj: it.pj, date: it.date, days: it.days, grps: [], _g: {}}; order.push(map[key]); }
+      var e = map[key];
+      if (!e._g[it.grp]) { e._g[it.grp] = {name: it.grp, staff: []}; e.grps.push(e._g[it.grp]); }
+      if (it.staff && e._g[it.grp].staff.indexOf(it.staff) < 0) e._g[it.grp].staff.push(it.staff);
+    });
+    return order;
+  }
+  function _pjDetailMN(e) {
+    return e.grps.map(function(g) {
+      return (g.name||'—') + (g.staff.length ? ' — <b>' + g.staff.join(', ') + '</b>' : '');
+    }).join(' &nbsp;·&nbsp; ');
+  }
 
   Object.entries((D.settings&&D.settings.staffProfiles)||{}).forEach(function(entry) {
     var name = entry[0], prof = entry[1];
@@ -12271,20 +12326,24 @@ function checkMorningNotification() {
     + '<div style="font-size:10px;opacity:.75;margin-top:1px">Cập nhật buổi sáng</div></div></div>';
 
   if (ups.length) {
+    var upPjs = _groupByPjMN(ups);
     html += '<div style="' + secStyle + '">'
-      + '<div style="' + hdrStyle('#c0392b') + '"><span>⏰</span> UP hôm nay <span style="background:#c0392b;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + ups.length + '</span></div>'
-      + ups.map(function(u){ return '<div style="' + rowStyle + '"><span style="' + dotStyle('#ef4444') + '"></span><span><b>' + u.pj + '</b>' + (u.grp?' · <span style="color:#555">'+u.grp+'</span>':'') + (u.staff?' · '+u.staff:'') + '</span></div>'; }).join('')
+      + '<div style="' + hdrStyle('#c0392b') + '"><span>⏰</span> UP hôm nay <span style="background:#c0392b;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + upPjs.length + ' công trình</span></div>'
+      + upPjs.map(function(e){
+          return '<div style="' + rowStyle + '"><span style="' + dotStyle('#ef4444') + '"></span><span><b>' + e.pj + '</b><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span></div>';
+        }).join('')
       + '</div>';
   }
 
   if (deadlines.length) {
     deadlines.sort(function(a,b){ return a.date.localeCompare(b.date); });
+    var dlPjs = _groupByPjMN(deadlines);
     html += '<div style="' + secStyle + '">'
-      + '<div style="' + hdrStyle('#d97706') + '"><span>🔔</span> Deadline trong 3 ngày <span style="background:#d97706;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + deadlines.length + '</span></div>'
-      + deadlines.map(function(d){
-          var urgColor = d.days===0?'#ef4444':d.days===1?'#f97316':'#f59e0b';
-          var urgText = d.days===0?'Hôm nay!':d.days===1?'Ngày mai':'Còn '+d.days+' ngày';
-          return '<div style="' + rowStyle + '"><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + d.pj + '</b>' + (d.grp?' · <span style="color:#555">'+d.grp+'</span>':'') + (d.staff?' · '+d.staff:'') + '</span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
+      + '<div style="' + hdrStyle('#d97706') + '"><span>🔔</span> Deadline trong 3 ngày <span style="background:#d97706;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + dlPjs.length + ' công trình</span></div>'
+      + dlPjs.map(function(e){
+          var urgColor = e.days===0?'#ef4444':e.days===1?'#f97316':'#f59e0b';
+          var urgText = e.days===0?'Hôm nay!':e.days===1?'Ngày mai':'Còn '+e.days+' ngày';
+          return '<div style="' + rowStyle + '"><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + e.pj + '</b><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
         }).join('')
       + '</div>';
   }

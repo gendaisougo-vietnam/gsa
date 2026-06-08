@@ -5,7 +5,16 @@ Chạy: python auto_test.py
 """
 
 import os, re, sys, time
-import esprima
+try:
+    import esprima
+except ImportError:
+    import subprocess
+    try:
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'esprima', '-q',
+                               '--break-system-packages'])
+    except subprocess.CalledProcessError:
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'esprima', '-q'])
+    import esprima
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(SCRIPT_DIR, 'index.html')

@@ -3899,10 +3899,11 @@ function getHolidays() {
 }
 
 function renderMonthGantt(pjs) {
-  // B4: Window đồng bộ projectTimeline qua _tlComputeWindow
-  // (1 tuần cuối tháng cũ + 4 tuần tháng mới, extend 42 nếu today rơi ngoài)
+  // Window: JP/International (担当者別工程表) dùng CHUNG cửa sổ với bảng 実施設計工程表
+  //   (_kouteiScreenWindow: từ đầu cửa sổ -> HẾT tháng tiếp theo) để 2 bảng khớp số ngày, dễ đối chiếu.
+  //   VN giữ _tlComputeWindow (đồng bộ với renderProjectTimeline của phía VN).
   const today = new Date(); today.setHours(0,0,0,0);
-  const W = _tlComputeWindow(D.activeMonth);
+  const W = (activeSection==='vn') ? _tlComputeWindow(D.activeMonth) : _kouteiScreenWindow();
   const { allDays: allDaysStr, todayStr, holidaySet, monthSpans } = W;
   const startStr = allDaysStr[0];
   const endStr   = allDaysStr[allDaysStr.length-1];

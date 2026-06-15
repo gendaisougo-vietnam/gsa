@@ -3054,10 +3054,14 @@ function _tlComputeWindow(refMonth) {
 }
 
 // Bar HTML — tràn -1px ra 2 bên theo pos để bar liền mạch (đè border)
-function _tlBarHtml(barColor, pos) {
+function _tlBarHtml(barColor, pos, dashed) {
   if (!barColor) return '';
   const barLeft  = (pos==='start'||pos==='only') ? '0' : '-1px';
   const barRight = (pos==='end'  ||pos==='only') ? '0' : '-1px';
+  if (dashed) {
+    // Lịch DỰ KIẾN: nét đôi đứt (đồng bộ với bảng 工程表)
+    return `<div style="position:absolute;top:50%;transform:translateY(-50%);left:${barLeft};right:${barRight};height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor};z-index:5"></div>`;
+  }
   return `<div style="position:absolute;top:50%;transform:translateY(-50%);left:${barLeft};right:${barRight};height:${GANTT_BAR_H}px;background:${barColor};z-index:5"></div>`;
 }
 
@@ -4071,7 +4075,8 @@ function renderMonthGantt(pjs) {
           const isFirst = from === dkStr || dkStr === startStr;
           const isLast = to === dkStr || dkStr === endStr;
           const pos = isFirst && isLast ? 'only' : isFirst ? 'start' : isLast ? 'end' : 'mid';
-          const bar = _tlBarHtml(bc, pos);
+          // Lịch dự kiến (tentative) -> nét đứt (đồng bộ bảng 工程表: theo đúng checkbox dự kiến)
+          const bar = _tlBarHtml(bc, pos, !!task.tentative);
           let upHtml = '';
           if (!isTrip && task.dateTo === dkStr) {
             if (task.isVN) {
@@ -6999,10 +7004,14 @@ function renderStaffSchedule(p) {
           : isNew ? '#5a9a35' : '#d4900a';
         const isFirstDay = r.dateFrom===dk;
         const isLastDay  = r.dateTo===dk;
+        const _dash = !!r.tentative;  // lịch dự kiến -> nét đứt
+        const _barStyle = _dash
+          ? `position:absolute;bottom:0;left:0;right:0;height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor}`
+          : `position:absolute;bottom:0;left:0;right:0;height:${GANTT_BAR_H}px;background:${barColor};border-radius:${isFirstDay?'1px 0 0 1px':isLastDay?'0 1px 1px 0':'0'}`;
         // B1: Bỏ label trên bar (đồng bộ với projectTimeline). Bar mảnh ở dưới container.
-        return `<div title="${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
+        return `<div title="${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'}${_dash?' · Dự kiến':''} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
           style="position:relative;height:13px;margin:1px 0;overflow:visible">
-          <div style="position:absolute;bottom:0;left:0;right:0;height:${GANTT_BAR_H}px;background:${barColor};border-radius:${isFirstDay?'1px 0 0 1px':isLastDay?'0 1px 1px 0':'0'}"></div>
+          <div style="${_barStyle}"></div>
         </div>`;
       }).join('');
       return `<td style="background:${bg};border-left:${borderL};padding:1px;vertical-align:top">${blocks}</td>`;

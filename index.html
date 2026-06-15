@@ -10461,6 +10461,116 @@ async function saveStaffAssignment(name){
   }catch(e){ alert('Lỗi cập nhật phân công: '+(e&&e.message?e.message:e)); }
 }
 
+// ── Thêm nhân sự mới (gán phòng + mặc định Thử việc) ──────────────────
+function openAddStaffModal(){
+  if (window._viewOnly || window._viewOnlyMode || (typeof _needsApproval==='function' && _needsApproval())) {
+    alert('Chế độ chỉ xem — không thêm được nhân sự.'); return;
+  }
+  // Đơn vị mặc định = phòng đang xem (tab hiện tại)
+  var curDept = window._staffDeptTab || '';
+  var units = (D.orgUnits||[]).filter(function(u){ return u.code!=='company'; })
+    .slice().sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
+  // unit khớp tên phòng đang xem (ưu tiên unit phòng, không phải nhóm con)
+  var defUnit = units.find(function(u){ return u.name_jp===curDept && u.kind!=='group'; })
+             || units.find(function(u){ return u.name_jp===curDept; });
+  var defUnitId = defUnit ? defUnit.id : (units[0]?units[0].id:'');
+  var _unitOpts = units.map(function(u){
+    return '<option value="'+u.id+'"'+(u.id===defUnitId?' selected':'')+'>'+(u.kind==='group'?'— ':'')+u.name_jp+'</option>';
+  }).join('');
+  var _titleArr=['取締役','所長','統括室長','室長','副室長','主任','副主任'];
+  var _titleOpts='<option value="" selected>(Nhân viên)</option>'+_titleArr.map(function(t){return '<option>'+t+'</option>';}).join('');
+  var _sel="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:13px;margin-top:3px";
+  showModal(
+    '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">➕ Thêm nhân sự mới</div>'
+    + '<div style="font-size:11px;color:var(--gray4);margin-bottom:14px">Nhân sự mới mặc định là <b style="color:#0f766e">🌱 Thử việc</b> (2 tháng kể từ hôm nay).</div>'
+    + '<div style="display:flex;flex-direction:column;gap:10px">'
+    + '<label style="font-size:12px;color:#374151;font-weight:600">Họ tên (đúng định dạng, vd: HAN ABC / SGN ABC)'
+    + '<input id="newStaffName" placeholder="HAN ..." style="'+_sel+'"></label>'
+    + '<label style="font-size:12px;color:#374151;font-weight:600">Phòng / Nhóm<select id="newStaffUnit" style="'+_sel+'">'+_unitOpts+'</select></label>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    + '<label style="font-size:12px;color:#374151;font-weight:600">Chức danh<select id="newStaffTitle" style="'+_sel+'">'+_titleOpts+'</select></label>'
+    + '<label style="font-size:12px;color:#374151;font-weight:600">Văn phòng<select id="newStaffOffice" style="'+_sel+'"><option value="">(tự nhận theo tên)</option><option value="HAN">HAN</option><option value="SGN">SGN</option></select></label>'
+    + '</div>'
+    + '<label style="font-size:12px;color:#374151;font-weight:600">Ngày bắt đầu thử việc'
+    + '<input id="newStaffStart" type="date" value="'+localDateStr(new Date())+'" style="'+_sel+'"></label>'
+    + '</div>'
+    + '<div class="modal-ft" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button class="btn" onclick="closeModal()">Hủy</button>'
+    + '<button class="btn btn-gold" onclick="confirmAddStaff()">➕ Tạo nhân sự</button>'
+    + '</div>'
+  );
+  setTimeout(function(){ var el=document.getElementById('newStaffName'); if(el) el.focus(); }, 60);
+}
+
+async function confirmAddStaff(){
+  var name=(document.getElementById('newStaffName').value||'').trim();
+  if(!name){ alert('Hãy nhập họ tên.'); return; }
+  D.settings.staffList = D.settings.staffList || [];
+  if(D.settings.staffList.indexOf(name)>=0 || (D.settings.staffProfiles||{})[name]){
+    alert('Đã có nhân sự tên này.'); return;
+  }
+  var unitId=document.getElementById('newStaffUnit').value;
+  var title=document.getElementById('newStaffTitle').value;
+  var office=document.getElementById('newStaffOffice').value
+    || (name.indexOf('SGN')===0?'SGN':name.indexOf('HAN')===0?'HAN':'');
+  var pStart=document.getElementById('newStaffStart').value||localDateStr(new Date());
+  var pEnd=_probationEndOf(pStart);
+  var T2R={'取締役':0,'所長':0,'統括室長':1,'室長':1,'副室長':2,'主任':3,'副主任':4,'':5};
+  var rank=(T2R[title]!=null?T2R[title]:5);
+  var today=localDateStr(new Date());
+
+  // 1) staffList + profile (thử việc)
+  D.settings.staffList.push(name);
+  if(!D.settings.staffProfiles) D.settings.staffProfiles={};
+  D.settings.staffProfiles[name]={
+    role:'', salaryGross:0, salaryNet:0, contractEnd:'',
+    order:D.settings.staffList.indexOf(name), status:'active', leaveDate:'', avatarUrl:'',
+    empType:'probation', probationStart:pStart, probationEnd:pEnd,
+    leaves:[], lateLog:[], trips:[]
+  };
+
+  try{
+    if(window._sbReady){
+      // 2) insert staff row -> lấy id
+      var ins=await _sb.from('staff').insert({
+        full_name:name, short_name:'',
+        office: isManagementStyle(name)?'Management':(office||''),
+        role:'', salary_gross:0, salary_net:0,
+        sort_order:D.settings.staffList.length, status:'active', is_active:true,
+        emp_type:'probation', probation_start:pStart, probation_end:pEnd
+      }).select().single();
+      if(ins&&ins.error) throw ins.error;
+      var sid=ins&&ins.data?ins.data.id:null;
+      if(sid){
+        (window._sbStaffIdByName=window._sbStaffIdByName||{})[name]=sid;
+        (D.staffById=D.staffById||{})[sid]=ins.data;
+        // 3) assignment cho phòng (note='new' -> chỉ hiện từ hôm nay trở đi, tháng cũ không bị ảnh hưởng)
+        if(unitId){
+          var rec={staff_id:sid, unit_id:unitId, title_jp:title, rank:rank, is_primary:true,
+            manager_staff_id:null, comanager_staff_id:null, reports_to_top:false,
+            is_bim:false, is_shoene:false, office:office||'HAN', date_from:today, note:'new'};
+          var ains=await _sb.from('assignments').insert(rec).select().single();
+          if(ains&&ains.error) throw ains.error;
+          if(ains&&ains.data) rec.id=ains.data.id;
+          (D.assignments=D.assignments||[]).push(rec);
+        }
+      }
+      // 4) đồng bộ staff_list trong settings
+      try{ if(window._sbSettingsId) await _sb.from('settings').update({staff_list:D.settings.staffList}).eq('id',window._sbSettingsId); }catch(e){}
+    }
+  }catch(e){
+    alert('Lỗi lưu lên CSDL: '+(e&&e.message?e.message:e)+'\n(Đã thêm tạm ở máy, hãy thử lại khi có mạng.)');
+  }
+
+  if(typeof persistD==='function') persistD();
+  if(typeof save==='function') save();
+  closeModal();
+  if(typeof renderStaffPage==='function') renderStaffPage();
+  var po=document.getElementById('pageOrg'); if(po && po.style.display!=='none' && typeof renderOrgChart==='function') renderOrgChart();
+  if(typeof toast==='function') toast('✓ Đã thêm nhân sự thử việc: '+name);
+  try{ _sbAuditLog('create','staff',name,'Thêm nhân sự mới (thử việc): '+name); }catch(e){}
+}
+
 // Lấy phòng (gom nhóm -> phòng cha) + cấp bậc của từng nhân sự từ assignments (đang hiệu lực)
 // Phân công ĐANG hiệu lực TẠI THỜI ĐIỂM `asOf` (mặc định = hôm nay), theo lịch sử date_from/date_to.
 // Đổi nhóm/phòng chỉ ảnh hưởng từ thời điểm đó trở đi; tháng cũ giữ phân công cũ.
@@ -10663,7 +10773,9 @@ function renderStaffPage() {
   sortedStaff.forEach(s=>{ const di=_orgInfo[s]; if(di&&di.rank===0) return; const dn=(di&&di.deptName)||'Chưa phân công'; if(dn==='経営企画室') return; if(!_seen[dn]){ _seen[dn]=1; _deptList.push({name:dn, sort:(di&&di.deptSort!=null?di.deptSort:99)}); } });
   _deptList.sort((a,b)=>a.sort-b.sort);
   if(!window._staffDeptTab || !_deptList.some(d=>d.name===window._staffDeptTab)) window._staffDeptTab=(_deptList[0]||{}).name||'';
-  const _deptTabHtml='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+_deptList.map(d=>{ const act=d.name===window._staffDeptTab; return '<button onclick="window._staffDeptTab=\''+d.name+'\';renderStaffPage()" style="padding:6px 12px;border-radius:9px;border:1px solid '+(act?'#1e40af':'#d1d5db')+';background:'+(act?'#1e40af':'#fff')+';color:'+(act?'#fff':'#374151')+';font-weight:'+(act?'600':'400')+';cursor:pointer;font-family:inherit;line-height:1.2;text-align:center"><div style="font-size:12.5px">'+d.name+'</div><div style="font-size:9.5px;opacity:.8">'+(_deptEN[d.name]||'')+'</div></button>'; }).join('')+'</div>';
+  const _addStaffBtn = (typeof _needsApproval==='function' && _needsApproval()) ? '' :
+    '<button onclick="openAddStaffModal()" title="Thêm nhân sự mới (mặc định thử việc)" style="margin-left:auto;align-self:center;padding:8px 14px;border-radius:9px;border:none;background:#0f766e;color:#fff;font-weight:600;cursor:pointer;font-family:inherit;font-size:12.5px;white-space:nowrap">➕ Thêm nhân sự</button>';
+  const _deptTabHtml='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-start">'+_deptList.map(d=>{ const act=d.name===window._staffDeptTab; return '<button onclick="window._staffDeptTab=\''+d.name+'\';renderStaffPage()" style="padding:6px 12px;border-radius:9px;border:1px solid '+(act?'#1e40af':'#d1d5db')+';background:'+(act?'#1e40af':'#fff')+';color:'+(act?'#fff':'#374151')+';font-weight:'+(act?'600':'400')+';cursor:pointer;font-family:inherit;line-height:1.2;text-align:center"><div style="font-size:12.5px">'+d.name+'</div><div style="font-size:9.5px;opacity:.8">'+(_deptEN[d.name]||'')+'</div></button>'; }).join('')+_addStaffBtn+'</div>';
 
   // Max for performance bar
   const maxTotal = Math.max(1, ...sortedStaff.map(s=>sd[s]?.n+sd[s]?.r||0));

@@ -1059,6 +1059,8 @@ async function sbLoadAll() {
       contractEnd: s.contract_end || '', order: s.sort_order,
       status: s.status || 'active', leaveDate: s.leave_date || '',
       avatarUrl: s.avatar_url || '',
+      empType: s.emp_type || 'official',
+      probationStart: s.probation_start || '', probationEnd: s.probation_end || '',
       leaves: [], lateLog: [], trips: [],
     };
   }
@@ -1312,7 +1314,7 @@ async function sbPushAll() {
   });
   for (var _btl=0; _btl<_tlRecs.length; _btl+=100) { try { await _sb.from('tl_tasks').upsert(_tlRecs.slice(_btl,_btl+100), {onConflict:'id'}); } catch(e) { _errs.push('tl_tasks@'+_btl+': '+e.message); } }
   // 5. Staff profiles
-  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||null, sort_order:prof.order||0, status:prof.status||'active', leave_date:prof.leaveDate||null, avatar_url:prof.avatarUrl||null }; });
+  var _stRecs = Object.entries(D.settings.staffProfiles||{}).map(function(kv){ var name=kv[0],prof=kv[1]; return { full_name:name, role:prof.role||'', salary_gross:prof.salaryGross||0, salary_net:prof.salaryNet||0, contract_end:prof.contractEnd||null, sort_order:prof.order||0, status:prof.status||'active', leave_date:prof.leaveDate||null, avatar_url:prof.avatarUrl||null, emp_type:prof.empType||'official', probation_start:prof.probationStart||null, probation_end:prof.probationEnd||null }; });
   if (_stRecs.length) try { await _sb.from('staff').upsert(_stRecs, {onConflict:'full_name'}); } catch(e) { _errs.push('staff: '+e.message); }
   if (_errs.length) console.warn('[sbPushAll] lỗi:', _errs);
   return _errs;
@@ -8690,9 +8692,86 @@ function renderContractBlock(staffName, prof, todayStr) {
     + '</div>';
 }
 
+// Badge nhỏ "🌱 Thử việc" (màu teal) để gắn cạnh tên — phân biệt với chính thức
+function _probationBadgeHtml(name, small) {
+  if (!isProbation(name)) return '';
+  var prof = getStaffProfile(name);
+  var today = localDateStr(new Date());
+  var end = prof.probationEnd || '';
+  var over = end && end < today;
+  var pad = small ? '2px 8px' : '3px 10px';
+  var fs = small ? '10px' : '11px';
+  var bg = over ? '#fde68a' : '#ccfbf1';
+  var co = over ? '#92400e' : '#0f766e';
+  var label = over ? '⏳ Hết thử việc — chờ xác nhận' : '🌱 Thử việc';
+  var tip = end ? (' title="Thử việc đến ' + end + '"') : '';
+  return '<span' + tip + ' style="display:inline-block; padding:' + pad + '; background:' + bg + '; color:' + co + '; font-size:' + fs + '; font-weight:700; border-radius:99px;">' + label + '</span>';
+}
+
+// Khối thử việc trong modal chi tiết nhân sự
+function renderProbationBlock(s, prof, today) {
+  var isP = (prof.empType || 'official') === 'probation';
+  var start = prof.probationStart || '';
+  var end = prof.probationEnd || (start ? _probationEndOf(start) : '');
+  var over = isP && end && end < today;
+  var dueSoon = isP && end && end >= today;
+  var daysLeft = end ? Math.round((new Date(end+'T00:00:00') - new Date(today+'T00:00:00'))/86400000) : null;
+
+  var sel = '<select onchange="setEmpType(\'' + x(s) + '\', this.value)" '
+    + 'style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:12px;font-weight:600">'
+    + '<option value="official"' + (!isP?' selected':'') + '>● Chính thức</option>'
+    + '<option value="probation"' + (isP?' selected':'') + '>🌱 Thử việc</option>'
+    + '</select>';
+
+  var html = '<div style="margin-bottom:12px;padding:10px 12px;border-radius:var(--r);border:1px solid '
+    + (isP ? '#5eead4' : '#e5e7eb') + ';background:' + (isP ? '#f0fdfa' : '#fff') + '">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:' + (isP?'10px':'0') + '">'
+    + '<span style="font-size:11px;font-weight:700;color:#0f766e;text-transform:uppercase;letter-spacing:.06em">🧑‍💼 Loại nhân sự</span>'
+    + sel + '</div>';
+
+  if (isP) {
+    var reviews = _probationReviewDates(start, end);
+    var revHtml = reviews.length
+      ? reviews.map(function(d){
+          var done = d < today;
+          var isToday = d === today;
+          var col = isToday ? '#dc2626' : done ? '#9ca3af' : '#0f766e';
+          var mark = done ? '✓' : isToday ? '🔴' : '○';
+          return '<span style="display:inline-block;font-size:10px;color:'+col+';margin-right:8px;'+(done?'text-decoration:line-through':'')+'">'+mark+' '+d.slice(5).replace('-','/')+'</span>';
+        }).join('')
+      : '<span style="font-size:10px;color:var(--gray3);font-style:italic">Chưa đủ chu kỳ review</span>';
+
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:8px">'
+      + '<label style="font-size:11px;color:#6b7280">Bắt đầu thử việc'
+      + '<input type="date" value="' + start + '" onchange="setProbationStart(\'' + x(s) + '\', this.value)" '
+      + 'style="width:100%;margin-top:2px;padding:4px 7px;border:1px solid #5eead4;border-radius:6px;font-size:11px"></label>'
+      + '<label style="font-size:11px;color:#6b7280">Kết thúc (tự tính +2 tháng)'
+      + '<input type="date" value="' + end + '" readonly '
+      + 'style="width:100%;margin-top:2px;padding:4px 7px;border:1px solid #e5e7eb;border-radius:6px;font-size:11px;background:#f9fafb;color:#374151"></label>'
+      + '</div>';
+
+    html += '<div style="margin-bottom:8px"><div style="font-size:10px;font-weight:600;color:#6b7280;margin-bottom:4px">📋 Lịch phỏng vấn review (mỗi 2 tuần)</div>' + revHtml + '</div>';
+
+    if (over) {
+      html += '<div style="padding:8px 10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-top:6px">'
+        + '<div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:7px">⏳ Đã hết thời gian thử việc — hãy xác nhận:</div>'
+        + '<div style="display:flex;gap:8px">'
+        + '<button onclick="confirmProbationOfficial(\'' + x(s) + '\')" style="flex:1;padding:8px;background:#10b981;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">✅ Thành chính thức</button>'
+        + '<button onclick="confirmProbationLeave(\'' + x(s) + '\')" style="flex:1;padding:8px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">🚪 Cho nghỉ việc</button>'
+        + '</div></div>';
+    } else if (dueSoon) {
+      var lbl = daysLeft === 0 ? 'Hết thử việc hôm nay' : daysLeft === 1 ? 'Còn 1 ngày' : 'Còn ' + daysLeft + ' ngày';
+      html += '<div style="font-size:11px;color:#0f766e;font-weight:600;text-align:center;padding:4px;background:#ccfbf1;border-radius:6px">🌱 ' + lbl + ' thử việc</div>';
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
 function getStaffProfile(name) {
   if (!D.settings.staffProfiles) D.settings.staffProfiles = {};
-  if (!D.settings.staffProfiles[name]) D.settings.staffProfiles[name] = {role:'',salaryGross:0,salaryNet:0,leaves:[],order:99,contractEnd:'',status:'active',leaveDate:'',avatarUrl:''};
+  if (!D.settings.staffProfiles[name]) D.settings.staffProfiles[name] = {role:'',salaryGross:0,salaryNet:0,leaves:[],order:99,contractEnd:'',status:'active',leaveDate:'',avatarUrl:'',empType:'official',probationStart:'',probationEnd:''};
   // Auto-set Management role và order=0 cho HAN トゥアン
   if (name === 'HAN トゥアン') {
     const p = D.settings.staffProfiles[name];
@@ -8700,6 +8779,80 @@ function getStaffProfile(name) {
     if (!p.order || p.order === 99) p.order = 0;
   }
   return D.settings.staffProfiles[name];
+}
+
+// ── Thử việc / Chính thức (probation) ────────────────────────────────
+// Cộng n THÁNG vào 1 ngày 'YYYY-MM-DD' (xử lý tràn ngày: 31/01 +1 -> 28/02)
+function _addMonths(dateStr, n) {
+  if (!dateStr) return '';
+  var parts = String(dateStr).slice(0,10).split('-');
+  var y = +parts[0], m = +parts[1], d = +parts[2];
+  if (!y || !m || !d) return '';
+  var idx = (m - 1) + n;
+  var ny = y + Math.floor(idx / 12);
+  var nm = ((idx % 12) + 12) % 12;          // 0..11
+  var lastDay = new Date(ny, nm + 1, 0).getDate();
+  var nd = Math.min(d, lastDay);
+  return ny + '-' + String(nm + 1).padStart(2,'0') + '-' + String(nd).padStart(2,'0');
+}
+// Thử việc mặc định 2 tháng kể từ ngày bắt đầu
+function _probationEndOf(startStr) { return _addMonths(startStr, 2); }
+// Các mốc phỏng vấn review: cứ 2 tuần 1 lần kể từ ngày bắt đầu cho tới hết thử việc
+function _probationReviewDates(startStr, endStr) {
+  var out = [];
+  if (!startStr || !endStr) return out;
+  var d = new Date(startStr.slice(0,10) + 'T00:00:00');
+  var end = new Date(endStr.slice(0,10) + 'T00:00:00');
+  for (var i = 0; i < 12; i++) {
+    d = new Date(d.getTime()); d.setDate(d.getDate() + 14);
+    if (d > end) break;
+    out.push(localDateStr(d));
+  }
+  return out;
+}
+function isProbation(name) { return (getStaffProfile(name).empType || 'official') === 'probation'; }
+
+// Đổi trạng thái Chính thức <-> Thử việc; khi chuyển sang thử việc tự set mốc thời gian
+function setEmpType(name, type) {
+  var prof = getStaffProfile(name);
+  if (type === 'probation') {
+    prof.empType = 'probation';
+    if (!prof.probationStart) {
+      var t = localDateStr(new Date());
+      prof.probationStart = t;
+    }
+    prof.probationEnd = _probationEndOf(prof.probationStart);
+    saveStaffProfile(name, 'empType', 'probation');
+    saveStaffProfile(name, 'probationStart', prof.probationStart);
+    saveStaffProfile(name, 'probationEnd', prof.probationEnd);
+  } else {
+    prof.empType = 'official';
+    saveStaffProfile(name, 'empType', 'official');
+  }
+  persistD();
+  try { refreshStaffDetailModal(); } catch(e) {}
+  try { renderStaffPage(); } catch(e) {}
+}
+// Đổi ngày bắt đầu thử việc -> tự tính lại ngày kết thúc (+2 tháng)
+function setProbationStart(name, val) {
+  var prof = getStaffProfile(name);
+  prof.probationStart = val || '';
+  prof.probationEnd = val ? _probationEndOf(val) : '';
+  saveStaffProfile(name, 'probationStart', prof.probationStart);
+  saveStaffProfile(name, 'probationEnd', prof.probationEnd);
+  persistD();
+  try { refreshStaffDetailModal(); } catch(e) {}
+  try { renderStaffPage(); } catch(e) {}
+}
+// Xác nhận hết thử việc -> chính thức
+function confirmProbationOfficial(name) {
+  if (!confirm('Xác nhận chuyển ' + name + ' thành nhân viên CHÍNH THỨC?')) return;
+  setEmpType(name, 'official');
+  if (typeof toast === 'function') toast('✅ ' + name + ' đã thành nhân viên chính thức');
+}
+// Hết thử việc -> cho nghỉ (dùng luồng nghỉ việc sẵn có)
+function confirmProbationLeave(name) {
+  try { openLeavingModal(name); } catch(e) { if (typeof toast==='function') toast('Mở hộp nghỉ việc lỗi'); }
 }
 
 // ── Staff status helpers (Step 2 of staff add/leave feature) ──────────
@@ -9889,12 +10042,13 @@ async function saveStaffProfile(name, field, val) {
   const COL_STAFF = {
     role:'role', salaryGross:'salary_gross', salaryNet:'salary_net',
     contractEnd:'contract_end', order:'sort_order',
-    status:'status', leaveDate:'leave_date', avatarUrl:'avatar_url'
+    status:'status', leaveDate:'leave_date', avatarUrl:'avatar_url',
+    empType:'emp_type', probationStart:'probation_start', probationEnd:'probation_end'
   };
   const col = COL_STAFF[field];
   if (col && window._sbReady) {
     // DATE columns: '' → null (Supabase DATE từ chối empty string)
-    const _isDate = (col === 'contract_end' || col === 'leave_date');
+    const _isDate = (col === 'contract_end' || col === 'leave_date' || col === 'probation_start' || col === 'probation_end');
     const _v = (_isDate && (val === '' || val === undefined)) ? null : val;
     try {
       const { error } = await _sb.from('staff').update({ [col]: _v }).eq('full_name', name);
@@ -10697,7 +10851,7 @@ function renderStaffPage() {
       return _deptHdr(s) + `<div class="staff-card" style="background:${_cardBg}; border:0.5px solid #e5e7eb; border-radius:12px; overflow:hidden;${isStaffLeft(s)?' opacity:0.7; background:#f3f4f6; border-left:4px solid #6b7280;':''}">
 
         <!-- Color stripe -->
-        <div style="height:4px; background:${leaveToday ? '#E74C3C' : _avt.text};"></div>
+        <div style="height:4px; background:${leaveToday ? '#E74C3C' : isProbation(s) ? '#14b8a6' : _avt.text};"></div>
 
         <!-- Header: avatar 128px LEFT + (name/role/badges TRÊN, buttons DƯỚI) RIGHT -->
         <div style="padding:16px; display:flex; gap:16px; align-items:stretch;">
@@ -10708,8 +10862,9 @@ function renderStaffPage() {
               <input value="${x(_roleTxt)}" placeholder="Chức vụ chưa cập nhật"
                 style="background:transparent; border:none; color:#6b7280; font-size:13px; font-style:${_roleTxt?'normal':'italic'}; outline:none; width:100%; font-family:inherit; padding:0; line-height:1.3;"
                 onchange="saveStaffProfile('${s}','role',this.value)">
-              ${(leaveToday || isStaffLeaving(s)) ? `
+              ${(leaveToday || isStaffLeaving(s) || isProbation(s)) ? `
                 <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
+                  ${isProbation(s) ? _probationBadgeHtml(s) : ''}
                   ${leaveToday ? `<span style="background:#fee2e2; color:#991b1b; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:600;">🏖 Nghỉ hôm nay</span>` : ''}
                   ${isStaffLeaving(s) ? (() => {
                     const _d = daysToLeave(s);
@@ -11564,6 +11719,8 @@ async function saveSettings() {
         var newNames = (D.settings.staffList || []).filter(function(n){ return !existingNames.includes(n); });
 
         if (newNames.length > 0) {
+          var _pStart = localDateStr(new Date());
+          var _pEnd = _probationEndOf(_pStart);
           var inserts = newNames.map(function(name, idx) {
             return {
               full_name: name,
@@ -11577,7 +11734,10 @@ async function saveSettings() {
               salary_net: 0,
               sort_order: (D.settings.staffList || []).length + idx,
               status: 'active',
-              is_active: true
+              is_active: true,
+              emp_type: 'probation',          // nhân sự mới mặc định = thử việc
+              probation_start: _pStart,
+              probation_end: _pEnd
             };
           });
 
@@ -11593,6 +11753,7 @@ async function saveSettings() {
                   role:'', salaryGross:0, salaryNet:0, contractEnd:'',
                   order: D.settings.staffList.indexOf(name),
                   status:'active', leaveDate:'',
+                  empType:'probation', probationStart:_pStart, probationEnd:_pEnd,
                   leaves:[], lateLog:[], trips:[]
                 };
               }
@@ -11809,6 +11970,7 @@ function renderStaffDetailModalContent(s) {
           onchange="saveStaffProfile('${s}','role',this.value);refreshStaffDetailModal()">
         <div>
           <span style="display:inline-block; padding:3px 10px; background:${_avt.bg}; color:${_avt.text}; font-size:11px; font-weight:600; border-radius:99px; letter-spacing:0.5px;">${_office}</span>
+          ${isProbation(s) ? `<span style="margin-left:6px">${_probationBadgeHtml(s)}</span>` : ''}
           ${leaveToday ? `<span style="display:inline-block; margin-left:6px; padding:3px 10px; background:#fee2e2; color:#991b1b; font-size:11px; font-weight:600; border-radius:99px;">🏖 Nghỉ hôm nay</span>` : ''}
           ${isStaffLeaving(s) ? (() => {
             const _d = daysToLeave(s);
@@ -11930,6 +12092,9 @@ function renderStaffDetailModalContent(s) {
         <span style="font-size:11px;color:var(--gray4)">OT tháng này:</span>
         <span style="font-weight:700;color:var(--orange)">${v.ot.toFixed(1)}h</span>
       </div>`:''}
+
+      <!-- Loại nhân sự: Chính thức / Thử việc -->
+      ${renderProbationBlock(s, prof, today)}
 
       <!-- Contract / Salary Review Date -->
       ${renderContractBlock(s, prof, today)}
@@ -12303,15 +12468,37 @@ function checkMorningNotification(force) {
     }).join(' &nbsp;·&nbsp; ');
   }
 
+  var probReviews = [], probEnds = [];
   Object.entries((D.settings&&D.settings.staffProfiles)||{}).forEach(function(entry) {
     var name = entry[0], prof = entry[1];
     (prof.leaves||[]).forEach(function(l) {
       if (l.from <= today && (!l.to || l.to >= today))
         leaves.push({name: name, session: l.session==='morning'?'Sáng':l.session==='afternoon'?'Chiều':'Cả ngày'});
     });
+    // Thử việc: nhắc phỏng vấn review (mỗi 2 tuần) + sắp/đã hết thử việc
+    if ((prof.empType||'official') === 'probation' && (prof.status||'active') !== 'left') {
+      var pStart = prof.probationStart || '';
+      var pEnd = prof.probationEnd || (pStart ? _probationEndOf(pStart) : '');
+      if (pStart && pEnd) {
+        var revs = _probationReviewDates(pStart, pEnd);
+        // mốc review rơi vào hôm nay hoặc trong 3 ngày tới
+        revs.forEach(function(d){
+          if (d >= today && d <= day3Str) {
+            var dl = Math.round((new Date(d+'T00:00:00') - new Date(today+'T00:00:00'))/86400000);
+            probReviews.push({name: name, date: d, days: dl});
+          }
+        });
+        // hết thử việc: đã quá hạn (cần xác nhận) hoặc trong 3 ngày tới
+        if (pEnd <= day3Str) {
+          var de = Math.round((new Date(pEnd+'T00:00:00') - new Date(today+'T00:00:00'))/86400000);
+          probEnds.push({name: name, date: pEnd, days: de});
+        }
+      }
+    }
   });
 
-  if (ups.length === 0 && leaves.length === 0 && deadlines.length === 0) return;
+  if (ups.length === 0 && leaves.length === 0 && deadlines.length === 0
+      && probReviews.length === 0 && probEnds.length === 0) return;
 
   var todayFmt = today.split('-').reverse().join('/');
   var secStyle = 'margin-bottom:14px';
@@ -12352,6 +12539,29 @@ function checkMorningNotification(force) {
     html += '<div style="' + secStyle + '">'
       + '<div style="' + hdrStyle('#7d6608') + '"><span>🏖</span> Nhân sự nghỉ hôm nay <span style="background:#7d6608;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + leaves.length + '</span></div>'
       + leaves.map(function(l){ return '<div style="' + rowStyle + '"><span style="' + dotStyle('#eab308') + '"></span><span><b>' + l.name + '</b> · ' + l.session + '</span></div>'; }).join('')
+      + '</div>';
+  }
+
+  if (probReviews.length) {
+    probReviews.sort(function(a,b){ return a.date.localeCompare(b.date); });
+    html += '<div style="' + secStyle + '">'
+      + '<div style="' + hdrStyle('#0f766e') + '"><span>📋</span> Phỏng vấn review thử việc <span style="background:#0f766e;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + probReviews.length + '</span></div>'
+      + probReviews.map(function(r){
+          var urg = r.days===0?'Hôm nay!':r.days===1?'Ngày mai':'Còn '+r.days+' ngày';
+          return '<div style="' + rowStyle + '"><span style="' + dotStyle('#14b8a6') + '"></span><span style="flex:1"><b>' + r.name + '</b> · review 2 tuần</span><span style="font-size:10px;background:#0f766e;color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urg+'</span></div>';
+        }).join('')
+      + '</div>';
+  }
+
+  if (probEnds.length) {
+    probEnds.sort(function(a,b){ return a.date.localeCompare(b.date); });
+    html += '<div style="' + secStyle + '">'
+      + '<div style="' + hdrStyle('#b45309') + '"><span>🌱</span> Hết hạn thử việc <span style="background:#b45309;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + probEnds.length + '</span></div>'
+      + probEnds.map(function(r){
+          var urgColor = r.days<=0?'#ef4444':r.days===1?'#f97316':'#f59e0b';
+          var urg = r.days<0?'Quá hạn '+(-r.days)+' ngày — xác nhận!':r.days===0?'Hôm nay — xác nhận!':r.days===1?'Ngày mai':'Còn '+r.days+' ngày';
+          return '<div style="' + rowStyle + '"><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + r.name + '</b> · hết thử việc ' + r.date.split('-').reverse().join('/') + '</span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urg+'</span></div>';
+        }).join('')
       + '</div>';
   }
 

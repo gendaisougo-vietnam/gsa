@@ -1205,7 +1205,13 @@ async function sbLoadAll() {
         id: t.id, lv: t.lv, name: t.name, start: t.start_date,
         end: t.end_date, upDate: t.up_date, actual: t.actual_date,
         content: t.content, progress: t.progress, status: t.status,
-        dep: t.dep, staff: t.staff, note: t.note, parentGroup: t.parent_group
+        dep: t.dep, staff: t.staff, note: t.note, parentGroup: t.parent_group,
+        duration: (t.duration==null?'':t.duration),
+        deps: Array.isArray(t.deps) ? t.deps : (t.dep?[{id:t.dep,type:'FS',lag:0}]:[]),
+        auto: (t.auto_sched===undefined||t.auto_sched===null? true : t.auto_sched),
+        isMilestone: !!t.is_milestone, deadline: t.deadline||'',
+        baselineStart: t.baseline_start||'', baselineEnd: t.baseline_end||'',
+        constraintType: t.constraint_type||'', constraintDate: t.constraint_date||''
       }))
     };
     if (p.section === 'vn') result.months[p.month_id].projectsVN.push(pObj);
@@ -1309,7 +1315,7 @@ async function sbPushAll() {
   var _tlRecs = []; var _stl = 0;
   Object.values(D.months||{}).forEach(function(m){
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
-      (p.tlTasks||[]).forEach(function(t){ _tlRecs.push({ id:t.id, project_id:p.id, lv:t.lv||'task', name:t.name||'', start_date:t.start||null, end_date:t.end||null, up_date:t.upDate||null, actual_date:t.actual||null, content:t.content||'', progress:t.progress||0, status:t.status||'', dep:t.dep||'', staff:t.staff||[], note:t.note||'', parent_group:t.parentGroup||null, sort_order:_stl++ }); });
+      (p.tlTasks||[]).forEach(function(t){ _tlRecs.push(Object.assign({ id:t.id, project_id:p.id, lv:t.lv||'task', name:t.name||'', start_date:t.start||null, end_date:t.end||null, up_date:t.upDate||null, actual_date:t.actual||null, content:t.content||'', progress:t.progress||0, status:t.status||'', dep:t.dep||'', staff:t.staff||[], note:t.note||'', parent_group:t.parentGroup||null, sort_order:_stl++ }, _tlExtraCols(t))); });
     });
   });
   for (var _btl=0; _btl<_tlRecs.length; _btl+=100) { try { await _sb.from('tl_tasks').upsert(_tlRecs.slice(_btl,_btl+100), {onConflict:'id'}); } catch(e) { _errs.push('tl_tasks@'+_btl+': '+e.message); } }
@@ -2598,6 +2604,7 @@ async function _sbDumpMonthEntities(mid) {
         staff: Array.isArray(t.staff) ? t.staff : (t.staff ? [t.staff] : []),
         note: t.note || '', parent_group: t.parentGroup || null,
         sort_order: ti,
+        ..._tlExtraCols(t)
       });
     });
   });
@@ -4425,6 +4432,7 @@ function updateHeroForProject(p) {
 
 function getTlTasks(p) {
   if (!p.tlTasks) p.tlTasks = [];
+  try { p.tlTasks.forEach(function(t){ if(typeof _tlNormTask==='function') _tlNormTask(t); }); } catch(e){}
   return p.tlTasks;
 }
 
@@ -4455,6 +4463,20 @@ function saveTlTask(pjId, task, insertAfterTaskId) {
   save();
 }
 
+// Cột MS-Project bổ sung cho tl_tasks (dùng chung cho mọi nơi ghi DB)
+function _tlExtraCols(t){
+  return {
+    duration: (t.duration===''||t.duration==null)?null:(+t.duration),
+    deps: Array.isArray(t.deps)?t.deps:[],
+    auto_sched: (t.auto===undefined?true:!!t.auto),
+    is_milestone: !!t.isMilestone,
+    deadline: t.deadline||null,
+    baseline_start: t.baselineStart||null,
+    baseline_end: t.baselineEnd||null,
+    constraint_type: t.constraintType||null,
+    constraint_date: t.constraintDate||null
+  };
+}
 // ── Supabase upsert cho 1 tl_task (fire-and-forget với verify log) ───────
 function _sbUpsertTlTask(pjId, task) {
   if (!window._sbReady) return;
@@ -4467,7 +4489,8 @@ function _sbUpsertTlTask(pjId, task) {
     content:task.content||'', progress:task.progress||0,
     status:task.status||'', dep:task.dep||'',
     staff:task.staff||[], note:task.note||'', parent_group:task.parentGroup||null,
-    sort_order: idx >= 0 ? idx : 0
+    sort_order: idx >= 0 ? idx : 0,
+    ..._tlExtraCols(task)
   };
   console.log('[tl upsert] →', task.name, '| dep:', task.dep||'(none)', '| start:', task.start, '| end:', task.end, '| rec:', rec);
   _sb.from('tl_tasks').upsert(rec, { onConflict:'id' })
@@ -4508,7 +4531,8 @@ async function _sbResyncAllTlTaskOrder(pjId) {
       staff: t.staff || [],
       note: t.note || '',
       parent_group: t.parentGroup || null,
-      sort_order: idx
+      sort_order: idx,
+      ..._tlExtraCols(t)
     };
   });
 
@@ -4531,9 +4555,15 @@ function deleteTlTask(pjId, taskId) {
   if (!p || !p.tlTasks) return;
   const deletedTask = p.tlTasks.find(t=>t.id===taskId);
   if (!deletedTask) return;
-  // Bridge: task phụ thuộc vào task bị xóa → kế thừa dep của task bị xóa
-  const relinkTasks = p.tlTasks.filter(t=>t.dep===taskId);
-  relinkTasks.forEach(t=>{ t.dep = deletedTask.dep || ''; });
+  // Bridge: task phụ thuộc vào task bị xóa → kế thừa việc-trước của task bị xóa (cả dep cũ lẫn deps[])
+  const _inheritDeps = Array.isArray(deletedTask.deps) ? deletedTask.deps : (deletedTask.dep?[{id:deletedTask.dep,type:'FS',lag:0}]:[]);
+  const relinkTasks = p.tlTasks.filter(t=> t.id!==taskId && (
+    (t.dep===taskId) || (Array.isArray(t.deps) && t.deps.some(d=>d.id===taskId)) ));
+  relinkTasks.forEach(t=>{
+    let nd = (Array.isArray(t.deps)?t.deps:[]).filter(d=>d.id!==taskId);
+    _inheritDeps.forEach(id2=>{ if(id2.id && id2.id!==t.id && !nd.some(d=>d.id===id2.id)) nd.push({id:id2.id,type:'FS',lag:0}); });
+    t.deps = nd; t.dep = (nd[0]&&nd[0].id)||'';
+  });
   p.tlTasks = p.tlTasks.filter(t=>t.id!==taskId);
 
   // Sau khi p.tlTasks đã được cập nhật, xây dựng tập ID còn lại để orphan cleanup
@@ -4553,12 +4583,8 @@ function deleteTlTask(pjId, taskId) {
   }
 
   save();
-  // Cascade từ parent của task bị xóa (nếu có)
-  var cascadedTasks = [];
-  if (deletedTask.dep) {
-    cascadedTasks = cascadeTlTaskDeps(pjId, deletedTask.dep);
-    if (cascadedTasks.length > 0) save();
-  }
+  // Lên lịch lại toàn dự án bằng engine (FS/SS/FF/SF + lag)
+  var cascadedTasks = (typeof recalcTlProject==='function') ? recalcTlProject(pjId) : [];
   // Supabase: xóa task, xóa groups + rows tương ứng (rows auto-cascade nhưng xóa explicit để chắc)
   if (window._sbReady) {
     _sb.from('tl_tasks').delete().eq('id', taskId)
@@ -4676,7 +4702,12 @@ function openTlTaskModal(pjId, taskId, parentGroupId, insertAfterTaskId) {
 
   <!-- Tính ngày từ ngày bắt đầu + số ngày làm -->
   <div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:6px;padding:10px 12px;margin-bottom:12px">
-    <div style="font-size:11px;font-weight:600;color:#1a5276;margin-bottom:8px">📅 Tính ngày kết thúc theo ngày làm việc</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:11px;font-weight:600;color:#1a5276">📅 Tính ngày theo ngày làm việc</span>
+      <label style="font-size:11px;color:#1a5276;display:flex;align-items:center;gap:5px;cursor:pointer" title="Bật: máy tự tính ngày theo việc-trước + số ngày. Tắt: ghim ngày thủ công, không bị dời.">
+        <input type="checkbox" id="tl-auto" ${t.auto===false?'':'checked'} style="width:auto;accent-color:#1a5276"> Tự động tính lịch
+      </label>
+    </div>
     ${autoStartNote?`<div style="font-size:11px;color:#1a5276;background:#dbeafe;border-radius:4px;padding:4px 8px;margin-bottom:8px">⚡ ${autoStartNote}</div>`:''}
     <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:8px;align-items:end">
       <div class="field" style="margin:0"><label>Ngày bắt đầu</label>
@@ -4706,18 +4737,19 @@ function openTlTaskModal(pjId, taskId, parentGroupId, insertAfterTaskId) {
     <div class="field"><label>Ngày thực tế hoàn thành</label>
       <input id="tl-actual" type="date" class="tbl-input" value="${t.actual}">
     </div>
-    <div class="field"><label>Phụ thuộc task trước <span style="font-size:10px;color:var(--gray4);font-weight:400">(tuỳ chọn — bỏ trống nếu chạy song song)</span></label>
-      <select id="tl-dep" class="sel-sm" style="width:100%">
-        <option value="">— Không phụ thuộc (song song) —</option>
-        ${(p.tlTasks||[]).filter(q=>q.id!==t.id).map(q=>`
-          <option value="${q.id}" ${t.dep===q.id?'selected':''}>
-            ${q.lv==='group'?'📁':q.lv==='task'?'▸':'  ·'} ${x(q.name.length>40?q.name.slice(0,40)+'…':q.name)}
-          </option>`).join('')}
-      </select>
-      <div id="tl-dep-info" style="font-size:10px;color:#1a5276;margin-top:4px;display:${t.dep?'block':'none'}">
-        ⚡ Ngày bắt đầu task này sẽ = ngày kết thúc task trước + 1 ngày làm việc
-        <button type="button" onclick="tlApplyDep()" style="margin-left:8px;font-size:10px;padding:1px 8px;border:1px solid #1a5276;border-radius:3px;background:#e8f4fd;color:#1a5276;cursor:pointer">Áp dụng ngay</button>
-      </div>
+    <div class="field"><label>Cột mốc (Milestone)</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:5px;cursor:pointer" title="Mốc quan trọng, thời lượng 0 ngày (hình thoi ◆)">
+        <input type="checkbox" id="tl-milestone" ${t.isMilestone?'checked':''} style="width:auto;accent-color:#7c3aed"> ◆ Là cột mốc (0 ngày)
+      </label>
+    </div>
+    <div class="field"><label>Hạn chót (Deadline)</label>
+      <input id="tl-deadline" type="date" class="tbl-input" value="${t.deadline||''}" style="${t.deadline?'border-color:#b45309':''}">
+      <div style="font-size:10px;color:#92400e;margin-top:2px">Cảnh báo nếu kết thúc trễ hơn hạn này</div>
+    </div>
+    <div class="field" style="grid-column:1/-1"><label>Việc trước (liên kết — kéo lịch tự động) <span style="font-size:10px;color:var(--gray4);font-weight:400">(bỏ trống nếu chạy song song)</span></label>
+      <div id="tl-deps-wrap" style="display:flex;flex-direction:column;gap:5px;margin-top:3px"></div>
+      <button type="button" onclick="_tlAddDepRow()" style="margin-top:5px;font-size:11px;padding:3px 10px;border:1px dashed #1a5276;border-radius:5px;background:#eaf4fd;color:#1a5276;cursor:pointer">➕ Thêm việc trước</button>
+      <div style="font-size:9.5px;color:var(--gray4);margin-top:4px">FS: xong việc trước → mới bắt đầu · SS: bắt đầu cùng lúc · FF: kết thúc cùng lúc · SF: hiếm dùng · Trễ: +N ngày làm việc (âm = chồng lấn)</div>
     </div>
     <div class="field"><label>Nội dung / Mô tả</label>
       <input id="tl-content" class="tbl-input" value="${x(t.content||'')}" placeholder="Bản vẽ, hồ sơ, tài liệu…">
@@ -4741,13 +4773,31 @@ function openTlTaskModal(pjId, taskId, parentGroupId, insertAfterTaskId) {
     <button class="btn btn-gold" onclick="confirmSaveTlTask('${pjId}','${t.id}')">💾 Lưu</button>
   </div>`);
 
+  // Options việc-trước + deps hiện có cho trình sửa liên kết
+  window._tlPredOptsHtml = (p.tlTasks||[]).filter(q=>q.id!==t.id && q.lv!=='group')
+    .map(q=>'<option value="'+q.id+'">'+x(q.name.length>36?q.name.slice(0,36)+'…':q.name)+'</option>').join('');
   // Gắn event sau khi modal render
   setTimeout(()=>{
-    const depSel = document.getElementById('tl-dep');
-    if(depSel) depSel.addEventListener('change',function(){
-      document.getElementById('tl-dep-info').style.display=this.value?'block':'none';
-    });
-  },100);
+    const wrap=document.getElementById('tl-deps-wrap');
+    if(wrap){ wrap.innerHTML=''; (t.deps||[]).forEach(function(dp){ _tlAddDepRow(dp); }); }
+  },60);
+}
+
+// Thêm 1 hàng việc-trước trong modal (dep = {id,type,lag} nếu có)
+function _tlAddDepRow(dep){
+  const wrap=document.getElementById('tl-deps-wrap'); if(!wrap) return;
+  dep = (dep && dep.id) ? dep : {id:'',type:'FS',lag:0};
+  const TYPES=['FS','SS','FF','SF'];
+  const row=document.createElement('div');
+  row.className='tl-dep-row';
+  row.style.cssText='display:grid;grid-template-columns:1fr 58px 52px 26px;gap:5px;align-items:center';
+  row.innerHTML=
+    '<select class="tl-dep-pred sel-sm" style="width:100%"><option value="">— chọn việc trước —</option>'+(window._tlPredOptsHtml||'')+'</select>'
+    +'<select class="tl-dep-type sel-sm" style="width:100%" title="Loại liên kết">'+TYPES.map(function(ty){return '<option value="'+ty+'"'+(ty===(dep.type||'FS')?' selected':'')+'>'+ty+'</option>';}).join('')+'</select>'
+    +'<input class="tl-dep-lag" type="number" value="'+(+dep.lag||0)+'" title="Độ trễ (ngày làm việc, âm = chồng lấn)" style="width:100%;text-align:center;font-size:12px">'
+    +'<button type="button" onclick="this.closest(\'.tl-dep-row\').remove()" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px">✕</button>';
+  wrap.appendChild(row);
+  if(dep.id){ const sel=row.querySelector('.tl-dep-pred'); if(sel) sel.value=dep.id; }
 }
 
 // ── Tính ngày làm việc (trừ T7, CN, lễ) ─────────────────────────────────
@@ -4799,6 +4849,265 @@ function addWorkDays(startStr, days) {
     if (count < days) d.setDate(d.getDate() + 1);
   }
   return localDateStr(d);
+}
+
+// =====================================================================
+// ENGINE LÊN LỊCH TỰ ĐỘNG (kiểu MS Project) — chỉ dự án VN
+//   - duration: số ngày LÀM VIỆC (bỏ T7/CN + lễ)
+//   - deps: [{id, type:'FS'|'SS'|'FF'|'SF', lag:int(ngày làm việc)}]
+//   - auto=false: ghim ngày thủ công (vẫn dùng làm việc-trước cho task khác)
+// =====================================================================
+function _tlIsWorkday(ds){
+  const d=new Date(ds+'T00:00:00'); const dow=d.getDay();
+  if(dow===0||dow===6) return false;
+  const hs=new Set(getHolidays().map(h=>h.date||h));
+  return !hs.has(ds);
+}
+// Snap về ngày làm việc gần nhất theo hướng dir (+1 tiến / -1 lùi)
+function _tlSnapWorkday(ds, dir){
+  let d=new Date(ds+'T00:00:00'); let guard=0;
+  while(!_tlIsWorkday(localDateStr(d)) && guard++<400) d.setDate(d.getDate()+(dir||1));
+  return localDateStr(d);
+}
+// Dịch n NGÀY LÀM VIỆC từ ds (n>0 tiến, n<0 lùi, n=0 = snap về ngày làm việc)
+function _tlShiftWork(ds, n){
+  if(!ds) return '';
+  if(n===0) return _tlSnapWorkday(ds, 1);
+  let d=new Date(ds+'T00:00:00'); const step=n>0?1:-1; let remain=Math.abs(n); let guard=0;
+  while(remain>0 && guard++<3000){ d.setDate(d.getDate()+step); if(_tlIsWorkday(localDateStr(d))) remain--; }
+  return localDateStr(d);
+}
+// Chuẩn hoá 1 task: deps[] (migrate từ dep cũ), auto, duration
+function _tlNormTask(t){
+  if(!Array.isArray(t.deps)) t.deps = t.dep ? [{id:t.dep,type:'FS',lag:0}] : [];
+  if(t.auto===undefined||t.auto===null) t.auto = true;
+  if((t.duration==null||t.duration==='') && t.start && t.end) t.duration = calcWorkDays(t.start,t.end);
+  if(t.isMilestone===undefined) t.isMilestone=false;
+  // mirror dep cũ = việc-trước đầu tiên (giữ tương thích code cũ)
+  t.dep = (t.deps[0]&&t.deps[0].id) || '';
+  return t;
+}
+// Lên lịch toàn dự án: tính lại start/end mọi task auto theo deps + lịch làm việc.
+// Trả về MẢNG task đã đổi ngày (để upsert Supabase). KHÔNG save/đụng Supabase ở đây.
+function scheduleTlProject(p){
+  if(!p || !Array.isArray(p.tlTasks)) return [];
+  const tasks=p.tlTasks; const byId={};
+  tasks.forEach(t=>{ _tlNormTask(t); byId[t.id]=t; });
+  const sched = tasks.filter(t=>t.lv!=='group');  // group tự suy từ con khi render
+  // topo sort theo deps (chỉ tính việc-trước là task lá có trong dự án)
+  const indeg={}, adj={};
+  sched.forEach(t=>{ indeg[t.id]=0; adj[t.id]=[]; });
+  sched.forEach(t=>{ (t.deps||[]).forEach(dp=>{ if(byId[dp.id] && indeg[dp.id]!=null){ adj[dp.id].push(t.id); indeg[t.id]++; } }); });
+  const q=sched.filter(t=>indeg[t.id]===0).map(t=>t.id);
+  const order=[]; const seen=new Set();
+  while(q.length){ const id=q.shift(); if(seen.has(id))continue; seen.add(id); order.push(id);
+    adj[id].forEach(nx=>{ if(--indeg[nx]===0) q.push(nx); }); }
+  sched.forEach(t=>{ if(!seen.has(t.id)) order.push(t.id); });   // chu trình -> nối cuối, giữ ngày cũ
+  const changed=[];
+  order.forEach(id=>{
+    const t=byId[id]; if(!t || t.auto===false) return;   // ghim thủ công -> không dời
+    const dur = t.isMilestone?0:Math.max(1, +t.duration || (t.start&&t.end?calcWorkDays(t.start,t.end):1));
+    let best='';
+    (t.deps||[]).forEach(dp=>{
+      const pr=byId[dp.id]; if(!pr||!pr.start) return;
+      const lag=+dp.lag||0, ty=dp.type||'FS';
+      const pe=pr.end||pr.start, ps=pr.start; let cand='';
+      if(ty==='FS') cand=_tlShiftWork(pe, 1+lag);
+      else if(ty==='SS') cand=_tlShiftWork(ps, lag);
+      else if(ty==='FF'){ const ec=_tlShiftWork(pe, lag); cand=dur>0?_tlShiftWork(ec, -(dur-1)):ec; }
+      else if(ty==='SF'){ const ec=_tlShiftWork(ps, lag); cand=dur>0?_tlShiftWork(ec, -(dur-1)):ec; }
+      if(cand && cand>best) best=cand;
+    });
+    if(t.constraintType==='SNET' && t.constraintDate){ const c=_tlSnapWorkday(t.constraintDate,1); if(c>best) best=c; }
+    const ns = best || (t.start?_tlSnapWorkday(t.start,1):'');
+    if(!ns) return;
+    const ne = dur>0?addWorkDays(ns, dur):ns;
+    if(t.start!==ns || t.end!==ne){
+      const moveUp = (!t.upDate || t.upDate===t.end);   // upDate trống/đang = end cũ -> theo end mới
+      t.start=ns; t.end=ne; if(moveUp) t.upDate=ne; t.duration=dur||t.duration;
+      changed.push(t);
+    }
+  });
+  return changed;
+}
+// Lên lịch + lưu + đẩy Supabase + vẽ lại (gọi sau khi sửa task/deps)
+function recalcTlProject(pjId){
+  let p=null; Object.values(D.months).forEach(m=>{ if(!p)p=(m.projectsVN||[]).find(q=>q.id===pjId); if(!p)p=(m.projects||[]).find(q=>q.id===pjId); });
+  if(!p) return [];
+  const changed=scheduleTlProject(p);
+  if(changed.length) save();
+  changed.forEach(t=>{ try{ if(t.staff&&t.staff.length&&t.lv!=='group') syncTlTaskToGroup(pjId,t); _sbUpsertTlTask(pjId,t); }catch(e){} });
+  return changed;
+}
+
+// ===================== GĐ2: KÉO–THẢ trên Gantt =====================
+var _TL_DRAG_DAYW = 5;  // = DAY_W trong renderProjectTimeline_VN
+function _tlFindTask(pjId, tid){
+  let p=null; Object.values(D.months).forEach(m=>{ if(!p)p=(m.projectsVN||[]).find(q=>q.id===pjId); if(!p)p=(m.projects||[]).find(q=>q.id===pjId); });
+  return { p:p, t: p ? (p.tlTasks||[]).find(x=>x.id===tid)||null : null };
+}
+function _tlAddCalDays(ds, n){ const d=new Date(ds+'T00:00:00'); d.setDate(d.getDate()+n); return localDateStr(d); }
+// a phụ thuộc (trực/gián tiếp) vào b? (để chặn vòng lặp khi nối)
+function _tlDependsOn(p, aId, bId){
+  const byId={}; (p.tlTasks||[]).forEach(t=>byId[t.id]=t);
+  const seen=new Set(); const stack=[aId];
+  while(stack.length){ const id=stack.pop(); if(seen.has(id))continue; seen.add(id);
+    const t=byId[id]; if(!t)continue; for(const d of (t.deps||[])){ if(d.id===bId) return true; stack.push(d.id); } }
+  return false;
+}
+function _tlBarDown(e, pjId, tid, mode){
+  if(window._tlLinking){ _tlLinkFinish(pjId, tid); return; }   // đang nối -> chọn đích
+  e.preventDefault();
+  const barEl = e.currentTarget.classList && e.currentTarget.classList.contains('tl-bar')
+    ? e.currentTarget : e.currentTarget.closest('.tl-bar');
+  if(!barEl) return;
+  const ft=_tlFindTask(pjId, tid); const t=ft.t; if(!t) return;
+  const x0=+barEl.getAttribute('data-x0')||0, w0=+barEl.getAttribute('data-w0')||0;
+  const startX=e.clientX, origStart=t.start, origEnd=t.end||t.start;
+  barEl.style.cursor = mode==='resize'?'ew-resize':'grabbing'; barEl.style.opacity='.85';
+  function onMove(ev){
+    const dpx=ev.clientX-startX;
+    if(mode==='move') barEl.style.left=(x0+dpx)+'px';
+    else barEl.style.width=Math.max(_TL_DRAG_DAYW, w0+dpx)+'px';
+  }
+  function onUp(ev){
+    document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp);
+    const dCal=Math.round((ev.clientX-startX)/_TL_DRAG_DAYW);
+    if(mode==='move' && Math.abs(dCal)<1){ barEl.style.opacity=''; barEl.style.cursor='grab'; return; }
+    if(mode==='move'){
+      const dur=Math.max(1, +t.duration || (origStart&&origEnd?calcWorkDays(origStart,origEnd):1));
+      const ns=_tlSnapWorkday(_tlAddCalDays(origStart,dCal),1);
+      const moveUp=(!t.upDate||t.upDate===origEnd);
+      t.start=ns; t.end=addWorkDays(ns,dur); if(moveUp)t.upDate=t.end; t.auto=false;
+    }else{
+      let ne=_tlSnapWorkday(_tlAddCalDays(origEnd,dCal),-1);
+      if(ne<t.start) ne=t.start;
+      const moveUp=(!t.upDate||t.upDate===origEnd);
+      t.end=ne; t.duration=calcWorkDays(t.start,ne); if(moveUp)t.upDate=ne;
+    }
+    save(); recalcTlProject(pjId); _sbUpsertTlTask(pjId,t);
+    try{ renderContent(); }catch(e2){} _refreshOverviewParts();
+    toast(mode==='move'?'✓ Đã dời "'+(t.name||'').slice(0,16)+'" (ghim 🔒)':'✓ Số ngày: '+t.duration);
+  }
+  document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+}
+function _tlLinkClick(e, pjId, fromId){
+  e.preventDefault();
+  window._tlLinking={pjId:pjId, fromId:fromId};
+  if(typeof toast==='function') toast('🔗 Bấm vào việc KẾ TIẾP để nối (FS). Bấm chỗ trống để hủy.');
+  setTimeout(function(){ document.addEventListener('mousedown', _tlLinkCancelOnce, true); },0);
+}
+function _tlLinkCancelOnce(ev){
+  const onBar = ev.target.closest && ev.target.closest('.tl-bar');
+  if(!onBar){ window._tlLinking=null; document.removeEventListener('mousedown',_tlLinkCancelOnce,true); if(typeof toast==='function') toast('Đã hủy nối'); }
+}
+function _tlLinkFinish(pjId, toId){
+  document.removeEventListener('mousedown',_tlLinkCancelOnce,true);
+  const link=window._tlLinking; window._tlLinking=null;
+  if(!link || link.fromId===toId) return;
+  const ft=_tlFindTask(pjId,toId), t=ft.t, p=ft.p; const fromT=_tlFindTask(pjId,link.fromId).t;
+  if(!t||!fromT||!p) return;
+  if(_tlDependsOn(p, link.fromId, toId)){ toast('⚠ Không nối được — sẽ tạo vòng lặp'); return; }
+  if(!Array.isArray(t.deps)) t.deps=[];
+  if(t.deps.some(d=>d.id===link.fromId)){ toast('Đã có liên kết này rồi'); return; }
+  t.deps.push({id:link.fromId, type:'FS', lag:0}); t.dep=t.deps[0].id;
+  save(); recalcTlProject(pjId); _sbUpsertTlTask(pjId,t);
+  try{ renderContent(); }catch(e){} _refreshOverviewParts();
+  toast('✓ Đã nối: "'+(fromT.name||'').slice(0,12)+'" → "'+(t.name||'').slice(0,12)+'"');
+}
+
+// ===================== GĐ3: đường găng + quá tải + mũi tên =====================
+// Đường găng (critical path): tập task có float = 0 (xấp xỉ theo FS — đủ để chỉ dẫn)
+function _tlComputeCPM(p){
+  const leaf=(p.tlTasks||[]).filter(t=>t.lv!=='group' && t.start && t.end);
+  if(!leaf.length) return new Set();
+  const byId={}; leaf.forEach(t=>byId[t.id]=t);
+  const succ={}; leaf.forEach(t=>succ[t.id]=[]);
+  const indeg={}; leaf.forEach(t=>indeg[t.id]=0);
+  leaf.forEach(t=>(t.deps||[]).forEach(d=>{ if(byId[d.id]){ succ[d.id].push(t.id); indeg[t.id]++; } }));
+  const q=leaf.filter(t=>indeg[t.id]===0).map(t=>t.id); const order=[]; const seen=new Set();
+  while(q.length){ const id=q.shift(); if(seen.has(id))continue; seen.add(id); order.push(id); succ[id].forEach(s=>{ if(--indeg[s]===0) q.push(s); }); }
+  leaf.forEach(t=>{ if(!seen.has(t.id)) order.push(t.id); });
+  let projEnd=''; leaf.forEach(t=>{ if(t.end>projEnd) projEnd=t.end; });
+  const LE={}; leaf.forEach(t=>LE[t.id]=projEnd);
+  for(let i=order.length-1;i>=0;i--){ const id=order[i];
+    succ[id].forEach(sid=>{ const s=byId[sid]; const sdur=Math.max(1,+s.duration||calcWorkDays(s.start,s.end));
+      const sLS=_tlShiftWork(LE[sid], -(sdur-1)); const cand=_tlShiftWork(sLS, -1);
+      if(cand<LE[id]) LE[id]=cand; });
+  }
+  const crit=new Set();
+  leaf.forEach(t=>{ if(!LE[t.id]) return; const fl=(LE[t.id]>=t.end)?(calcWorkDays(t.end,LE[t.id])-1):-1; if(fl<=0) crit.add(t.id); });
+  return crit;
+}
+// Nhân sự quá tải: 1 người bị xếp 2 việc trùng ngày (bỏ qua việc đã xong)
+function _tlOveralloc(p){
+  const leaf=(p.tlTasks||[]).filter(t=>t.lv!=='group' && t.start && t.end && t.status!=='done' && (t.staff||[]).length);
+  const byStaff={}; leaf.forEach(t=>(t.staff||[]).forEach(s=>{(byStaff[s]=byStaff[s]||[]).push(t);}));
+  const tasks=new Set(); const staffSet=new Set();
+  Object.keys(byStaff).forEach(s=>{ const arr=byStaff[s].slice().sort((a,b)=>a.start<b.start?-1:1);
+    for(let i=0;i<arr.length;i++) for(let j=i+1;j<arr.length;j++){
+      if(arr[i].start<=arr[j].end && arr[j].start<=arr[i].end){ tasks.add(arr[i].id); tasks.add(arr[j].id); staffSet.add(s); }
+    }
+  });
+  return {tasks:tasks, staff:[...staffSet]};
+}
+// Vẽ mũi tên liên kết giữa các thanh (SVG overlay cuộn cùng nội dung)
+function _tlDrawDepArrows(pjId){
+  try{
+    const card=document.getElementById('vn-timeline-'+pjId); if(!card) return;
+    const inner=card.querySelector('.tl-scroll-inner'); if(!inner) return;
+    const old=inner.querySelector('.tl-arrow-svg'); if(old) old.remove();
+    const bars={}; inner.querySelectorAll('.tl-bar[data-tid]').forEach(b=>{ bars[b.getAttribute('data-tid')]=b; });
+    if(!Object.keys(bars).length) return;
+    const ft=_tlFindTask(pjId, Object.keys(bars)[0]); const p=ft.p; if(!p) return;
+    const crit=_tlComputeCPM(p);
+    const iR=inner.getBoundingClientRect();
+    function pos(el){ const r=el.getBoundingClientRect(); return {l:r.left-iR.left, t:r.top-iR.top, w:r.width, h:r.height}; }
+    const NS='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(NS,'svg'); svg.setAttribute('class','tl-arrow-svg');
+    svg.setAttribute('width', inner.scrollWidth); svg.setAttribute('height', inner.scrollHeight);
+    svg.style.cssText='position:absolute;left:0;top:0;pointer-events:none;z-index:2;overflow:visible';
+    svg.innerHTML='<defs>'
+      +'<marker id="tlah" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker>'
+      +'<marker id="tlahc" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ef4444"/></marker></defs>';
+    (p.tlTasks||[]).forEach(t=>{
+      if(t.lv==='group') return;
+      (t.deps||[]).forEach(d=>{
+        const fromB=bars[d.id], toB=bars[t.id]; if(!fromB||!toB) return;
+        const a=pos(fromB), b=pos(toB); const ty=d.type||'FS';
+        let x1,x2; const y1=a.t+a.h/2, y2=b.t+b.h/2;
+        if(ty==='SS'){ x1=a.l; x2=b.l; } else if(ty==='FF'){ x1=a.l+a.w; x2=b.l+b.w; } else if(ty==='SF'){ x1=a.l; x2=b.l+b.w; } else { x1=a.l+a.w; x2=b.l; }
+        const isC=crit.has(d.id)&&crit.has(t.id);
+        const col=isC?'#ef4444':'#94a3b8', mk=isC?'url(#tlahc)':'url(#tlah)';
+        let dd;
+        if(ty==='FS') dd='M'+x1+','+y1+' H'+(x1+8)+' V'+y2+' H'+(x2-5);
+        else dd='M'+x1+','+y1+' V'+((y1+y2)/2)+' H'+x2+' V'+(y2 - (y2>y1?5:-5));
+        const path=document.createElementNS(NS,'path');
+        path.setAttribute('d',dd); path.setAttribute('fill','none'); path.setAttribute('stroke',col);
+        path.setAttribute('stroke-width','1.4'); path.setAttribute('marker-end',mk); path.setAttribute('opacity','.85');
+        svg.appendChild(path);
+      });
+    });
+    inner.appendChild(svg);
+  }catch(e){ console.warn('[tl arrows]',e); }
+}
+// ── Baseline (kế hoạch gốc) ──────────────────────────────────────────
+function _tlPjVN(pjId){ let p=null; Object.values(D.months).forEach(m=>{ if(!p)p=(m.projectsVN||[]).find(q=>q.id===pjId); }); return p; }
+function saveTlBaseline(pjId){
+  const p=_tlPjVN(pjId); if(!p||!(p.tlTasks||[]).length){ toast('Chưa có việc nào'); return; }
+  if(!confirm('Lưu KẾ HOẠCH GỐC?\nChụp lại ngày bắt đầu/kết thúc hiện tại của tất cả việc để về sau so sánh với thực tế.')) return;
+  p.tlTasks.forEach(t=>{ if(t.lv!=='group'){ t.baselineStart=t.start||''; t.baselineEnd=t.end||''; } });
+  save(); p.tlTasks.forEach(t=>{ if(t.lv!=='group') _sbUpsertTlTask(pjId,t); });
+  try{ renderContent(); }catch(e){} _refreshOverviewParts();
+  toast('📌 Đã lưu kế hoạch gốc (vạch xám dưới mỗi việc)');
+}
+function clearTlBaseline(pjId){
+  const p=_tlPjVN(pjId); if(!p) return;
+  if(!confirm('Xoá kế hoạch gốc đã lưu?')) return;
+  p.tlTasks.forEach(t=>{ t.baselineStart=''; t.baselineEnd=''; });
+  save(); p.tlTasks.forEach(t=>{ if(t.lv!=='group') _sbUpsertTlTask(pjId,t); });
+  try{ renderContent(); }catch(e){} _refreshOverviewParts();
+  toast('Đã xoá kế hoạch gốc');
 }
 
 // ── Auto-cascade dependencies khi thay đổi ngày 1 task ──────────────────
@@ -4858,8 +5167,16 @@ function tlCalcEnd() {
   const days  = +document.getElementById('tl-days')?.value;
   if (!start || !days) return;
   const end = addWorkDays(start, days);
-  if (end && document.getElementById('tl-end')) {
-    document.getElementById('tl-end').value = end;
+  const endEl = document.getElementById('tl-end');
+  const upEl  = document.getElementById('tl-up');
+  if (end && endEl) {
+    const oldEnd = endEl.value;
+    endEl.value = end;
+    // Ngày UP bám theo ngày kết thúc nếu đang để trống hoặc đang = ngày KT cũ
+    if (upEl && (!upEl.value || upEl.value === oldEnd)) {
+      upEl.value = end;
+      upEl.style.borderColor = '#e74c3c';
+    }
     document.getElementById('tl-day-info').innerHTML =
       `Ngày kết thúc: <strong>${end.slice(5).replace('-','/')}</strong> — <strong>${days} ngày làm việc</strong> (đã trừ T7, CN và ngày lễ)`;
   }
@@ -4871,6 +5188,9 @@ function tlCalcDays() {
   if (!start || !end) return;
   const days = calcWorkDays(start, end);
   if (document.getElementById('tl-days')) document.getElementById('tl-days').value = days;
+  // Ngày UP bám theo ngày kết thúc nếu đang để trống
+  const upEl = document.getElementById('tl-up');
+  if (upEl && !upEl.value) { upEl.value = end; upEl.style.borderColor = '#e74c3c'; }
   document.getElementById('tl-day-info').innerHTML =
     `Tính được <strong>${days} ngày làm việc</strong> (đã trừ T7, CN và ngày lễ)`;
 }
@@ -4882,6 +5202,14 @@ function confirmSaveTlTask(pjId, taskId) {
   const staff = [...document.querySelectorAll('#tl-staff-wrap input[type=checkbox]:checked')].map(e=>e.value);
   const end   = document.getElementById('tl-end').value;
   const upDate = document.getElementById('tl-up').value || end;
+  // Thu liên kết việc-trước (deps[])
+  const deps = [...document.querySelectorAll('#tl-deps-wrap .tl-dep-row')].map(function(row){
+    return { id: row.querySelector('.tl-dep-pred').value,
+             type: row.querySelector('.tl-dep-type').value || 'FS',
+             lag: +row.querySelector('.tl-dep-lag').value || 0 };
+  }).filter(function(d){ return d.id; });
+  const auto = !!document.getElementById('tl-auto')?.checked;
+  const durVal = +document.getElementById('tl-days')?.value || 0;
   const task = {
     id: taskId,
     lv:       document.getElementById('tl-lv').value,
@@ -4893,10 +5221,16 @@ function confirmSaveTlTask(pjId, taskId) {
     content:  document.getElementById('tl-content')?.value.trim()||'',
     progress: +document.getElementById('tl-prog').value,
     status:   document.getElementById('tl-status').value,
-    dep:      document.getElementById('tl-dep')?.value||'',
+    deps,
+    dep:      (deps[0]&&deps[0].id)||'',   // giữ tương thích code cũ
+    auto,
+    duration: durVal || (task_startEndDur()),
+    isMilestone: !!document.getElementById('tl-milestone')?.checked,
+    deadline: document.getElementById('tl-deadline')?.value||'',
     staff,
     note:     document.getElementById('tl-note').value.trim(),
   };
+  function task_startEndDur(){ const s=document.getElementById('tl-start').value, e=end; return (s&&e)?calcWorkDays(s,e):''; }
   if (!task.name) { toast('Vui lòng nhập tên công việc'); return; }
 
   const _dbgPj = allCurProjects().find(q=>q.id===pjId)
@@ -4922,25 +5256,16 @@ function confirmSaveTlTask(pjId, taskId) {
     }
   }
 
-  // 3. Cascade trong D — trả về mảng task đã cập nhật
-  const cascadedTasks = cascadeTlTaskDeps(pjId, task.id);
-  if (cascadedTasks.length > 0) save();
+  // 3. ENGINE lên lịch tự động toàn dự án (FS/SS/FF/SF + lag + lịch làm việc)
+  const cascadedTasks = (typeof recalcTlProject==='function') ? recalcTlProject(pjId) : [];
 
-  // 4. Sync cascaded tasks xuống groups/rows
-  cascadedTasks.forEach(function(dep) {
-    if (dep.staff && dep.staff.length > 0 && dep.lv !== 'group') {
-      syncTlTaskToGroup(pjId, dep);
-    }
-  });
-
-  // 5. Sync main task xuống groups/rows nếu có nhân sự
+  // 4. Sync main task xuống groups/rows nếu có nhân sự
   if (staff.length > 0 && task.lv !== 'group') {
     syncTlTaskToGroup(pjId, task);
   }
 
-  // 6. Upsert lên Supabase: task chính + cascaded + relinked
+  // 5. Upsert lên Supabase: task chính + relinked (cascaded đã được recalcTlProject upsert)
   _sbUpsertTlTask(pjId, task);
-  cascadedTasks.forEach(function(dep) { _sbUpsertTlTask(pjId, dep); });
   relinkTasks.forEach(function(t) { _sbUpsertTlTask(pjId, t); });
   // Re-sync order sau khi insert/relink — tránh tie sort_order
   _sbResyncAllTlTaskOrder(pjId);
@@ -4949,7 +5274,7 @@ function confirmSaveTlTask(pjId, taskId) {
   try { renderContent(); } catch(e) {}
   _refreshOverviewParts();
   const _insertMsg = insertAfterTaskId ? ' (chèn vào giữa)' : '';
-  const _cascadeMsg = cascadedTasks.length > 0 ? ` — Cập nhật ${cascadedTasks.length} task phụ thuộc` : '';
+  const _cascadeMsg = cascadedTasks.length > 0 ? ` — Tự dời ${cascadedTasks.length} việc liên quan` : '';
   toast('✓ Đã lưu task tiến độ' + (staff.length>0&&task.lv!=='group' ? ' & đồng bộ hạng mục' : '') + _insertMsg + _cascadeMsg);
 }
 
@@ -5187,6 +5512,8 @@ function renderProjectTimeline_VN(p) {
     const endDs    = t.end    || t._autoEnd    || '';
     const prog     = t.lv==='group' ? (t._autoProgress||0) : (t.progress||0);
     const bc       = SC[t.status]||'#94a3b8';
+    const isCrit   = (typeof _critSet!=='undefined') && _critSet.has && _critSet.has(t.id) && t.lv!=='group';
+    const isOv     = (typeof _ovSet!=='undefined') && _ovSet.has && _ovSet.has(t.id);
     const isUpToday= t.upDate===today;
     const isTaskDone = t.status === 'done';
     const taskDoneStyle = isTaskDone ? `color:${DONE_COLOR};` : '';
@@ -5213,11 +5540,43 @@ function renderProjectTimeline_VN(p) {
       .map(c=>`<div style="position:absolute;top:2px;left:${dx(c.upDate)}px;width:2px;height:12px;background:#e67e22;border-radius:1px;opacity:.7" title="${x(c.name)}: UP ${c.upDate}"></div>`)
       .join('') : '';
 
-    const ganttBar = bw2>0 ? `
-      <div style="position:absolute;top:${barY}px;left:${bx}px;width:${bw2}px;height:${barH}px;background:${bc};border-radius:3px;opacity:.18"></div>
-      <div style="position:absolute;top:${barY}px;left:${bx}px;width:${progW}px;height:${barH}px;background:${bc};border-radius:3px"></div>
-      ${t.lv==='group'?`<span style="position:absolute;top:1px;left:${bx+2}px;font-size:11px;color:${bc};font-weight:700;white-space:nowrap;line-height:1;z-index:2">${startDs.slice(5).replace('-','/')}${bw2>50?' → '+endDs.slice(5).replace('-','/'):''}  </span>`:''}
-    ` : '';
+    let ganttBar = '';
+    if (bw2>0 && t.lv==='group') {
+      // Group: thanh ngoặc (không kéo–thả, tự suy từ con)
+      ganttBar = `
+        <div style="position:absolute;top:${barY}px;left:${bx}px;width:${bw2}px;height:${barH}px;background:${bc};border-radius:3px;opacity:.18"></div>
+        <div style="position:absolute;top:${barY}px;left:${bx}px;width:${progW}px;height:${barH}px;background:${bc};border-radius:3px"></div>
+        <span style="position:absolute;top:1px;left:${bx+2}px;font-size:11px;color:${bc};font-weight:700;white-space:nowrap;line-height:1;z-index:2">${startDs.slice(5).replace('-','/')}${bw2>50?' → '+endDs.slice(5).replace('-','/'):''}  </span>`;
+    } else if (t.isMilestone && startDs) {
+      // Cột mốc (milestone): hình thoi ◆ (0 ngày), kéo dời + nối được
+      const mx = dx(startDs);
+      ganttBar = `
+        <div class="tl-bar" data-pj="${p.id}" data-tid="${t.id}" data-x0="${mx-6}" data-w0="12"
+             onmousedown="_tlBarDown(event,'${p.id}','${t.id}','move')" title="◆ Cột mốc: ${startDs}"
+             style="position:absolute;top:5px;left:${mx-6}px;width:12px;height:12px;background:#7c3aed;transform:rotate(45deg);border-radius:2px;cursor:grab;z-index:3;${isCrit?'box-shadow:0 0 0 1.5px #ef4444':''}"></div>
+        <div onmousedown="event.stopPropagation();_tlLinkClick(event,'${p.id}','${t.id}')" title="Nối việc sau" style="position:absolute;top:6px;left:${mx+9}px;width:10px;height:10px;border-radius:50%;background:#4F46E5;border:1.5px solid #fff;cursor:crosshair;z-index:4"></div>`;
+    } else if (bw2>0) {
+      // Task lá: KÉO–THẢ được (dời / co giãn / nối liên kết) — bar dày 10px cho dễ kéo
+      const lY=6, lH=10;
+      ganttBar = `
+        <div class="tl-bar" data-pj="${p.id}" data-tid="${t.id}" data-x0="${bx}" data-w0="${bw2}"
+             onmousedown="_tlBarDown(event,'${p.id}','${t.id}','move')"
+             title="${isCrit?'⚠ Đường găng (không được trễ) · ':''}Kéo để dời · kéo mép phải để đổi số ngày · chấm xanh để nối việc sau"
+             style="position:absolute;top:${lY}px;left:${bx}px;width:${bw2}px;height:${lH}px;border-radius:3px;cursor:grab;z-index:3;${isCrit?'box-shadow:0 0 0 1.5px #ef4444':'box-shadow:0 0 0 0.5px '+bc+'66'}">
+          <div style="position:absolute;inset:0;background:${bc};opacity:.22;border-radius:3px"></div>
+          <div style="position:absolute;top:0;left:0;height:100%;width:${prog}%;background:${bc};border-radius:3px"></div>
+          <div onmousedown="event.stopPropagation();_tlBarDown(event,'${p.id}','${t.id}','resize')" title="Kéo đổi số ngày" style="position:absolute;right:-2px;top:0;width:7px;height:100%;cursor:ew-resize"></div>
+          <div onmousedown="event.stopPropagation();_tlLinkClick(event,'${p.id}','${t.id}')" title="Bấm rồi chọn việc sau để nối (FS)" style="position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:10px;height:10px;border-radius:50%;background:#4F46E5;border:1.5px solid #fff;box-shadow:0 0 2px rgba(0,0,0,.3);cursor:crosshair;z-index:4"></div>
+        </div>`;
+    }
+    // Baseline (kế hoạch gốc) — thanh xám mảnh phía dưới để so sánh
+    const baseHtml = (t.lv!=='group' && t.baselineStart && t.baselineEnd)
+      ? `<div title="Kế hoạch gốc: ${t.baselineStart} → ${t.baselineEnd}" style="position:absolute;top:17px;left:${dx(t.baselineStart)}px;width:${dw(t.baselineStart,t.baselineEnd)}px;height:2.5px;background:#9ca3af;border-radius:2px;opacity:.8"></div>` : '';
+    // Deadline (hạn chót) — vạch đứt + cờ; đỏ nếu kết thúc trễ hơn hạn
+    const _isLate = t.deadline && endDs && endDs>t.deadline;
+    const deadlineHtml = t.deadline
+      ? `<div title="Hạn chót: ${t.deadline}${_isLate?' — ĐANG TRỄ!':''}" style="position:absolute;top:0;left:${dx(t.deadline)}px;height:20px;border-left:1.5px dashed ${_isLate?'#dc2626':'#b45309'};z-index:2"></div>`
+        +`<div style="position:absolute;top:-1px;left:${dx(t.deadline)-3}px;font-size:9px;color:${_isLate?'#dc2626':'#b45309'};z-index:3">⚑</div>` : '';
 
     // Style row
     const rowBg = t.lv==='group' ? 'background:linear-gradient(90deg,#EEF2FF,#F8F9FF);border-top:2px solid #C7D2FE'
@@ -5237,7 +5596,8 @@ function renderProjectTimeline_VN(p) {
            title="Thêm task vào nhóm này">+ thêm</button>`
       : '';
 
-    const depName = t.dep ? (allTasks.find(q=>q.id===t.dep)?.name?.slice(0,22)||'?') : '';
+    const depName = (t.deps||[]).map(function(dp){ const q=allTasks.find(x=>x.id===dp.id); if(!q) return null; const lag=+dp.lag||0; return (q.name||'?').slice(0,16)+((dp.type&&dp.type!=='FS')?' ['+dp.type+']':'')+(lag?(lag>0?' +'+lag+'d':' '+lag+'d'):''); }).filter(Boolean).join(', ');
+    const manualMark = (t.auto===false && t.lv!=='group') ? ' <span title="Ghim ngày thủ công" style="color:#b45309">🔒</span>' : '';
 
     return `<tr style="${rowBg};${taskDoneStyle}" ${isChild?`class="tl-child-${groupId||''}"`:''}>
       ${prependCell||''}
@@ -5248,8 +5608,8 @@ function renderProjectTimeline_VN(p) {
           <div style="flex:1;min-width:0">
             <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
               color:${isTaskDone?DONE_COLOR:(t.lv==='group'?'#3730A3':'var(--color-text-primary)')};font-size:${t.lv==='group'?'12px':'11px'};"
-              onclick="openTlTaskModal('${p.id}','${t.id}')" title="${x(t.name)}">${x(t.name)||'—'}</div>
-            ${depName?`<div style="font-size:9px;color:#1a5276">↳ sau: ${x(depName)}</div>`:''}
+              onclick="openTlTaskModal('${p.id}','${t.id}')" title="${x(t.name)}">${x(t.name)||'—'}${manualMark}${isOv?' <span title="Nhân sự bị trùng lịch (quá tải)" style="color:#ea580c">⚠</span>':''}${isCrit?' <span title="Đường găng" style="color:#ef4444;font-size:9px">●</span>':''}${(t.deadline&&endDs&&endDs>t.deadline)?' <span title="Trễ hạn chót '+t.deadline+'" style="color:#dc2626">⚑</span>':''}</div>
+            ${depName?`<div style="font-size:9px;color:#1a5276">↳ sau: ${depName}</div>`:''}
             ${staffNames&&t.lv!=='group'?`<div style="font-size:9px;color:var(--gray4)">${x(staffNames)}</div>`:''}
             ${addChildBtn}
           </div>
@@ -5274,7 +5634,7 @@ function renderProjectTimeline_VN(p) {
       <td style="padding:0;position:relative;min-width:${totalDays*DAY_W}px">
         <div style="position:relative;height:20px;width:${totalDays*DAY_W}px">
           <div id="gantt-today-vn-${p.id}" style="position:absolute;top:0;bottom:0;left:${todayX}px;width:1.5px;background:#ef4444;opacity:.5;z-index:1"></div>
-          ${ganttBar}${upMarker}${upLabel}${childMarkers}
+          ${baseHtml}${deadlineHtml}${ganttBar}${upMarker}${upLabel}${childMarkers}
         </div>
       </td>
       <td style="width:28px;text-align:center;padding:2px">
@@ -5299,6 +5659,13 @@ function renderProjectTimeline_VN(p) {
       </td>
     </tr>`;
   }
+
+  // ── Đường găng (critical) + cảnh báo nhân sự quá tải ──────────────────
+  const _critSet = (typeof _tlComputeCPM==='function') ? _tlComputeCPM(p) : new Set();
+  const _ov = (typeof _tlOveralloc==='function') ? _tlOveralloc(p) : {tasks:new Set(),staff:[]};
+  const _ovSet = _ov.tasks, _ovStaff = _ov.staff;
+  // Vẽ mũi tên liên kết sau khi DOM đã chèn
+  setTimeout(function(){ try{ _tlDrawDepArrows(p.id); }catch(e){} }, 30);
 
   // ── Build tất cả rows ─────────────────────────────────────────────────
   let rowNum = 0;
@@ -5338,6 +5705,7 @@ function renderProjectTimeline_VN(p) {
         </div>
         <span style="font-size:11px;font-weight:700;color:var(--navy)">${avgProg}%</span>
         <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-vn-${p.id}')" title="Cuộn đến vạch ngày hôm nay">📍 Hôm nay</button>
+        <button class="btn btn-sm" style="background:#f3f0ff;color:#6d28d9;border:1px solid #c4b5fd;font-size:11px;padding:3px 10px" onclick="saveTlBaseline('${p.id}')" title="Chụp lại kế hoạch hiện tại để so sánh thực tế (vạch xám)">📌 Kế hoạch gốc</button>
         <button class="btn btn-sm" style="background:#e8f4fd;color:#1a5276;border:1px solid #b3d4f5" onclick="exportTlPDF('${p.id}')">📄 Xuất PDF</button>
         <button class="btn btn-gold btn-sm" onclick="openTlTaskModal('${p.id}',null,null)">＋ Thêm</button>
       </div>
@@ -5354,7 +5722,9 @@ function renderProjectTimeline_VN(p) {
       <div style="text-align:center;padding:5px 12px;background:#eff6ff;border-radius:var(--r)"><div style="font-size:16px;font-weight:700;color:#3b82f6">${ip}</div><div style="font-size:10px;color:#1d4ed8">Đang làm</div></div>
       <div style="text-align:center;padding:5px 12px;background:#fef2f2;border-radius:var(--r)"><div style="font-size:16px;font-weight:700;color:#ef4444">${late}</div><div style="font-size:10px;color:#b91c1c">Trễ/UP</div></div>
     </div>
+    ${_ovStaff.length?`<div style="margin:6px 12px;padding:6px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;font-size:11px;color:#9a3412">⚠ <b>Nhân sự quá tải</b> (bị xếp nhiều việc trùng ngày): ${_ovStaff.map(s=>x(staffShortName(s))).join(', ')}</div>`:''}
     <div style="overflow-x:auto">
+    <div class="tl-scroll-inner" style="position:relative;width:max-content;min-width:100%">
     <table style="border-collapse:collapse;width:100%;font-size:11px">
       <thead><tr style="background:var(--navy)">
         <th style="color:rgba(255,255,255,.5);padding:5px 4px;text-align:center;width:24px">#</th>
@@ -5372,6 +5742,7 @@ function renderProjectTimeline_VN(p) {
       </tr></thead>
       <tbody>${allRows}</tbody>
     </table>
+    </div>
     </div>`}
   </div>`;
 }

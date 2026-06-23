@@ -699,6 +699,7 @@ table.detail-tl tr.staff-last > td {
     <div class="splash-studio" id="splashStudio">Design Studio</div>
   </div>
 
+  <div id="splashWho" style="display:none;text-align:center;margin-bottom:8px;color:#fff;font-size:15px;font-weight:600"></div>
   <div class="splash-pw-wrap">
     <div class="splash-pw-box">
       <input type="password" id="splashPwInput" placeholder="••••••••"
@@ -757,6 +758,7 @@ table.detail-tl tr.staff-last > td {
     <button class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)" title="Nhập backup từ file" onclick="importFromFile()">📂 Nhập</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)" onclick="openThemePicker()">🎨</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)" onclick="openExportMenu()">📤 Báo cáo</button>
+    <span id="whoami" style="display:none;color:#fff;font-size:12px;font-weight:600;padding:3px 10px;background:rgba(255,255,255,.12);border-radius:99px;white-space:nowrap"></span>
     <button class="btn btn-gold btn-sm" onclick="openAddProject()">＋ Dự án mới</button>
     <button class="btn btn-sm" onclick="_logout()" title="Đăng xuất / đổi tài khoản" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)">⏻</button>
   </div>
@@ -1425,7 +1427,7 @@ async function _sbQueueChange(description, tableName, operation, recordId, paylo
     await _sb.from('pending_changes').insert({
       table_name: tableName, operation: operation, record_id: recordId,
       payload: payload || null, context: context || {},
-      submitted_by: sessionStorage.getItem('splash_role') || 'edit',
+      submitted_by: sessionStorage.getItem('splash_acc_name') || sessionStorage.getItem('splash_role') || 'edit',
       description: description, status: 'pending'
     });
     toast('📋 Đã gửi yêu cầu duyệt cho admin');
@@ -1449,7 +1451,7 @@ function _sbQueueRowDebounced(pjId, gid, rid, colData, desc) {
     _sb.from('pending_changes').insert({
       table_name: 'rows', operation: 'upsert', record_id: rid,
       payload: payload, context: { projectId: b.pjId },
-      submitted_by: sessionStorage.getItem('splash_role') || 'edit',
+      submitted_by: sessionStorage.getItem('splash_acc_name') || sessionStorage.getItem('splash_role') || 'edit',
       description: b.desc || ('Sửa dòng | ' + b.pjId), status: 'pending'
     }).then(function() {
       toast('📋 Đã gửi yêu cầu duyệt cho admin');
@@ -1580,8 +1582,9 @@ async function _sbAuditLog(action, tableName, recordId, description) {
 async function _sbSessionCreate(role) {
   if (!window._sbReady) return;
   try {
+    var _nm = sessionStorage.getItem('splash_acc_name') || '';
     var res = await _sb.from('user_sessions').insert({
-      role: role, user_agent: (navigator.userAgent || '').slice(0, 200)
+      role: role + (_nm ? ' · ' + _nm : ''), user_agent: (navigator.userAgent || '').slice(0, 200)
     }).select('id').single();
     window._sessionId = res.data && res.data.id;
     clearInterval(window._heartbeatTimer);
@@ -1865,6 +1868,16 @@ function _currentPerms() {
   return {};
 }
 function _hasPerm(f) { return !!_currentPerms()[f]; }
+// Hiện tên người đăng nhập trên header
+function _showWhoami() {
+  try {
+    var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
+    var nm = sessionStorage.getItem('splash_acc_name') || '';
+    var label = (r === 'admin') ? '👤 Admin' + (nm?' · '+nm:'') : (nm ? '👤 ' + nm : '');
+    var el = document.getElementById('whoami');
+    if (el) { el.textContent = label; el.style.display = label ? 'inline-block' : 'none'; }
+  } catch(e){}
+}
 // Áp quyền lên giao diện (ẩn/hiện nút theo permissions) — cho role 'custom'
 function applyPermUI() {
   var perms = _currentPerms();
@@ -1896,7 +1909,9 @@ async function openAccountsPanel() {
 }
 function _accountsPanelHtml(accs, editAcc) {
   var _sel = 'width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box';
-  var newCode = editAcc ? '' : _gen6();   // mã 6 số tự tạo cho tài khoản mới
+  var newCode = editAcc ? '' : _gen6();   // mã 6 số nội bộ tự tạo cho tài khoản mới
+  var _accNames = Array.from(new Set([].concat(D.settings.staffList||[], Object.keys(D.settings.staffProfiles||{})))).sort();
+  var _accNameOpts = '<option value="">— Chọn nhân sự —</option>' + _accNames.map(function(n){ return '<option value="'+x(n)+'"'+((editAcc&&editAcc.display_name===n)?' selected':'')+'>'+x(n)+'</option>'; }).join('');
   var permBoxes = _PERM_FEATURES.map(function(f){
     var on = editAcc ? !!(editAcc.permissions||{})[f] : (f==='intl');
     return '<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer"><input type="checkbox" class="acc-perm" data-f="'+f+'" '+(on?'checked':'')+' style="width:auto"> '+_PERM_LABELS[f]+'</label>';
@@ -1923,11 +1938,11 @@ function _accountsPanelHtml(accs, editAcc) {
     + '<div style="border-top:1px dashed #ddd;padding-top:12px">'
       + '<div style="font-weight:700;font-size:13px;color:#6d28d9;margin-bottom:8px">'+(editAcc?'✏ Sửa tài khoản: '+x(editAcc.code):'➕ Thêm tài khoản mới')+'</div>'
       + '<input type="hidden" id="acc-id" value="'+(editAcc?editAcc.id:'')+'">'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
-        + '<label style="font-size:11px;color:#374151">Mã đăng nhập '+(editAcc?'':'<span style="color:#9ca3af">(tự tạo 6 số)</span>')+'<div style="display:flex;gap:5px;margin-top:2px"><input id="acc-code" value="'+(editAcc?x(editAcc.code):newCode)+'" readonly style="'+_sel+';background:#f3f4f6;font-weight:700;letter-spacing:1px">'+(editAcc?'':'<button type="button" title="Tạo mã khác" onclick="var c=_gen6();document.getElementById(\'acc-code\').value=c;document.getElementById(\'acc-pw\').value=c" style="flex-shrink:0;padding:0 10px;border:1px solid #c4b5fd;background:#f5f3ff;border-radius:6px;cursor:pointer">🔄</button>')+'</div></label>'
-        + '<label style="font-size:11px;color:#374151">Tên hiển thị<input id="acc-name" value="'+(editAcc?x(editAcc.display_name||''):'')+'" placeholder="Tên người dùng" style="'+_sel+'"></label>'
+      + '<input type="hidden" id="acc-code" value="'+(editAcc?x(editAcc.code):newCode)+'">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+        + '<label style="font-size:11px;color:#374151">Tên người dùng <span style="color:#9ca3af">(chọn từ nhân sự)</span><select id="acc-name" style="'+_sel+'">'+_accNameOpts+'</select></label>'
+        + '<label style="font-size:11px;color:#374151">Mật khẩu '+(editAcc?'<span style="color:#9ca3af">(trống = giữ nguyên)</span>':'')+'<div style="display:flex;gap:5px;margin-top:2px"><input id="acc-pw" type="text" value="'+(editAcc?'':newCode)+'" placeholder="'+(editAcc?'••••••':'Mật khẩu')+'" style="'+_sel+'"><button type="button" title="Tạo mật khẩu khác" onclick="document.getElementById(\'acc-pw\').value=_gen6()" style="flex-shrink:0;padding:0 10px;border:1px solid #c4b5fd;background:#f5f3ff;border-radius:6px;cursor:pointer">🔄</button></div></label>'
       + '</div>'
-      + '<label style="font-size:11px;color:#374151;display:block;margin-bottom:10px">Mật khẩu '+(editAcc?'<span style="color:#9ca3af">(để trống = giữ nguyên)</span>':'<span style="color:#9ca3af">(mặc định = mã, sửa được)</span>')+'<input id="acc-pw" type="text" value="'+(editAcc?'':newCode)+'" placeholder="'+(editAcc?'••••••':'Mật khẩu đăng nhập')+'" style="'+_sel+'"></label>'
       + '<div style="font-size:11px;color:#374151;margin-bottom:5px;font-weight:600">Cho phép xem chức năng:</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">'+permBoxes+'</div>'
       + '<div style="display:flex;gap:8px;justify-content:flex-end">'
@@ -1943,7 +1958,8 @@ async function saveAccount() {
   var code = (document.getElementById('acc-code').value||'').trim();
   var name = (document.getElementById('acc-name').value||'').trim();
   var pw = (document.getElementById('acc-pw').value||'').trim();
-  if (!code) { alert('Hãy nhập mã đăng nhập.'); return; }
+  if (!name) { alert('Hãy chọn tên người dùng.'); return; }
+  if (!code) { code = _gen6(); }
   var perms = {};
   document.querySelectorAll('.acc-perm').forEach(function(c){ if (c.checked) perms[c.getAttribute('data-f')] = true; });
   var rec = { code:code, display_name:name, role:'custom', permissions:perms, is_active:true, updated_at:new Date().toISOString() };
@@ -1965,10 +1981,11 @@ async function saveAccount() {
 }
 // Hiện thông tin đăng nhập để admin copy gửi cho người dùng
 function _showAccountShare(code, pw, name) {
-  var url = 'https://gendaisougo-vietnam.github.io/gsa';
-  var share = '🔑 Tài khoản phần mềm GS' + (name?' ('+name+')':'') + '\n'
-    + '🔗 Link: ' + url + '\n'
-    + '👤 Mã đăng nhập: ' + code + '\n'
+  // Link mang sẵn mã tài khoản -> mở ra đã hiện đúng tên người, chỉ cần nhập mật khẩu
+  var url = 'https://gendaisougo-vietnam.github.io/gsa/?acc=' + encodeURIComponent(code);
+  var share = '🔑 Tài khoản phần mềm GS — ' + (name||'') + '\n'
+    + '👉 Bấm link rồi nhập mật khẩu là vào (đã hiện sẵn tên):\n'
+    + '🔗 ' + url + '\n'
     + '🔒 Mật khẩu: ' + pw;
   showModal(
     '<div style="max-width:460px">'
@@ -14215,6 +14232,7 @@ try { renderAll(); } catch(e) { console.error('renderAll init error:', e); }
 
 // Global: apply UI restrictions based on role
 function applyRoleUI(role) {
+  try { _showWhoami(); } catch(e){}
   if (role === 'admin') {
     try { document.body.classList.remove('hide-ot'); } catch(e){}
     var ob = document.getElementById('onlineBtn');
@@ -14317,15 +14335,19 @@ window.addEventListener('beforeunload', function() {
         // Tài khoản do admin tạo trong bảng accounts (phân quyền theo permissions)
         if (!role && window._sbReady) {
           try {
-            const { data: accs } = await _sb.from('accounts').select('*').eq('pass_hash', h).eq('is_active', true).limit(1);
+            var _accParam = new URLSearchParams(location.search).get('acc');
+            var _q = _sb.from('accounts').select('*').eq('pass_hash', h).eq('is_active', true);
+            if (_accParam) _q = _q.eq('code', _accParam);   // link ?acc -> đúng tài khoản người đó
+            const { data: accs } = await _q.limit(1);
             if (accs && accs.length) {
               const acc = accs[0];
               if (acc.role === 'admin') { role = 'admin'; }
               else {
                 role = 'custom';
                 try { sessionStorage.setItem('splash_perms', JSON.stringify(acc.permissions||{})); } catch(e){}
-                try { sessionStorage.setItem('splash_acc_name', acc.display_name||acc.code||''); } catch(e){}
               }
+              try { sessionStorage.setItem('splash_acc_name', acc.display_name||acc.code||''); } catch(e){}
+              try { sessionStorage.setItem('splash_acc_code', acc.code||''); } catch(e){}
             }
           } catch(e) { console.warn('[Auth accounts] ', e.message); }
         }
@@ -14378,6 +14400,21 @@ window.addEventListener('beforeunload', function() {
     } catch(e) { console.error('splashLogin error:', e); }
   };
   window.splashLogin = window._splashLogin;
+
+  // Link ?acc=<mã> -> hiện sẵn tên người dùng, chỉ cần nhập mật khẩu
+  (function(){
+    try {
+      var accParam = new URLSearchParams(location.search).get('acc');
+      if (!accParam || sessionStorage.getItem('splash_role')) return;
+      var who = document.getElementById('splashWho');
+      var tryShow = function(){
+        if (!window._sbReady) { setTimeout(tryShow, 500); return; }
+        _sb.from('accounts').select('display_name').eq('code', accParam).limit(1)
+          .then(function(r){ var n = r.data && r.data[0] && r.data[0].display_name; if (n && who){ who.textContent = '👤 ' + n; who.style.display = 'block'; } });
+      };
+      tryShow();
+    } catch(e){}
+  })();
 
   // Check session — already logged in
   try {

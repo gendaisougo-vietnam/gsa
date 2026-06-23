@@ -3357,9 +3357,9 @@ function _tlBarHtml(barColor, pos, dashed) {
   const barRight = (pos==='end'  ||pos==='only') ? '0' : '-1px';
   if (dashed) {
     // Lịch DỰ KIẾN: nét đôi đứt (đồng bộ với bảng 工程表)
-    return `<div style="position:absolute;top:50%;transform:translateY(-50%);left:${barLeft};right:${barRight};height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor};z-index:5"></div>`;
+    return `<div style="position:absolute;top:70%;transform:translateY(-50%);left:${barLeft};right:${barRight};height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor};z-index:5"></div>`;
   }
-  return `<div style="position:absolute;top:50%;transform:translateY(-50%);left:${barLeft};right:${barRight};height:${GANTT_BAR_H}px;background:${barColor};z-index:5"></div>`;
+  return `<div style="position:absolute;top:70%;transform:translateY(-50%);left:${barLeft};right:${barRight};height:${GANTT_BAR_H}px;background:${barColor};z-index:5"></div>`;
 }
 
 // UP marker HTML — sát TRÊN dòng kẻ, căn phải, màu theo doneAt, tooltip extendable
@@ -3369,7 +3369,7 @@ function _tlUpHtml(upRow, extraTitle) {
   const upColor = upDone ? '#374151' : '#e74c3c';
   const base = `Dự kiến UP: ${upRow.dateTo}${upRow.doneAt ? ' · Đã UP: ' + upRow.doneAt : ' · Chưa UP'}`;
   const upTitle = extraTitle ? `${extraTitle} · ${base}` : base;
-  return `<div title="${upTitle}" style="position:absolute;bottom:calc(50% + 1px);right:1px;font-size:9px;font-weight:900;color:${upColor};line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff;cursor:help">UP</div>`;
+  return `<div title="${upTitle}" style="position:absolute;bottom:calc(30% + 1px);right:1px;font-size:9px;font-weight:900;color:${upColor};line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff;cursor:help">UP</div>`;
 }
 
 // Border-left ô ngày (today/isAfterToday viền xanh, isPrev mảnh)
@@ -3513,8 +3513,8 @@ function renderKouteiJP(pjs, win){
       if(c){
         const L=c.isStart?'0':'-1px', R=c.isEnd?'0':'-1px';
         bar = c.dashed
-          ? '<div style="position:absolute;top:50%;transform:translateY(-50%);left:'+L+';right:'+R+';height:5px;border-top:1.2px dashed '+c.color+';border-bottom:1.2px dashed '+c.color+';z-index:5"></div>'
-          : '<div style="position:absolute;top:50%;transform:translateY(-50%);left:'+L+';right:'+R+';height:'+GANTT_BAR_H+'px;background:'+c.color+';z-index:5"></div>';
+          ? '<div style="position:absolute;top:70%;transform:translateY(-50%);left:'+L+';right:'+R+';height:5px;border-top:1.2px dashed '+c.color+';border-bottom:1.2px dashed '+c.color+';z-index:5"></div>'
+          : '<div style="position:absolute;top:70%;transform:translateY(-50%);left:'+L+';right:'+R+';height:'+GANTT_BAR_H+'px;background:'+c.color+';z-index:5"></div>';
       }
       let lbl='';
       if(g){
@@ -3525,7 +3525,7 @@ function renderKouteiJP(pjs, win){
           const lc = bw ? (ud?'#888':'#000') : (upToday?'#e74c3c':(ud?'#6b7280':(upRow.status==='new'?'#5a9a35':'#d4900a')));
           const lt = upRow.status==='new'?'作成':'修正';
           const tip = (upRow.staff?x(upRow.staff)+' ・ ':'')+'UP '+upRow.dateTo+(upRow.tentative?' ・ Dự kiến':'')+(upRow.doneAt?' ・ Đã UP':' ・ Chưa UP');
-          lbl='<div title="'+tip+'" style="position:absolute;bottom:calc(50% + 1px);right:1px;white-space:nowrap;font-size:9px;font-weight:900;color:'+lc+';line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff">'+lt+'</div>';
+          lbl='<div title="'+tip+'" style="position:absolute;bottom:calc(30% + 1px);right:1px;white-space:nowrap;font-size:9px;font-weight:900;color:'+lc+';line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff">'+lt+'</div>';
         }
       }
       const bg = (bw && isToday) ? '#f0f0f0' : _tlCellBg(isToday,isHol,isPrev);
@@ -4438,7 +4438,7 @@ function renderMonthGantt(pjs) {
               const lc = upToday?'#e74c3c':(ud?'#6b7280':(task.status==='new'?'#5a9a35':'#d4900a'));
               const lt = task.status==='new'?'作成':'修正';
               const tip = (task.pjName||'')+' ・ UP '+task.dateTo+(task.doneAt?' ・ Đã UP':' ・ Chưa UP');
-              upHtml = '<div title="'+tip+'" style="position:absolute;bottom:calc(50% + 1px);right:1px;white-space:nowrap;font-size:9px;font-weight:900;color:'+lc+';line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff;cursor:help">'+lt+'</div>';
+              upHtml = '<div title="'+tip+'" style="position:absolute;bottom:calc(30% + 1px);right:1px;white-space:nowrap;font-size:9px;font-weight:900;color:'+lc+';line-height:1;z-index:11;background:rgba(255,255,255,0.95);border-radius:2px;padding:0 2px;text-shadow:0 0 3px #fff,0 0 3px #fff;cursor:help">'+lt+'</div>';
             }
           }
           inner = `${bar}${upHtml}`;

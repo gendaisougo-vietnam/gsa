@@ -3769,7 +3769,8 @@ function renderProjectTimeline(pjs) {
   const PB = _TL_PB;
 
   // Day headers + month header — dùng helper chung (sync với staffSchedule)
-  const dayHeaders = _tlDayHeaderHtml(allDays, todayStr, holidaySet, 16);
+  const _DCW = 22;   // độ rộng ô ngày (px) — khớp với bảng 担当者別工程表 bên dưới
+  const dayHeaders = _tlDayHeaderHtml(allDays, todayStr, holidaySet, _DCW);
   // 4 cột trái (VP/Thông tin, Hạng mục, 作成, 修正) + 1 cột phải (Ghi chú / Khởi công)
   const monthHeaderRow = _tlMonthHeaderRow(monthSpans, 4, 1);
 
@@ -3781,7 +3782,7 @@ function renderProjectTimeline(pjs) {
     const bar = _tlBarHtml(barColor, pos);
     const upHtml = _tlUpHtml(upRow, extraTitle);
     const ch = compact ? 9 : 24;   // hạng mục đã UP xong: thu gọn còn ~1/3
-    return `<td style="width:16px;padding:0;position:relative;overflow:visible;background:${bg};border-left:${bL};border-bottom:${isLast?PB:CB}"><div style="height:${ch}px;position:relative;overflow:visible">${bar}${upHtml}</div></td>`;
+    return `<td style="width:${_DCW}px;padding:0;position:relative;overflow:visible;background:${bg};border-left:${bL};border-bottom:${isLast?PB:CB}"><div style="height:${ch}px;position:relative;overflow:visible">${bar}${upHtml}</div></td>`;
   }
 
   // Sắp xếp dự án: 大阪 trước, 東京 sau
@@ -3824,7 +3825,7 @@ function renderProjectTimeline(pjs) {
         const isAfterToday=prevDs===todayStr;
         const bg=isToday?_TL_TODAY_BG:isHol?'rgba(231,76,60,.04)':isPrev?'rgba(0,0,0,.02)':'var(--table-bg)';
         const bL=isToday||isAfterToday?_TL_TODAY_BORDER:isPrev?'1px solid #eee':CB;
-        return `<td style="width:16px;padding:0;background:${bg};border-left:${bL};border-bottom:none"><div style="height:12px"></div></td>`;
+        return `<td style="width:${_DCW}px;padding:0;background:${bg};border-left:${bL};border-bottom:none"><div style="height:12px"></div></td>`;
       }).join('')}
       <td style="border-bottom:none;border-left:${CB};background:var(--table-bg)"></td>
     </tr>` : '';
@@ -3947,7 +3948,7 @@ function renderProjectTimeline(pjs) {
       <col style="width:${isVN?'240px':'34px'}">
       <col style="width:175px">
       <col style="width:26px"><col style="width:26px">
-      ${allDays.map(()=>'<col style="width:16px">').join('')}
+      ${allDays.map(()=>'<col style="width:'+_DCW+'px">').join('')}
       <col style="width:90px">
     </colgroup>
     <thead>
@@ -3973,7 +3974,7 @@ function renderProjectTimeline(pjs) {
           const prevDs=di>0?allDays[di-1]:'';
           const isAfterToday=prevDs===todayStr;
           const bL=isToday||isAfterToday?_TL_TODAY_BORDER:CB;
-          return `<td style="width:16px;border-top:${PB};border-left:${bL};${isToday?'background:'+_TL_TODAY_BG+';':''}"></td>`;
+          return `<td style="width:${_DCW}px;border-top:${PB};border-left:${bL};${isToday?'background:'+_TL_TODAY_BG+';':''}"></td>`;
         }).join('')}
         <td style="border-top:${PB};border-left:${CB}"></td>
       </tr>

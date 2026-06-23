@@ -1407,7 +1407,9 @@ function savePjDetailField(pjId, field, val) {
     if (col) {
       if (typeof _needsApproval==='function' && _needsApproval()) {
         _sbQueueChange('Sửa thông tin dự án "' + (p.nameVN||p.nameJP||pjId) + '" (' + field + ')',
-          'projects', 'upsert', pjId, { [col]: val||null }, { monthId: foundMid });
+          'projects', 'upsert', pjId,
+          { month_id: foundMid, section: (foundSec==='vn'?'vn':'jp'), name_vn: p.nameVN||'', name_jp: p.nameJP||'', [col]: val||null },
+          { monthId: foundMid });
       } else {
         console.log('[savePjDetailField]', field, '→', col, '=', val);
         _sb.from('projects').update({ [col]: val||null }).eq('id', pjId)
@@ -8620,12 +8622,14 @@ function confirmEditPj(id) {
   if (_needsApproval()) {
     _sbQueueChange('Sửa dự án: "' + (p.nameVN || p.nameJP || id) + '"',
       'projects', 'upsert', id,
-      { name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'',
+      { month_id: D.activeMonth, section: (activeSection==='vn'?'vn':'jp'),
+        name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'',
         client: p.client||null, building_type: p.buildingType||null, scope: p.scope||null, area: p.area||null,
-        construction_start: p.constructionStart||null, construction_end: p.constructionEnd||null },
+        construction_start: p.constructionStart||null, construction_end: p.constructionEnd||null,
+        studio_on: (p.studioOn!==false), intl_on: (p.intlOn!==false) },
       { monthId: D.activeMonth });
   } else {
-    _sbSaveProject(p, D.activeMonth, activeSection);
+    _sbSaveProject(p, D.activeMonth, activeSection==='vn'?'vn':'jp');
   }
 }
 // Thu gọn / mở rộng nhóm task

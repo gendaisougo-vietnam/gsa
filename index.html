@@ -3697,8 +3697,10 @@ function renderKouteiJP(pjs, win){
   // Ô "Người liên hệ" dọc bên trái — gom các dự án cùng người liên hệ; nền hồng/xanh xen kẽ
   function _contactCell(name, rowspan, idx){
     var bg = bw ? '#fff' : (idx%2===0 ? '#fde2e4' : '#dbeafe');
+    // Hiển thị gọn: bỏ tiền tố văn phòng (HAN/SGN/HCM…), chỉ giữ tên viết tắt + tên (vd HAN LV.フン -> LV.フン)
+    var _dn = (name||'—').replace(/^(HAN|SGN|HCM|HN|SG)\s+/,'');
     return '<td rowspan="'+rowspan+'" style="border-bottom:'+_TL_PB+';border-right:'+SEP+';border-left:'+SEP+';background:'+bg+';text-align:center;vertical-align:middle;padding:1px;width:30px">'
-      + '<div style="writing-mode:vertical-rl;text-orientation:upright;font-size:11px;font-weight:700;color:#333;white-space:nowrap;margin:0 auto;letter-spacing:1px">'+x(name||'—')+'</div></td>';
+      + '<div style="writing-mode:vertical-rl;text-orientation:upright;font-size:11px;font-weight:700;color:#333;white-space:nowrap;margin:0 auto;letter-spacing:1px">'+x(_dn)+'</div></td>';
   }
 
   // Chia nhóm theo văn phòng: 大阪 trước, 東京 sau (kèm hàng tiêu đề VP)

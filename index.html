@@ -1906,18 +1906,19 @@ function _accountsPanelHtml(accs, editAcc) {
     return '<tr style="border-bottom:1px solid #eee">'
       + '<td style="padding:6px 8px;font-weight:600">'+x(a.code)+(a.is_active?'':' <span style="color:#dc2626;font-size:10px">(đã tắt)</span>')+'</td>'
       + '<td style="padding:6px 8px;font-size:11px;color:#555">'+x(a.display_name||'')+'</td>'
+      + '<td style="padding:6px 8px;font-size:12px;font-family:monospace;color:#0f766e;font-weight:700">'+(a.pass_plain?x(a.pass_plain):'<span style="color:#9ca3af;font-weight:400;font-family:inherit">(ẩn)</span>')+'</td>'
       + '<td style="padding:6px 8px;font-size:10px;color:#6d28d9">'+x(permTxt)+'</td>'
       + '<td style="padding:6px 8px;white-space:nowrap;text-align:right">'
         + '<button onclick="editAccount(\''+a.id+'\')" style="font-size:11px;padding:2px 8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:4px;cursor:pointer;margin-right:3px">Sửa</button>'
         + '<button onclick="toggleAccountActive(\''+a.id+'\','+(!a.is_active)+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;background:#fff;border-radius:4px;cursor:pointer;margin-right:3px">'+(a.is_active?'Tắt':'Bật')+'</button>'
         + '<button onclick="deleteAccount(\''+a.id+'\',\''+x(a.code)+'\')" style="font-size:11px;padding:2px 8px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:4px;cursor:pointer">Xoá</button>'
       + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="padding:14px;text-align:center;color:#9ca3af">Chưa có tài khoản nào</td></tr>';
+  }).join('') || '<tr><td colspan="5" style="padding:14px;text-align:center;color:#9ca3af">Chưa có tài khoản nào</td></tr>';
   return '<div style="max-width:640px">'
     + '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">🔑 Quản lý tài khoản truy cập</div>'
     + '<div style="font-size:11px;color:#6b7280;margin-bottom:10px">Tạo tài khoản, cấp quyền xem từng chức năng, bật/tắt hoặc xoá. (Admin gốc luôn đăng nhập được.)</div>'
     + '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">'
-      + '<thead><tr style="background:var(--navy);color:#fff"><th style="padding:6px 8px;text-align:left">Mã ĐN</th><th style="padding:6px 8px;text-align:left">Tên</th><th style="padding:6px 8px;text-align:left">Quyền xem</th><th style="padding:6px 8px"></th></tr></thead>'
+      + '<thead><tr style="background:var(--navy);color:#fff"><th style="padding:6px 8px;text-align:left">Mã ĐN</th><th style="padding:6px 8px;text-align:left">Tên</th><th style="padding:6px 8px;text-align:left">Mật khẩu</th><th style="padding:6px 8px;text-align:left">Quyền xem</th><th style="padding:6px 8px"></th></tr></thead>'
       + '<tbody>'+rows+'</tbody></table>'
     + '<div style="border-top:1px dashed #ddd;padding-top:12px">'
       + '<div style="font-weight:700;font-size:13px;color:#6d28d9;margin-bottom:8px">'+(editAcc?'✏ Sửa tài khoản: '+x(editAcc.code):'➕ Thêm tài khoản mới')+'</div>'
@@ -1948,11 +1949,11 @@ async function saveAccount() {
   var rec = { code:code, display_name:name, role:'custom', permissions:perms, is_active:true, updated_at:new Date().toISOString() };
   try {
     if (id) {
-      if (pw) rec.pass_hash = await hashPw(pw);
+      if (pw) { rec.pass_hash = await hashPw(pw); rec.pass_plain = pw; }
       var u = await _sb.from('accounts').update(rec).eq('id', id); if (u.error) throw u.error;
     } else {
       if (!pw) { alert('Tài khoản mới cần đặt mật khẩu.'); return; }
-      rec.pass_hash = await hashPw(pw);
+      rec.pass_hash = await hashPw(pw); rec.pass_plain = pw;
       var ins = await _sb.from('accounts').insert(rec); if (ins.error) throw ins.error;
       toast('✓ Đã tạo tài khoản: ' + code);
       _showAccountShare(code, pw, name);   // tài khoản MỚI -> hiện link + pass để copy gửi

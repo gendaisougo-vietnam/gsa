@@ -1399,10 +1399,15 @@ function savePjDetailField(pjId, field, val) {
                      client:'client' };
     const col = colMap[field];
     if (col) {
-      console.log('[savePjDetailField]', field, '→', col, '=', val);
-      _sb.from('projects').update({ [col]: val||null }).eq('id', pjId)
-        .then(r=>{ if(r.error) _sbReport('savePjDetailField', r.error, {op:'update', table:'projects'}); else toast('✓ Đã lưu'); })
-        .catch(e=>{ _sbReport('savePjDetailField', e, {op:'update', table:'projects'}); });
+      if (typeof _needsApproval==='function' && _needsApproval()) {
+        _sbQueueChange('Sửa thông tin dự án "' + (p.nameVN||p.nameJP||pjId) + '" (' + field + ')',
+          'projects', 'upsert', pjId, { [col]: val||null }, { monthId: foundMid });
+      } else {
+        console.log('[savePjDetailField]', field, '→', col, '=', val);
+        _sb.from('projects').update({ [col]: val||null }).eq('id', pjId)
+          .then(r=>{ if(r.error) _sbReport('savePjDetailField', r.error, {op:'update', table:'projects'}); else toast('✓ Đã lưu'); })
+          .catch(e=>{ _sbReport('savePjDetailField', e, {op:'update', table:'projects'}); });
+      }
     }
   }
 }
@@ -3487,13 +3492,14 @@ function renderProjectTimeline(pjs) {
   const monthHeaderRow = _tlMonthHeaderRow(monthSpans, 4, 1);
 
   // Day cell — wrap helper _tlBarHtml + _tlUpHtml để đồng bộ tuyệt đối với staffSchedule
-  function dayCell(ds, barColor, pos, isToday, isHol, isLast, isAfterToday, upRow, extraTitle) {
+  function dayCell(ds, barColor, pos, isToday, isHol, isLast, isAfterToday, upRow, extraTitle, compact) {
     const isPrev = ds < `${yr}-${String(mo).padStart(2,'0')}-01`;
     const bg = _tlCellBg(isToday, isHol, isPrev);
     const bL = _tlBorderLeft(isToday, isAfterToday, isPrev);
     const bar = _tlBarHtml(barColor, pos);
     const upHtml = _tlUpHtml(upRow, extraTitle);
-    return `<td style="width:16px;padding:2px 0;position:relative;overflow:visible;background:${bg};border-left:${bL};border-bottom:${isLast?PB:CB}"><div style="height:24px;position:relative;overflow:visible">${bar}${upHtml}</div></td>`;
+    const ch = compact ? 9 : 24;   // hạng mục đã UP xong: thu gọn còn ~1/3
+    return `<td style="width:16px;padding:0;position:relative;overflow:visible;background:${bg};border-left:${bL};border-bottom:${isLast?PB:CB}"><div style="height:${ch}px;position:relative;overflow:visible">${bar}${upHtml}</div></td>`;
   }
 
   // Sắp xếp dự án: 大阪 trước, 東京 sau
@@ -3549,6 +3555,7 @@ function renderProjectTimeline(pjs) {
       const grpNew = (g.rows||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
       const grpRev = (g.rows||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
       const grpAllDone = (g.rows||[]).some(r=>r.dateTo) && (g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt);
+      const _compactGrp = !isVN && grpAllDone;   // hạng mục đã UP xong -> thu gọn (chỉ bảng JP)
       // Có lịch UP chưa done và deadline chưa qua
       const grpHasPendingUp = (g.rows||[]).some(r => r.dateTo >= todayStr && !r.doneAt);
       // Done state: gray đậm (không opacity, không line-through)
@@ -3606,7 +3613,7 @@ function renderProjectTimeline(pjs) {
         const upRow = (g.rows||[]).find(r => r.dateTo === ds) || null;
         const extraTitle = upRow && upRow.staff ? upRow.staff : '';
 
-        return dayCell(ds, barColor, pos, isToday, isHol, isLastGrp, isAfterToday, upRow, extraTitle);
+        return dayCell(ds, barColor, pos, isToday, isHol, isLastGrp, isAfterToday, upRow, extraTitle, _compactGrp);
       }).join('');
 
       // Ghi chú từ tất cả row trong hạng mục
@@ -3622,11 +3629,11 @@ function renderProjectTimeline(pjs) {
       return `<tr class="grp-row" style="${trDoneStyle}">
         ${vnInfoCell}
         ${!isVN ? `<td style="padding:0 4px 0;border-bottom:${rowBorderB};border-right:${CB};border-left:${CB};background:var(--table-bg)"></td>` : ''}
-        <td style="padding:1px 4px 1px;border-bottom:${rowBorderB};border-right:${CB};${isVN?'border-left:'+CB+';':''}background:var(--table-bg);vertical-align:middle">
-          <div class="grp-name-text" style="font-size:11px;color:${grpNameColor};font-weight:${grpNameWeight};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:165px;line-height:1.2;">${x(g.type||'—')}${grpAllDone?' ✓':''}</div>
+        <td style="padding:${_compactGrp?'0 4px':'1px 4px 1px'};border-bottom:${rowBorderB};border-right:${CB};${isVN?'border-left:'+CB+';':''}background:var(--table-bg);vertical-align:middle">
+          <div class="grp-name-text" style="font-size:${_compactGrp?'8.5px':'11px'};color:${grpNameColor};font-weight:${grpNameWeight};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:165px;line-height:1.1;">${x(g.type||'—')}${grpAllDone?' ✓':''}</div>
         </td>
-        <td style="padding:1px 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:10px;font-weight:600;color:#27ae60;background:var(--table-bg);vertical-align:middle">${grpNew||''}</td>
-        <td style="padding:1px 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:10px;font-weight:600;color:#e67e22;background:var(--table-bg);vertical-align:middle">${grpRev||''}</td>
+        <td style="padding:0 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:${_compactGrp?'8.5px':'10px'};font-weight:600;color:#27ae60;background:var(--table-bg);vertical-align:middle">${grpNew||''}</td>
+        <td style="padding:0 3px;border-bottom:${rowBorderB};border-right:${CB};text-align:right;font-size:${_compactGrp?'8.5px':'10px'};font-weight:600;color:#e67e22;background:var(--table-bg);vertical-align:middle">${grpRev||''}</td>
         ${dayCells}
         <td style="padding:1px 5px;border-bottom:${rowBorderB};border-left:${CB};background:var(--table-bg);vertical-align:${isVN&&isFirstGrp?'top':'middle'};${isVN&&isFirstGrp?'min-width:100px':'max-width:90px;overflow:hidden'}">
           ${(isVN&&isFirstGrp)
@@ -4037,14 +4044,18 @@ function renderMonthGantt(pjs) {
       : isDoneByDate ? DONE_COLOR
       : 'inherit';
     const prefix = isTrip ? '✈' : `[${r.pjNum||'?'}]`;
-    return `<td ${r.pjId?`onclick="selectPj('${r.pjId}')"`:''} title="${r.pjId?'Mở dự án':''}" style="padding:2px 6px;border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
-      <div class="grp-name-text" style="font-size:11px;color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:18px">
+    const _compact = (isActuallyDone || isDoneByDate) && !isTodayUp && !isUrgent;  // đã UP xong/qua hạn -> thu gọn
+    return `<td ${r.pjId?`onclick="selectPj('${r.pjId}')"`:''} title="${r.pjId?'Mở dự án':''}" style="padding:${_compact?'0 6px':'2px 6px'};border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
+      <div class="grp-name-text" style="font-size:${_compact?'8.5px':'11px'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:${_compact?'11px':'18px'}">
         <span style="font-weight:800;color:${numColor}">${prefix}</span> ${typeName}${isTodayUp?' 🔴':''}${isUrgent?' ⚡':''}${isActuallyDone?' <span style="color:#27ae60;font-size:9px">✓</span>':''}
       </div>
     </td>`;
   }
 
   function buildDayCellsForTask(task, staff) {
+    // Task đã UP xong / qua hạn -> ô thu gọn còn ~1/3
+    const _compactCell = task && (task.doneAt || (task.dateTo && task.dateTo<todayStr && !(task.dateTo===todayStr)));
+    const _cellH = _compactCell ? 9 : 24;
     return days.map((d, i) => {
       const dkStr = dk(d), isToday = dkStr === todayStr;
       const isSun = d.getDay()===0, isSat = d.getDay()===6;
@@ -4102,7 +4113,7 @@ function renderMonthGantt(pjs) {
           inner = `${bar}${upHtml}`;
         }
       }
-      return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible;vertical-align:middle"><div style="height:24px;position:relative;overflow:visible">${inner}</div></td>`;
+      return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible;vertical-align:middle"><div style="height:${_cellH}px;position:relative;overflow:visible">${inner}</div></td>`;
     }).join('');
   }
 
@@ -7485,9 +7496,9 @@ async function addGroup(pjId) {
       var pObjAG = getPj(pjId);
       var pNameAG = pObjAG && (pObjAG.nameVN || pObjAG.nameJP) || pjId;
       _sbQueueChange('Thêm hạng mục vào "' + pNameAG + '"',
-        'groups', 'insert', g.id, { project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true }, { projectId: pjId });
+        'groups', 'upsert', g.id, { project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true, dept: (g.dept||'studio') }, { projectId: pjId });
       _sbQueueChange('Thêm dòng đầu tiên cho hạng mục mới | ' + pNameAG,
-        'rows', 'insert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
+        'rows', 'upsert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
     } else {
       try {
         const { error: err1 } = await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true, dept: (g.dept||'studio') });
@@ -7509,7 +7520,7 @@ async function addRow(pjId,gid2) {
       var pObjAR = getPj(pjId);
       var pNameAR = pObjAR && (pObjAR.nameVN || pObjAR.nameJP) || pjId;
       _sbQueueChange('Thêm dòng vào "' + pNameAR + '"',
-        'rows', 'insert', r.id, { group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
+        'rows', 'upsert', r.id, { group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
     } else {
       try {
         const { error } = await _sb.from('rows').insert({ id: r.id, group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00' });
@@ -7624,10 +7635,19 @@ async function updGroup(pjId,gid2,field,val) {
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
   g[field]=val; save();
   if (window._sbReady && field === 'type') {
-    try {
-      const { error } = await _sb.from('groups').update({ type: val }).eq('id', gid2);
-      if (error) _sbReport('updGroup', error, {op:'update', table:'groups'});
-    } catch(e) { _sbReport('updGroup', e, {op:'update', table:'groups'}); }
+    if (_needsApproval()) {
+      // Tài khoản cần duyệt: gửi yêu cầu (upsert đủ trường để không phụ thuộc thứ tự duyệt)
+      var pNameUG = (p.nameVN||p.nameJP)||pjId;
+      _sbQueueChange('Đặt tên hạng mục "' + (val||'(trống)') + '" trong "' + pNameUG + '"',
+        'groups', 'upsert', gid2,
+        { project_id: pjId, type: val, dept: (g.dept||'studio'), manual: (g._manual?true:false) },
+        { projectId: pjId });
+    } else {
+      try {
+        const { error } = await _sb.from('groups').update({ type: val }).eq('id', gid2);
+        if (error) _sbReport('updGroup', error, {op:'update', table:'groups'});
+      } catch(e) { _sbReport('updGroup', e, {op:'update', table:'groups'}); }
+    }
   }
 }
 // Ghi 1 trường sang 1 row ở tháng khác (dùng cho đồng bộ carryover 2 chiều)
@@ -8198,7 +8218,9 @@ function confirmEditPj(id) {
   if (_needsApproval()) {
     _sbQueueChange('Sửa dự án: "' + (p.nameVN || p.nameJP || id) + '"',
       'projects', 'upsert', id,
-      { name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'' },
+      { name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'',
+        client: p.client||null, building_type: p.buildingType||null, scope: p.scope||null, area: p.area||null,
+        construction_start: p.constructionStart||null, construction_end: p.constructionEnd||null },
       { monthId: D.activeMonth });
   } else {
     _sbSaveProject(p, D.activeMonth, activeSection);

@@ -1236,7 +1236,9 @@ async function sbLoadAll() {
     const _today = new Date(); _today.setHours(0,0,0,0);
     const _warnDays = result.settings.leavingWarnDays || 7;
     const _staffChanges = [];
-    (result.settings.staffList || []).forEach(function(name) {
+    // Duyệt TẤT CẢ nhân sự có hồ sơ (không chỉ staffList) — nhân sự phòng Bản vẽ/Quốc tế có thể chỉ nằm trong staffProfiles.
+    const _allProfNames = Array.from(new Set([...(result.settings.staffList||[]), ...Object.keys(result.settings.staffProfiles||{})]));
+    _allProfNames.forEach(function(name) {
       const prof = (result.settings.staffProfiles || {})[name];
       if (!prof) return;
       const cur = prof.status || 'active';
@@ -9736,7 +9738,14 @@ function confirmProbationLeave(name) {
 // ── Staff status helpers (Step 2 of staff add/leave feature) ──────────
 function getStaffStatus(name) {
   var prof = getStaffProfile(name);
-  return (prof && prof.status) || 'active';
+  var st = (prof && prof.status) || 'active';
+  // Tự động coi là ĐÃ NGHỈ ('left') khi đã đặt ngày nghỉ và ngày đó đã qua — dù chưa kịp lưu DB.
+  if (prof && prof.leaveDate && (st === 'leaving' || st === 'left')) {
+    var d = new Date(prof.leaveDate); d.setHours(0,0,0,0);
+    var t = new Date(); t.setHours(0,0,0,0);
+    if (Math.round((d - t)/86400000) < 0) return 'left';
+  }
+  return st;
 }
 function isStaffActive(name)   { return getStaffStatus(name) === 'active'; }
 function isStaffLeaving(name)  { return getStaffStatus(name) === 'leaving'; }

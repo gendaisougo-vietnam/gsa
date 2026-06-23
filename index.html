@@ -8177,13 +8177,14 @@ function openAddProject() {
       </div>
     </div>
     <div class="info-grid c2" style="gap:10px;margin-top:10px">
-      <div class="field"><label>Người liên hệ JP</label>
-        <input id="ap-ct" list="ap-cl" placeholder="ソン, フン…">
-        <datalist id="ap-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist>
+      <div class="field"><label>Người liên hệ (phòng này)</label>
+        <select id="ap-ct"><option value="">— Chọn —</option>
+          ${_deptStaffOptionsHtml('')}
+        </select>
       </div>
-      <div class="field"><label>Người triển khai chính</label>
+      <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ap-st"><option value="">— Chọn —</option>
-          ${sortedStaffOptionsHtml('')}
+          ${_deptStaffOptionsHtml('')}
         </select>
       </div>
     </div>
@@ -8231,13 +8232,14 @@ function openAddProject() {
     </div>
     <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
     <div class="info-grid c2" style="gap:10px">
-      <div class="field"><label>Người liên hệ</label>
-        <input id="ap-ct" list="ap-cl" placeholder="Tên liên hệ…">
-        <datalist id="ap-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist>
+      <div class="field"><label>Người liên hệ (phòng này)</label>
+        <select id="ap-ct"><option value="">— Chọn —</option>
+          ${_deptStaffOptionsHtml('')}
+        </select>
       </div>
-      <div class="field"><label>Người triển khai chính</label>
+      <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ap-st"><option value="">— Chọn —</option>
-          ${sortedStaffOptionsHtml('')}
+          ${_deptStaffOptionsHtml('')}
         </select>
       </div>
     </div>
@@ -8490,12 +8492,12 @@ function openEditProject(id) {
         <select id="ep-off">${sel(['大阪','東京','ハノイ','HCM'],p.office)}</select></div>
     </div>
     <div class="info-grid c2" style="gap:10px;margin-top:10px">
-      <div class="field"><label>Người liên hệ JP</label>
-        <input id="ep-ct" list="ep-cl" value="${x(p.contact||'')}">
-        <datalist id="ep-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist></div>
-      <div class="field"><label>Người triển khai chính</label>
+      <div class="field"><label>Người liên hệ (phòng này)</label>
+        <select id="ep-ct"><option value="">— Chọn —</option>
+          ${_deptStaffOptionsHtml(p.contact)}</select></div>
+      <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ep-st"><option value="">— Chọn —</option>
-          ${sortedStaffOptionsHtml(p.mainStaff)}</select></div>
+          ${_deptStaffOptionsHtml(p.mainStaff)}</select></div>
     </div>
     <div style="font-size:11px;font-weight:700;color:#1F3864;margin:12px 0 8px;padding:4px 8px;background:#eef3fb;border-radius:4px">🏛 Khung tên dự án (工程表)</div>
     <div class="info-grid c2" style="gap:10px">
@@ -8540,12 +8542,12 @@ function openEditProject(id) {
     </div>
     <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
     <div class="info-grid c2" style="gap:10px">
-      <div class="field"><label>Người liên hệ</label>
-        <input id="ep-ct" list="ep-cl" value="${x(p.contact||'')}">
-        <datalist id="ep-cl">${D.settings.contactList.map(c=>`<option value="${c}">`).join('')}</datalist></div>
-      <div class="field"><label>Người triển khai chính</label>
+      <div class="field"><label>Người liên hệ (phòng này)</label>
+        <select id="ep-ct"><option value="">— Chọn —</option>
+          ${_deptStaffOptionsHtml(p.contact)}</select></div>
+      <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ep-st"><option value="">— Chọn —</option>
-          ${sortedStaffOptionsHtml(p.mainStaff)}</select></div>
+          ${_deptStaffOptionsHtml(p.mainStaff)}</select></div>
     </div>
     <input type="hidden" id="ep-nJP" value="${x(p.nameJP||'')}">`;
 
@@ -9792,6 +9794,22 @@ function sortedStaffOptionsHtml(selectedName) {
     } else {
       html += '<option value="' + name + '"' + sel + '>' + name + '</option>';
     }
+  });
+  return html;
+}
+
+// Dropdown nhân sự CHỈ của phòng đang xem (国際設計室 / デザインスタジオ / 設計室) — dùng cho thông tin dự án
+function _deptStaffOptionsHtml(selectedName) {
+  var html = '';
+  var _names = (typeof _deptStaffNames==='function') ? _deptStaffNames() : [...(D.settings.staffList||[])];
+  if (selectedName && _names.indexOf(selectedName) < 0) _names = [selectedName].concat(_names);
+  _names = _names.slice().sort(function(a,b){ if(a==='HAN トゥアン')return -1; if(b==='HAN トゥアン')return 1; var pa=getStaffProfile(a),pb=getStaffProfile(b); return (pa.order||99)-(pb.order||99); });
+  _names.forEach(function(name){
+    var status = getStaffStatus(name);
+    var sel = (name === selectedName) ? ' selected' : '';
+    if (status === 'left') html += '<option value="'+x(name)+'" style="color:#9ca3af;font-style:italic"'+sel+'>🚪 '+x(name)+'</option>';
+    else if (status === 'leaving') html += '<option value="'+x(name)+'" style="color:#d97706"'+sel+'>⏰ '+x(name)+'</option>';
+    else html += '<option value="'+x(name)+'"'+sel+'>'+x(name)+'</option>';
   });
   return html;
 }

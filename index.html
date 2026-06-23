@@ -4748,18 +4748,19 @@ function updateHeroForProject(p) {
   const pctRev = tgtRev > 0 ? Math.min(100, Math.round(sumRev / tgtRev * 100)) : 0;
   const _pjNew = _rowCountDept(p,'new'), _pjRev = _rowCountDept(p,'rev');
 
-  // Staff breakdown for this project — CHỈ hạng mục của phòng đang xem
+  // Staff breakdown for this project — CHỈ hạng mục của phòng đang xem.
+  // Gom theo người THỰC TẾ trong hạng mục (không phụ thuộc staffList — nhân sự phòng Bản vẽ có thể không nằm trong staffList).
   const sm = {};
-  D.settings.staffList.forEach(s => sm[s] = {n:0, r:0, ot:0});
+  function _smGet(name){ if(!sm[name]) sm[name]={n:0,r:0,ot:0}; return sm[name]; }
   (p.groups||[]).filter(_groupInDept).flatMap(g => g.rows||[]).forEach(r => {
-    if(r.staff && sm[r.staff] && !r.isCarryRef) {
-      if(r.status==='new') sm[r.staff].n += (r.qty||0);
-      else sm[r.staff].r += (r.qty||0);
-      sm[r.staff].ot += (r.ot||0);
+    if(r.staff && !r.isCarryRef) {
+      const e=_smGet(r.staff);
+      if(r.status==='new') e.n += (r.qty||0); else e.r += (r.qty||0);
+      e.ot += (r.ot||0);
     }
   });
-  (p.otLog||[]).forEach(e => { if(e.staff && sm[e.staff]) sm[e.staff].ot += (e.hours||0); });
-  const activeS = D.settings.staffList.filter(s => sm[s].n + sm[s].r + sm[s].ot > 0);
+  (p.otLog||[]).forEach(e => { if(e.staff) _smGet(e.staff).ot += (e.hours||0); });
+  const activeS = Object.keys(sm).filter(s => sm[s].n + sm[s].r + sm[s].ot > 0);
   const maxV = Math.max(1, ...activeS.map(s => sm[s].n + sm[s].r));
 
   const heroRow = document.getElementById('heroStatsRow');
@@ -6136,12 +6137,12 @@ function renderProjectDetail(ci, p) {
   const ot=totalOT(p);
 
   const sm={};
-  D.settings.staffList.forEach(s=>sm[s]={n:0,r:0,ot:0});
-  (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{
-    if(r.staff&&sm[r.staff]){ if(r.status==='new') sm[r.staff].n+=(r.qty||0); else sm[r.staff].r+=(r.qty||0); sm[r.staff].ot+=(r.ot||0); }
+  const _smG=function(n){ if(!sm[n]) sm[n]={n:0,r:0,ot:0}; return sm[n]; };
+  (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).forEach(r=>{
+    if(r.staff&&!r.isCarryRef){ const e=_smG(r.staff); if(r.status==='new') e.n+=(r.qty||0); else e.r+=(r.qty||0); e.ot+=(r.ot||0); }
   });
-  (p.otLog||[]).forEach(e=>{if(e.staff&&sm[e.staff])sm[e.staff].ot+=(e.hours||0);});
-  const activeS=D.settings.staffList.filter(s=>sm[s].n+sm[s].r+sm[s].ot>0);
+  (p.otLog||[]).forEach(e=>{if(e.staff)_smG(e.staff).ot+=(e.hours||0);});
+  const activeS=Object.keys(sm).filter(s=>sm[s].n+sm[s].r+sm[s].ot>0);
   const maxV=Math.max(1,...activeS.map(s=>sm[s].n+sm[s].r));
 
   ci.innerHTML=`

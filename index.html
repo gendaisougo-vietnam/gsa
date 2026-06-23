@@ -3633,7 +3633,7 @@ function renderKouteiJP(pjs, win){
   function _contactCell(name, rowspan, idx){
     var bg = bw ? '#fff' : (idx%2===0 ? '#fde2e4' : '#dbeafe');
     return '<td rowspan="'+rowspan+'" style="border-bottom:'+_TL_PB+';border-right:'+SEP+';border-left:'+SEP+';background:'+bg+';text-align:center;vertical-align:middle;padding:1px;width:30px">'
-      + '<div style="writing-mode:vertical-rl;text-orientation:mixed;font-size:11px;font-weight:700;color:#333;white-space:nowrap;margin:0 auto">'+x(name||'—')+'</div></td>';
+      + '<div style="writing-mode:vertical-rl;text-orientation:upright;font-size:11px;font-weight:700;color:#333;white-space:nowrap;margin:0 auto;letter-spacing:1px">'+x(name||'—')+'</div></td>';
   }
 
   // Chia nhóm theo văn phòng: 大阪 trước, 東京 sau (kèm hàng tiêu đề VP)

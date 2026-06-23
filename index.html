@@ -2447,6 +2447,13 @@ function _rowCountDept(p, status){
   (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
   return s;
 }
+// Đếm số mai theo dept cụ thể ('studio'|'intl'|null=tất cả). Dùng cho Xuất báo cáo từng phòng.
+function _rowCountFor(p, status, deptFilter){
+  let s=0;
+  (p.groups||[]).forEach(function(g){ if(deptFilter!==null && (g.dept||'studio')!==deptFilter) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef) s+=(r.qty||0); }); });
+  if(deptFilter!=='intl') (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
+  return s;
+}
 function curProjects() {
   const m = curMonth();
   if (activeSection==='vn') return m.projectsVN||[];
@@ -14135,12 +14142,14 @@ function updateColorInputs() {
 /* ══════════════════════════════════════════════════════
    EXPORT / REPORT — simplified: name + items + counts only
 ══════════════════════════════════════════════════════ */
-function _collectOTEntries(pjs) {
+function _collectOTEntries(pjs, deptFilter) {
+  if(deptFilter===undefined) deptFilter=null;
   const entries = [];
   (pjs||[]).forEach(p => {
     const pjName = p.nameVN || p.nameJP || '?';
     const pjOffice = p.office || '';
     (p.groups||[]).forEach(g => {
+      if(deptFilter!==null && (g.dept||'studio')!==deptFilter) return;
       (g.rows||[]).forEach(r => {
         if (r && r.staff && (r.ot||0) > 0) {
           entries.push({
@@ -14154,6 +14163,7 @@ function _collectOTEntries(pjs) {
         }
       });
     });
+    if(deptFilter==='intl') return;  // OT thủ công (otLog) thuộc phòng phối cảnh/VN, không tính cho bản vẽ
     (p.otLog||[]).forEach(e => {
       entries.push({
         staff: e.staff,
@@ -14172,10 +14182,12 @@ function openExportMenu() {
   const ml = monthLabel(D.activeMonth);
   const pjsJP = D.months[D.activeMonth]?.projects    || [];
   const pjsVN = D.months[D.activeMonth]?.projectsVN  || [];
-  const cntJP = pjsJP.filter(p=>totalNew(p)+totalRev(p)>0).length;
-  const cntVN = pjsVN.filter(p=>totalNew(p)+totalRev(p)>0).length;
-  const otJP  = _collectOTEntries(pjsJP).reduce((s,e)=>s+(e.hours||0), 0);
-  const otVN  = _collectOTEntries(pjsVN).reduce((s,e)=>s+(e.hours||0), 0);
+  const cntJP   = pjsJP.filter(p=>_rowCountFor(p,'new','studio')+_rowCountFor(p,'rev','studio')>0).length;
+  const cntIntl = pjsJP.filter(p=>_rowCountFor(p,'new','intl')+_rowCountFor(p,'rev','intl')>0).length;
+  const cntVN   = pjsVN.filter(p=>totalNew(p)+totalRev(p)>0).length;
+  const otJP   = _collectOTEntries(pjsJP,'studio').reduce((s,e)=>s+(e.hours||0), 0);
+  const otIntl = _collectOTEntries(pjsJP,'intl').reduce((s,e)=>s+(e.hours||0), 0);
+  const otVN   = _collectOTEntries(pjsVN).reduce((s,e)=>s+(e.hours||0), 0);
 
   function card(icon, title, sub, badge, color, bg, fn) {
     return `<div style="border:1.5px solid #eee;border-radius:12px;padding:18px;text-align:center;cursor:pointer;transition:all .15s"
@@ -14194,14 +14206,16 @@ function openExportMenu() {
     <div style="font-size:11px;color:#aaa;margin-bottom:14px">Chọn loại báo cáo và nguồn dữ liệu</div>
 
     <div style="font-size:11px;font-weight:700;color:#1F3864;letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">📋 Báo cáo Dự án</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-      ${card('🇯🇵','デザインスタジオ Design Studio','Hạng mục · Mới / Sửa<br>Tổng từng dự án JP',`${cntJP} dự án`,'#1F3864','#EEF3FB',`exportProjectReport('jp')`)}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      ${card('🇯🇵','デザインスタジオ Design Studio','Phối cảnh · Mới / Sửa<br>Tổng từng dự án',`${cntJP} dự án`,'#1F3864','#EEF3FB',`exportProjectReport('jp')`)}
+      ${card('📐','国際設計室 Bản vẽ','Bản vẽ · Khổ A1/A2/A3<br>Tổng từng dự án',`${cntIntl} dự án`,'#6D28D9','#F5F3FF',`exportProjectReport('intl')`)}
       ${card('🇻🇳','設計室 Design Department','Hạng mục · Mới / Sửa<br>Tổng từng dự án VN',`${cntVN} dự án`,'#C8292A','#FFF0F0',`exportProjectReport('vn')`)}
     </div>
 
     <div style="font-size:11px;font-weight:700;color:#C55A11;letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase">⏱ Báo cáo OT</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
       ${card('🇯🇵','OT デザインスタジオ Design Studio','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otJP.toFixed(1)}h`,'#ED7D31','#FFF5EE',`exportOTReport('jp')`)}
+      ${card('📐','OT 国際設計室 Bản vẽ','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otIntl.toFixed(1)}h`,'#6D28D9','#F5F3FF',`exportOTReport('intl')`)}
       ${card('🇻🇳','OT 設計室 Design Department','Nhân sự · Ngày giờ OT<br>Tổng giờ tháng',`${otVN.toFixed(1)}h`,'#C55A11','#FFF5EE',`exportOTReport('vn')`)}
     </div>
 
@@ -14215,25 +14229,30 @@ function openExportMenu() {
 function exportProjectReport(section) {
   section = section || 'jp';
   const isVN = section === 'vn';
+  const isIntl = section === 'intl';
+  const deptFilter = isIntl ? 'intl' : (isVN ? null : 'studio');
   const pjs = isVN
     ? (D.months[D.activeMonth]?.projectsVN || [])
     : (D.months[D.activeMonth]?.projects   || []);
   const m = curMonth();
   const ml = monthLabel(D.activeMonth);
   const now = new Date().toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'});
-  const sumNew = pjs.reduce((s,p)=>s+totalNew(p),0);
-  const sumRev = pjs.reduce((s,p)=>s+totalRev(p),0);
-  const sectionLabel = isVN ? '🇻🇳 設計室 (Design Department)' : '🇯🇵 デザインスタジオ (Design Studio)';
-  const headerColor  = isVN ? '#C8292A' : '#1F3864';
-  const newColor     = isVN ? '#1A7A3A' : '#375623';
-  const revColor     = isVN ? '#7F4000' : '#7F6000';
+  const _pn = p=>_rowCountFor(p,'new',deptFilter), _pr = p=>_rowCountFor(p,'rev',deptFilter);
+  const sumNew = pjs.reduce((s,p)=>s+_pn(p),0);
+  const sumRev = pjs.reduce((s,p)=>s+_pr(p),0);
+  const _gDeptOK = g => deptFilter===null ? true : ((g.dept||'studio')===deptFilter);
+  const unitLabel = isVN ? 'hạng mục' : (isIntl ? 'tờ bản vẽ' : 'phối cảnh');
+  const sectionLabel = isVN ? '🇻🇳 設計室 (Design Department)' : (isIntl ? '📐 国際設計室 (Bản vẽ / International)' : '🇯🇵 デザインスタジオ (Design Studio)');
+  const headerColor  = isVN ? '#C8292A' : (isIntl ? '#6D28D9' : '#1F3864');
+  const newColor     = isVN ? '#1A7A3A' : (isIntl ? '#6D28D9' : '#375623');
+  const revColor     = isVN ? '#7F4000' : (isIntl ? '#9333EA' : '#7F6000');
 
   const pjBlocks = pjs.map((p,i) => {
-    const groups = p.groups||[];
-    if (!groups.length && totalNew(p)+totalRev(p)===0) return '';
-    const tn = totalNew(p), tr = totalRev(p);
+    const groups = (p.groups||[]).filter(_gDeptOK);
+    const tn = _pn(p), tr = _pr(p);
+    if (!groups.length && tn+tr===0) return '';
 
-    // Group rows: only type name + new count + rev count
+    // Group rows: type name + new count + rev count (+ khổ giấy nếu là phòng Bản vẽ)
     const groupRows = groups.filter(g=>{
       const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
       const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
@@ -14241,8 +14260,10 @@ function exportProjectReport(section) {
     }).map(g => {
       const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
       const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+      let _ps='';
+      if(isIntl){ const pc={}; (g.rows||[]).forEach(r=>{ if(r.isCarryRef)return; const k=r.paperSize||''; if(k==='A1'||k==='A2'||k==='A3') pc[k]=(pc[k]||0)+(r.qty||0); }); const tags=['A1','A2','A3'].filter(k=>pc[k]).map(k=>k+':'+pc[k]).join(' '); if(tags) _ps=` <span style="font-size:9px;color:#6d28d9;font-weight:600">(${tags})</span>`; }
       return `<tr>
-        <td style="padding:5px 10px;border-bottom:1px solid #f0f0f0">${x(g.type||'—')}</td>
+        <td style="padding:5px 10px;border-bottom:1px solid #f0f0f0">${x(g.type||'—')}${_ps}</td>
         <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;color:#375623;font-weight:600">${gNew||'—'}</td>
         <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;color:#7F6000;font-weight:600">${gRev||'—'}</td>
         <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;font-weight:700">${gNew+gRev}</td>
@@ -14281,10 +14302,10 @@ function exportProjectReport(section) {
         <div style="font-size:11px;color:#888;margin-top:2px">Ngày xuất: ${now}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:12px;color:#555">Tổng dự án: <strong>${pjs.filter(p=>totalNew(p)+totalRev(p)>0).length}</strong></div>
+        <div style="font-size:12px;color:#555">Tổng dự án: <strong>${pjs.filter(p=>_pn(p)+_pr(p)>0).length}</strong></div>
         <div style="font-size:12px;color:${newColor};margin-top:4px">作成 Làm mới: <strong>${sumNew}</strong></div>
         <div style="font-size:12px;color:${revColor}">修正 Sửa lại: <strong>${sumRev}</strong></div>
-        <div style="font-size:14px;font-weight:800;color:${headerColor};margin-top:2px">Tổng: ${sumNew+sumRev} phối cảnh</div>
+        <div style="font-size:14px;font-weight:800;color:${headerColor};margin-top:2px">Tổng: ${sumNew+sumRev} ${unitLabel}</div>
       </div>
     </div>
     ${pjBlocks||'<p style="color:#bbb">Không có dữ liệu</p>'}
@@ -14300,23 +14321,26 @@ function exportProjectReport(section) {
 function exportOTReport(section) {
   section = section || 'jp';
   const isVN = section === 'vn';
+  const isIntl = section === 'intl';
+  const deptFilter = isIntl ? 'intl' : (isVN ? null : 'studio');
   const pjs = isVN
     ? (D.months[D.activeMonth]?.projectsVN || [])
     : (D.months[D.activeMonth]?.projects   || []);
   const ml = monthLabel(D.activeMonth);
   const now = new Date().toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'});
-  const sectionLabel = isVN ? '🇻🇳 設計室 (Design Department)' : '🇯🇵 デザインスタジオ (Design Studio)';
-  const headerColor  = isVN ? '#C55A11' : '#ED7D31';
+  const sectionLabel = isVN ? '🇻🇳 設計室 (Design Department)' : (isIntl ? '📐 国際設計室 (Bản vẽ / International)' : '🇯🇵 デザインスタジオ (Design Studio)');
+  const headerColor  = isVN ? '#C55A11' : (isIntl ? '#6D28D9' : '#ED7D31');
   const staffOT = {};
-  D.settings.staffList.forEach(s=>staffOT[s]={total:0,entries:[]});
-  const allEntries = _collectOTEntries(pjs);
+  // Gom theo người THỰC TẾ có OT (không phụ thuộc staffList — nhân sự phòng Bản vẽ có thể ngoài staffList).
+  const allEntries = _collectOTEntries(pjs, deptFilter);
   allEntries.forEach(e=>{
-    if(e.staff && staffOT[e.staff]){
+    if(e.staff){
+      if(!staffOT[e.staff]) staffOT[e.staff]={total:0,entries:[]};
       staffOT[e.staff].total += (e.hours||0);
       staffOT[e.staff].entries.push(e);
     }
   });
-  const activeStaff = D.settings.staffList.filter(s=>staffOT[s].total>0);
+  const activeStaff = Object.keys(staffOT).filter(s=>staffOT[s].total>0).sort((a,b)=>staffOT[b].total-staffOT[a].total);
   if(!activeStaff.length){ toast('Tháng này chưa có nhân sự nào phát sinh OT'); return; }
   const totalOT = activeStaff.reduce((s,k)=>s+staffOT[k].total,0);
 

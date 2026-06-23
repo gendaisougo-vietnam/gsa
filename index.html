@@ -7564,6 +7564,43 @@ async function cleanupEmptyGroups() {
 }
 window.cleanupEmptyGroups = cleanupEmptyGroups;
 
+// ── SỬA DỮ LIỆU CŨ: hạng mục bản vẽ bị gán nhầm sang phòng Phối cảnh (lỗi thiếu dept khi duyệt) ──
+// Admin chạy 1 lần từ Console (F12): fixIntlGroups()
+//  - Chuyển các hạng mục có TÊN khớp danh sách hạng mục Bản vẽ (Settings) -> dept='intl'
+//  - Liệt kê các hạng mục TRỐNG TÊN (mất tên do lỗi) để admin tự kiểm tra
+async function fixIntlGroups() {
+  if ((sessionStorage.getItem('splash_role')||'admin') !== 'admin') { alert('Chỉ admin mới chạy được.'); return; }
+  var intlNames = new Set((D.settings.typeListIntl||[]).map(function(s){ return String(s).trim(); }).filter(Boolean));
+  if (!intlNames.size) { alert('Danh sách hạng mục Bản vẽ trong Cài đặt đang trống — hãy điền trước khi chạy.'); return; }
+  var moved = [], blanks = [];
+  for (const mid of Object.keys(D.months||{})) {
+    var m = D.months[mid];
+    for (const p of [...(m.projects||[]), ...(m.projectsVN||[])]) {
+      for (const g of (p.groups||[])) {
+        if ((g.dept||'studio') === 'intl') continue;
+        var ty = (g.type||'').trim();
+        if (ty && intlNames.has(ty)) {
+          g.dept = 'intl';
+          moved.push({ tháng: mid, dự_án: p.nameJP||p.nameVN||p.id, hạng_mục: ty, id: g.id });
+          if (window._sbReady) { try { await _sb.from('groups').update({ dept: 'intl' }).eq('id', g.id); } catch(e) { console.warn('update fail', g.id, e.message); } }
+        } else if (!ty) {
+          blanks.push({ tháng: mid, dự_án: p.nameJP||p.nameVN||p.id, id: g.id });
+        }
+      }
+    }
+  }
+  save();
+  console.log('=== KẾT QUẢ fixIntlGroups ===');
+  console.log('✓ Đã chuyển sang phòng Bản vẽ:', moved.length);
+  if (moved.length) console.table(moved);
+  console.log('⚠ Hạng mục TRỐNG TÊN (nghi mất tên do lỗi cũ, cần kiểm tra tay):', blanks.length);
+  if (blanks.length) console.table(blanks);
+  if (typeof renderAll === 'function') renderAll();
+  alert('Đã chuyển ' + moved.length + ' hạng mục về phòng Bản vẽ.\n' +
+        (blanks.length ? blanks.length + ' hạng mục bị trống tên — xem Console (F12) để kiểm tra/sửa tay.' : 'Không có hạng mục trống tên.'));
+}
+window.fixIntlGroups = fixIntlGroups;
+
 async function delGroup(pjId,gid2) {
   if(!confirm('Xóa hạng mục này?')) return;
   const p=getPj(pjId); if(!p) return;

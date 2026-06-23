@@ -3456,7 +3456,7 @@ function renderKouteiJP(pjs, win){
   if(!pjs.length) return '<div style="padding:24px;text-align:center;color:#aaa;font-size:12px">Chưa có dự án trong tháng này.</div>';
 
   const C_NEW=bw?'#000':'#5a9a35', C_REV=bw?'#000':'#d4900a', C_DONE=bw?'#9aa0a6':DONE_BAR_COLOR;
-  const NCOL=5; // 備考,項目,担当,作成,修正
+  const NCOL=5; // 連絡(Người liên hệ),備考,項目,作成,修正 — 担当 gộp vào hàng tên dự án
   const totCols = NCOL + allDays.length;
   const WJ=['日','月','火','水','木','金','土'];
   const SEP='2px solid #888';  // vạch đậm phân cách khối trái | timeline
@@ -3472,8 +3472,8 @@ function renderKouteiJP(pjs, win){
   // Header 2 hàng giống file gốc: (工事名称 | 担当 | 作成 | 修正 | tháng) rồi (備考 | 項目 | ngày)
   const thead = bandRow
     + '<tr>'
-    + '<th colspan="2" style="'+HB+';font-size:11px;padding:3px 6px">工事名称</th>'
-    + '<th rowspan="2" style="'+HB+';font-size:11px;padding:3px 4px">担当</th>'
+    + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 3px;border-left:'+SEP+'">連絡<br><span style="font-size:7px;opacity:.7">Liên hệ</span></th>'
+    + '<th colspan="2" style="'+HB+';font-size:11px;padding:3px 6px">工事名称 <span style="font-size:9px;opacity:.7">／ 担当</span></th>'
     + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">作成</th>'
     + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">修正</th>'
     + monthCells
@@ -3550,9 +3550,11 @@ function renderKouteiJP(pjs, win){
     let rows='';
     const pjName = x(p.nameJP||p.nameVN||'—');
     const carryBadge = (isCarry && !bw) ? ' <span style="font-size:8px;color:#f39c12">↩ T.cũ</span>' : '';
+    const _tanBadge = (pm && pm!=='—')
+      ? '<span style="font-size:10px;font-weight:700;color:'+(bw?'#000':'#1F3864')+';background:'+(bw?'#fff':'#eef3fb')+';border:1px solid '+(bw?'#000':'#c7d2fe')+';border-radius:4px;padding:0 6px;white-space:nowrap;flex-shrink:0">担当 '+x(pm)+'</span>'
+      : '';
     rows += '<tr>'
-      + '<td class="kj-bikou-name" colspan="2"><div class="nm" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="Mở dự án">'+pjName+carryBadge+'</div></td>'
-      + '<td class="kj-tan" rowspan="'+totalRows+'" style="border-bottom:'+_TL_PB+'">'+x(pm)+'</td>'
+      + '<td class="kj-bikou-name" colspan="2"><div style="display:flex;align-items:center;gap:6px"><div class="nm" style="flex:1;min-width:0" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="Mở dự án">'+pjName+carryBadge+'</div>'+_tanBadge+'</div></td>'
       + '<td class="kj-num" style="border-bottom:'+_TL_CB+'"></td>'
       + '<td class="kj-num" style="border-bottom:'+_TL_CB+'"></td>'
       + blankDays
@@ -3586,7 +3588,14 @@ function renderKouteiJP(pjs, win){
         + dayCells(g, isLastRow, isCarry)
         + '</tr>';
     }
-    return rows;
+    return { html: rows, rows: totalRows };
+  }
+
+  // Ô "Người liên hệ" dọc bên trái — gom các dự án cùng người liên hệ; nền hồng/xanh xen kẽ
+  function _contactCell(name, rowspan, idx){
+    var bg = bw ? '#fff' : (idx%2===0 ? '#fde2e4' : '#dbeafe');
+    return '<td rowspan="'+rowspan+'" style="border-bottom:'+_TL_PB+';border-right:'+SEP+';border-left:'+SEP+';background:'+bg+';text-align:center;vertical-align:middle;padding:1px;width:30px">'
+      + '<div style="writing-mode:vertical-rl;text-orientation:mixed;font-size:11px;font-weight:700;color:#333;white-space:nowrap;margin:0 auto">'+x(name||'—')+'</div></td>';
   }
 
   // Chia nhóm theo văn phòng: 大阪 trước, 東京 sau (kèm hàng tiêu đề VP)
@@ -3599,18 +3608,29 @@ function renderKouteiJP(pjs, win){
     const offDays = allDays.map(function(ds,di){ const dow=new Date(ds).getDay(); const isToday=ds===todayStr,isHol=holidaySet.has(ds)||dow===0||dow===6,isPrev=ds<monthStartStr; const prevDs=di>0?allDays[di-1]:''; const isAfterToday=prevDs===todayStr; const bg=(bw&&isToday)?'#f0f0f0':_tlCellBg(isToday,isHol,isPrev); const bL=di===0?SEP:_tlBorderLeft(isToday,isAfterToday,isPrev); return '<td style="width:16px;padding:0;background:'+bg+';border-left:'+bL+';border-bottom:'+_TL_PB+'"><div style="height:18px"></div></td>'; }).join('');
     if(!officeTop){ body += '<tr><td colspan="'+NCOL+'" style="background:'+(bw?'#eee':'#dde3ee')+';color:'+(bw?'#000':'var(--navy)')+';font-weight:800;font-size:13px;letter-spacing:.4em;text-align:center;padding:4px 10px;border-bottom:'+_TL_PB+'">'+x(o)+'</td>'+offDays+'</tr>'; }
     let sNew=0,sRev=0,iNew=0,iRev=0;  // studio (パース) vs intl (図面)
-    byOffice[o].forEach(function(p){
-      body += projBlock(p);
-      (p.groups||[]).forEach(function(g){ const isI=(g.dept||'studio')==='intl'; (g.rows||[]).forEach(function(r){ if(r.isCarryRef)return;
-        if(isI){ if(r.status==='new')iNew+=(r.qty||0); else iRev+=(r.qty||0); }
-        else   { if(r.status==='new')sNew+=(r.qty||0); else sRev+=(r.qty||0); } }); });
+    // Gom theo NGƯỜI LIÊN HỆ (p.contact) trong từng văn phòng; cùng người -> đứng cạnh nhau
+    var _pjSorted = byOffice[o].slice().sort(function(a,b){ return String(a.contact||'~~').localeCompare(String(b.contact||'~~')); });
+    var _cgroups=[], _cmap={};
+    _pjSorted.forEach(function(p){ var k=p.contact||''; if(!_cmap[k]){ _cmap[k]={contact:k, pjs:[]}; _cgroups.push(_cmap[k]); } _cmap[k].pjs.push(p); });
+    _cgroups.forEach(function(cg, cgi){
+      var _blocks = cg.pjs.map(function(p){ return projBlock(p); });
+      var _totalRows = _blocks.reduce(function(s,b){ return s+b.rows; }, 0);
+      _blocks.forEach(function(b, pidx){
+        var html = b.html;
+        html = html.replace('<tr>', '<tr>' + (pidx===0 ? _contactCell(cg.contact, _totalRows, cgi) : ''));
+        body += html;
+        var p = cg.pjs[pidx];
+        (p.groups||[]).forEach(function(g){ const isI=(g.dept||'studio')==='intl'; (g.rows||[]).forEach(function(r){ if(r.isCarryRef)return;
+          if(isI){ if(r.status==='new')iNew+=(r.qty||0); else iRev+=(r.qty||0); }
+          else   { if(r.status==='new')sNew+=(r.qty||0); else sRev+=(r.qty||0); } }); });
+      });
     });
     // Hàng TỔNG theo văn phòng — chỉ hiện ở bản in. Tách riêng パース / 図面.
     if(bw){
       const _totRow=function(label,nn,rr){ return '<tr>'
+        + '<td style="border-bottom:'+_TL_PB+';border-right:'+SEP+';border-left:'+SEP+';background:#eee"></td>'
         + '<td class="kj-bikou-line" style="border-bottom:'+_TL_PB+';font-weight:800;text-align:right;background:#eee">'+x(o)+' 合計</td>'
         + '<td class="kj-item" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+label+'</td>'
-        + '<td class="kj-tan" style="border-bottom:'+_TL_PB+';background:#eee"></td>'
         + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+nn+'</td>'
         + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+rr+'</td>'
         + offDays + '</tr>'; };
@@ -3625,7 +3645,7 @@ function renderKouteiJP(pjs, win){
     }
   });
 
-  let cols='<col style="width:130px"><col style="width:165px"><col style="width:42px"><col style="width:30px"><col style="width:30px">';
+  let cols='<col style="width:30px"><col style="width:130px"><col style="width:175px"><col style="width:30px"><col style="width:30px">';
   allDays.forEach(()=>cols+='<col style="width:16px">');
   return '<div style="overflow-x:auto"><table class="kj-tbl"><colgroup>'+cols+'</colgroup><thead>'+thead+'</thead><tbody>'+body+'</tbody></table></div>';
 }

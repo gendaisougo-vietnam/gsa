@@ -751,6 +751,7 @@ table.detail-tl tr.staff-last > td {
     <button class="btn btn-sm" id="onlineBtn" style="display:none;background:rgba(46,213,115,.15);color:#2ed573;border-color:rgba(46,213,115,.4);position:relative" onclick="openOnlinePanel()" title="Giám sát truy cập — xem ai đang online">
       👁 Online<span id="onlineBadge" style="display:none;position:absolute;top:-6px;right:-6px;background:#e74c3c;color:#fff;border-radius:50%;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px"></span>
     </button>
+    <button class="btn btn-sm" id="accountsBtn" style="display:none;background:rgba(124,58,237,.2);color:#c4b5fd;border-color:rgba(124,58,237,.5)" onclick="openAccountsPanel()" title="Tạo / phân quyền / xoá tài khoản truy cập">🔑 Tài khoản</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)" title="Xuất backup ra file" onclick="exportToFile()">💾 Backup</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)" title="Nhập backup từ file" onclick="importFromFile()">📂 Nhập</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)" onclick="openThemePicker()">🎨</button>
@@ -1809,7 +1810,7 @@ const SYNC = {
 // Phase 8: check if current user needs approval workflow
 function _needsApproval() {
   var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
-  return r === 'edit' || r === 'view';
+  return r === 'edit' || r === 'view' || r === 'custom';
 }
 // Chỉ admin (chủ) mới được xem tính năng ĐÁNH GIÁ nhân sự (KPI/rating)
 function _isAdmin() {
@@ -1817,6 +1818,118 @@ function _isAdmin() {
   return r === 'admin';
 }
 function _canSeeKPI() { return _isAdmin(); }
+
+// ── Phân quyền hiển thị theo tài khoản (accounts) ────────────────────────
+const _PERM_FEATURES = ['studio','intl','vn','dashboard','staff','org','settings','report'];
+const _PERM_LABELS = { studio:'Phòng Design Studio (phối cảnh)', intl:'Phòng International (bản vẽ)', vn:'Phòng Design Department (VN)', dashboard:'Dashboard', staff:'Nhân sự', org:'Sơ đồ tổ chức', settings:'Cài đặt', report:'Báo cáo / Xuất file' };
+function _currentPerms() {
+  var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
+  if (r === 'admin') { var all = {}; _PERM_FEATURES.forEach(function(f){ all[f] = true; }); return all; }
+  if (r === 'custom') { try { var p = JSON.parse(sessionStorage.getItem('splash_perms')||'null'); if (p) return p; } catch(e){} return {}; }
+  if (r === 'edit')  return { intl:true, settings:true };           // tài khoản 123456 cũ
+  if (r === 'view')  { var v = {}; _PERM_FEATURES.forEach(function(f){ v[f] = true; }); return v; }
+  return {};
+}
+function _hasPerm(f) { return !!_currentPerms()[f]; }
+// Áp quyền lên giao diện (ẩn/hiện nút theo permissions) — cho role 'custom'
+function applyPermUI() {
+  var perms = _currentPerms();
+  var navMap = { dashboard:'navDash', staff:'navStaff', org:'navOrg', settings:'navSettings', studio:'navMain', vn:'navMainVN', intl:'navMainIntl' };
+  Object.keys(navMap).forEach(function(f){ var el = document.getElementById(navMap[f]); if (el) el.style.display = perms[f] ? '' : 'none'; });
+  // Nút Báo cáo / Xuất / Theme
+  document.querySelectorAll('.hdr-right .btn').forEach(function(btn){ var oc = btn.getAttribute('onclick')||''; if (oc.includes('openExportMenu')||oc.includes('openThemePicker')) btn.style.display = perms.report ? '' : 'none'; });
+  // Online badge chỉ admin
+  var ob = document.getElementById('onlineBtn'); if (ob) ob.style.display = 'none';
+  // Vào section đầu tiên được phép
+  var firstSec = perms.studio ? 'jp' : perms.intl ? 'intl' : perms.vn ? 'vn' : null;
+  if (firstSec) { try { setSection(firstSec); } catch(e) { activeSection = firstSec; } }
+  if (activePage !== 'main') showPage('main'); else showPage('main');
+}
+
+// ── Quản lý tài khoản (admin) ────────────────────────────────────────────
+async function openAccountsPanel() {
+  if (!_isAdmin()) { alert('Chỉ admin mới quản lý tài khoản.'); return; }
+  if (!window._sbReady) { alert('Chưa kết nối Supabase.'); return; }
+  var accs = [];
+  try { var r = await _sb.from('accounts').select('*').order('created_at', { ascending: true }); accs = r.data || []; }
+  catch(e) { alert('Lỗi tải danh sách tài khoản: ' + e.message); return; }
+  window._accCache = accs;
+  showModal(_accountsPanelHtml(accs, null));
+}
+function _accountsPanelHtml(accs, editAcc) {
+  var _sel = 'width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box';
+  var permBoxes = _PERM_FEATURES.map(function(f){
+    var on = editAcc ? !!(editAcc.permissions||{})[f] : (f==='intl');
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:5px 8px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer"><input type="checkbox" class="acc-perm" data-f="'+f+'" '+(on?'checked':'')+' style="width:auto"> '+_PERM_LABELS[f]+'</label>';
+  }).join('');
+  var rows = accs.map(function(a){
+    var permTxt = (a.role==='admin') ? 'Toàn quyền (admin)' : (_PERM_FEATURES.filter(function(f){return (a.permissions||{})[f];}).map(function(f){return _PERM_LABELS[f].split(' ')[0];}).join(', ') || '(chưa cấp)');
+    return '<tr style="border-bottom:1px solid #eee">'
+      + '<td style="padding:6px 8px;font-weight:600">'+x(a.code)+(a.is_active?'':' <span style="color:#dc2626;font-size:10px">(đã tắt)</span>')+'</td>'
+      + '<td style="padding:6px 8px;font-size:11px;color:#555">'+x(a.display_name||'')+'</td>'
+      + '<td style="padding:6px 8px;font-size:10px;color:#6d28d9">'+x(permTxt)+'</td>'
+      + '<td style="padding:6px 8px;white-space:nowrap;text-align:right">'
+        + '<button onclick="editAccount(\''+a.id+'\')" style="font-size:11px;padding:2px 8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:4px;cursor:pointer;margin-right:3px">Sửa</button>'
+        + '<button onclick="toggleAccountActive(\''+a.id+'\','+(!a.is_active)+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;background:#fff;border-radius:4px;cursor:pointer;margin-right:3px">'+(a.is_active?'Tắt':'Bật')+'</button>'
+        + '<button onclick="deleteAccount(\''+a.id+'\',\''+x(a.code)+'\')" style="font-size:11px;padding:2px 8px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:4px;cursor:pointer">Xoá</button>'
+      + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="padding:14px;text-align:center;color:#9ca3af">Chưa có tài khoản nào</td></tr>';
+  return '<div style="max-width:640px">'
+    + '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">🔑 Quản lý tài khoản truy cập</div>'
+    + '<div style="font-size:11px;color:#6b7280;margin-bottom:10px">Tạo tài khoản, cấp quyền xem từng chức năng, bật/tắt hoặc xoá. (Admin gốc luôn đăng nhập được.)</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">'
+      + '<thead><tr style="background:var(--navy);color:#fff"><th style="padding:6px 8px;text-align:left">Mã ĐN</th><th style="padding:6px 8px;text-align:left">Tên</th><th style="padding:6px 8px;text-align:left">Quyền xem</th><th style="padding:6px 8px"></th></tr></thead>'
+      + '<tbody>'+rows+'</tbody></table>'
+    + '<div style="border-top:1px dashed #ddd;padding-top:12px">'
+      + '<div style="font-weight:700;font-size:13px;color:#6d28d9;margin-bottom:8px">'+(editAcc?'✏ Sửa tài khoản: '+x(editAcc.code):'➕ Thêm tài khoản mới')+'</div>'
+      + '<input type="hidden" id="acc-id" value="'+(editAcc?editAcc.id:'')+'">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+        + '<label style="font-size:11px;color:#374151">Mã đăng nhập<input id="acc-code" value="'+(editAcc?x(editAcc.code):'')+'" '+(editAcc?'readonly':'')+' placeholder="vd: banve01" style="'+_sel+(editAcc?';background:#f3f4f6':'')+'"></label>'
+        + '<label style="font-size:11px;color:#374151">Tên hiển thị<input id="acc-name" value="'+(editAcc?x(editAcc.display_name||''):'')+'" placeholder="Tên người dùng" style="'+_sel+'"></label>'
+      + '</div>'
+      + '<label style="font-size:11px;color:#374151;display:block;margin-bottom:10px">Mật khẩu '+(editAcc?'<span style="color:#9ca3af">(để trống = giữ nguyên)</span>':'')+'<input id="acc-pw" type="text" placeholder="'+(editAcc?'••••••':'Đặt mật khẩu đăng nhập')+'" style="'+_sel+'"></label>'
+      + '<div style="font-size:11px;color:#374151;margin-bottom:5px;font-weight:600">Cho phép xem chức năng:</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">'+permBoxes+'</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+        + (editAcc?'<button class="btn" onclick="openAccountsPanel()">Huỷ sửa</button>':'')
+        + '<button class="btn btn-gold" onclick="saveAccount()">💾 Lưu tài khoản</button>'
+      + '</div>'
+    + '</div>'
+    + '<div class="modal-ft" style="margin-top:14px"><button class="btn" onclick="closeModal()">Đóng</button></div>'
+  + '</div>';
+}
+async function saveAccount() {
+  var id = document.getElementById('acc-id').value;
+  var code = (document.getElementById('acc-code').value||'').trim();
+  var name = (document.getElementById('acc-name').value||'').trim();
+  var pw = (document.getElementById('acc-pw').value||'').trim();
+  if (!code) { alert('Hãy nhập mã đăng nhập.'); return; }
+  var perms = {};
+  document.querySelectorAll('.acc-perm').forEach(function(c){ if (c.checked) perms[c.getAttribute('data-f')] = true; });
+  var rec = { code:code, display_name:name, role:'custom', permissions:perms, is_active:true, updated_at:new Date().toISOString() };
+  try {
+    if (id) {
+      if (pw) rec.pass_hash = await hashPw(pw);
+      var u = await _sb.from('accounts').update(rec).eq('id', id); if (u.error) throw u.error;
+    } else {
+      if (!pw) { alert('Tài khoản mới cần đặt mật khẩu.'); return; }
+      rec.pass_hash = await hashPw(pw);
+      var ins = await _sb.from('accounts').insert(rec); if (ins.error) throw ins.error;
+    }
+    toast('✓ Đã lưu tài khoản: ' + code);
+    openAccountsPanel();
+  } catch(e) { alert('Lỗi lưu tài khoản: ' + (e.message||e)); }
+}
+function editAccount(id) { var a = (window._accCache||[]).find(function(x){ return x.id===id; }); if (a) showModal(_accountsPanelHtml(window._accCache, a)); }
+async function toggleAccountActive(id, active) {
+  try { await _sb.from('accounts').update({ is_active:active, updated_at:new Date().toISOString() }).eq('id', id); openAccountsPanel(); }
+  catch(e) { alert('Lỗi: ' + e.message); }
+}
+async function deleteAccount(id, code) {
+  if (!confirm('Xoá tài khoản "' + code + '"?\nNgười này sẽ không đăng nhập được nữa (dữ liệu công việc không bị ảnh hưởng).')) return;
+  try { await _sb.from('accounts').delete().eq('id', id); toast('✓ Đã xoá tài khoản: ' + code); openAccountsPanel(); }
+  catch(e) { alert('Lỗi xoá: ' + e.message); }
+}
 
 // SPLASH_PW removed in Phase 9 — auth dùng hash qua Supabase (xem injectSyncHashes)
 
@@ -2250,6 +2363,10 @@ function showPage(pg) {
   // Block restricted pages for non-admin roles (edit = quản lý Bản vẽ: được vào Cài đặt — chỉ hạng mục bản vẽ)
   const sessionRole = sessionStorage.getItem('splash_role') || 'admin';
   if (sessionRole === 'edit' && (pg === 'dashboard' || pg === 'staff' || pg === 'org')) return;
+  if (sessionRole === 'custom') {
+    const _pm = _currentPerms();
+    if ((pg==='dashboard'&&!_pm.dashboard)||(pg==='staff'&&!_pm.staff)||(pg==='org'&&!_pm.org)||(pg==='settings'&&!_pm.settings)) return;
+  }
 
   activePage=pg;
   ['main','dashboard','staff','settings','org'].forEach(p=>{
@@ -13958,6 +14075,7 @@ function applyRoleUI(role) {
   if (role === 'admin') {
     var ob = document.getElementById('onlineBtn');
     if (ob) ob.style.display = 'inline-flex';
+    var ab = document.getElementById('accountsBtn'); if (ab) ab.style.display = 'inline-flex';
     clearInterval(window._onlinePollTimer);
     window._onlinePollTimer = setInterval(refreshOnlineBadge, 30000);
     setTimeout(refreshOnlineBadge, 2000);
@@ -13981,6 +14099,9 @@ function applyRoleUI(role) {
   }
   if (role === 'view') {
     enableViewOnlyMode(true);
+  }
+  if (role === 'custom') {
+    try { applyPermUI(); } catch(e) { console.warn('[applyPermUI]', e.message); }
   }
 }
 
@@ -14049,6 +14170,21 @@ window.addEventListener('beforeunload', function() {
           else if (h === cfg.editHash) role = 'edit';
           else if (h === cfg.viewHash) role = 'view';
         }
+        // Tài khoản do admin tạo trong bảng accounts (phân quyền theo permissions)
+        if (!role && window._sbReady) {
+          try {
+            const { data: accs } = await _sb.from('accounts').select('*').eq('pass_hash', h).eq('is_active', true).limit(1);
+            if (accs && accs.length) {
+              const acc = accs[0];
+              if (acc.role === 'admin') { role = 'admin'; }
+              else {
+                role = 'custom';
+                try { sessionStorage.setItem('splash_perms', JSON.stringify(acc.permissions||{})); } catch(e){}
+                try { sessionStorage.setItem('splash_acc_name', acc.display_name||acc.code||''); } catch(e){}
+              }
+            }
+          } catch(e) { console.warn('[Auth accounts] ', e.message); }
+        }
       } catch(e) {
         console.warn('[Auth] Supabase check failed:', e.message);
       }
@@ -14108,6 +14244,7 @@ window.addEventListener('beforeunload', function() {
       try {
         if (sessionRole === 'view') { SYNC.role='view'; enableViewOnlyMode(true); }
         else if (sessionRole === 'edit') { SYNC.role='edit'; }
+        else if (sessionRole === 'custom') { SYNC.role='custom'; }
         else { SYNC.role='admin'; }
       } catch(e) {}
       setTimeout(() => { try { applyRoleUI(sessionRole); } catch(e) {} }, 300);

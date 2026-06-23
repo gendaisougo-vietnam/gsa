@@ -8243,9 +8243,9 @@ function openAddProject() {
       </div>
     </div>
     <div class="info-grid c2" style="gap:10px;margin-top:10px">
-      <div class="field"><label>Người liên hệ (phòng này)</label>
+      <div class="field"><label>Người liên hệ</label>
         <select id="ap-ct"><option value="">— Chọn —</option>
-          ${_deptStaffOptionsHtml('')}
+          ${_contactOptionsHtml('')}
         </select>
       </div>
       <div class="field"><label>Người triển khai chính (phòng này)</label>
@@ -8298,9 +8298,9 @@ function openAddProject() {
     </div>
     <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
     <div class="info-grid c2" style="gap:10px">
-      <div class="field"><label>Người liên hệ (phòng này)</label>
+      <div class="field"><label>Người liên hệ</label>
         <select id="ap-ct"><option value="">— Chọn —</option>
-          ${_deptStaffOptionsHtml('')}
+          ${_contactOptionsHtml('')}
         </select>
       </div>
       <div class="field"><label>Người triển khai chính (phòng này)</label>
@@ -8558,9 +8558,9 @@ function openEditProject(id) {
         <select id="ep-off">${sel(['大阪','東京','ハノイ','HCM'],p.office)}</select></div>
     </div>
     <div class="info-grid c2" style="gap:10px;margin-top:10px">
-      <div class="field"><label>Người liên hệ (phòng này)</label>
+      <div class="field"><label>Người liên hệ</label>
         <select id="ep-ct"><option value="">— Chọn —</option>
-          ${_deptStaffOptionsHtml(p.contact)}</select></div>
+          ${_contactOptionsHtml(p.contact)}</select></div>
       <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ep-st"><option value="">— Chọn —</option>
           ${_deptStaffOptionsHtml(p.mainStaff)}</select></div>
@@ -8608,9 +8608,9 @@ function openEditProject(id) {
     </div>
     <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
     <div class="info-grid c2" style="gap:10px">
-      <div class="field"><label>Người liên hệ (phòng này)</label>
+      <div class="field"><label>Người liên hệ</label>
         <select id="ep-ct"><option value="">— Chọn —</option>
-          ${_deptStaffOptionsHtml(p.contact)}</select></div>
+          ${_contactOptionsHtml(p.contact)}</select></div>
       <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ep-st"><option value="">— Chọn —</option>
           ${_deptStaffOptionsHtml(p.mainStaff)}</select></div>
@@ -9868,6 +9868,25 @@ function sortedStaffOptionsHtml(selectedName) {
 function _deptStaffOptionsHtml(selectedName) {
   var html = '';
   var _names = (typeof _deptStaffNames==='function') ? _deptStaffNames() : [...(D.settings.staffList||[])];
+  if (selectedName && _names.indexOf(selectedName) < 0) _names = [selectedName].concat(_names);
+  _names = _names.slice().sort(function(a,b){ if(a==='HAN トゥアン')return -1; if(b==='HAN トゥアン')return 1; var pa=getStaffProfile(a),pb=getStaffProfile(b); return (pa.order||99)-(pb.order||99); });
+  _names.forEach(function(name){
+    var status = getStaffStatus(name);
+    var sel = (name === selectedName) ? ' selected' : '';
+    if (status === 'left') html += '<option value="'+x(name)+'" style="color:#9ca3af;font-style:italic"'+sel+'>🚪 '+x(name)+'</option>';
+    else if (status === 'leaving') html += '<option value="'+x(name)+'" style="color:#d97706"'+sel+'>⏰ '+x(name)+'</option>';
+    else html += '<option value="'+x(name)+'"'+sel+'>'+x(name)+'</option>';
+  });
+  return html;
+}
+
+// Dropdown NGƯỜI LIÊN HỆ — chỉ nhân sự có chức danh từ 主任 trở lên (rank<=3), mọi phòng/văn phòng.
+//   rank: 0=取締役/所長 · 1=統括室長/室長 · 2=副室長 · 3=主任 · 4=副主任 · 5=không chức danh
+function _contactOptionsHtml(selectedName) {
+  var html = '';
+  var o = (typeof _staffOrgInfo==='function') ? _staffOrgInfo() : {};
+  var _names = Object.keys(o).filter(function(n){ var r=o[n].rank; return (r!=null && r<=3); });
+  if(!Object.keys(o).length) _names = [...(D.settings.staffList||[])];  // chưa nạp dữ liệu phòng -> tạm hiện hết
   if (selectedName && _names.indexOf(selectedName) < 0) _names = [selectedName].concat(_names);
   _names = _names.slice().sort(function(a,b){ if(a==='HAN トゥアン')return -1; if(b==='HAN トゥアン')return 1; var pa=getStaffProfile(a),pb=getStaffProfile(b); return (pa.order||99)-(pb.order||99); });
   _names.forEach(function(name){

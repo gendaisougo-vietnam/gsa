@@ -1958,8 +1958,11 @@ async function openAccountsPanel() {
   try { var r = await _sb.from('accounts').select('*').order('created_at', { ascending: true }); accs = r.data || []; }
   catch(e) { alert('Lỗi tải danh sách tài khoản: ' + e.message); return; }
   window._accCache = accs;
+  _closeAllModals();
   showModal(_accountsPanelHtml(accs, null));
 }
+// Đóng MỌI modal đang mở (tránh trùng id khi xếp chồng)
+function _closeAllModals(){ try { document.querySelectorAll('#activeModal').forEach(function(m){ m.remove(); }); } catch(e){} }
 function _accountsPanelHtml(accs, editAcc) {
   var _sel = 'width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box';
   var newCode = editAcc ? '' : _gen6();   // mã 6 số nội bộ tự tạo cho tài khoản mới
@@ -2040,6 +2043,7 @@ function _showAccountShare(code, pw, name) {
     + '👉 Bấm link rồi nhập mật khẩu là vào (đã hiện sẵn tên):\n'
     + '🔗 ' + url + '\n'
     + '🔒 Mật khẩu: ' + pw;
+  _closeAllModals();
   showModal(
     '<div style="max-width:460px">'
     + '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">✅ Đã tạo tài khoản</div>'
@@ -2060,7 +2064,7 @@ function _copyAccountShare() {
     else { ta.select(); document.execCommand('copy'); done(); }
   } catch(e) { ta.select(); try { document.execCommand('copy'); done(); } catch(e2){} }
 }
-function editAccount(id) { var a = (window._accCache||[]).find(function(x){ return x.id===id; }); if (a) showModal(_accountsPanelHtml(window._accCache, a)); }
+function editAccount(id) { var a = (window._accCache||[]).find(function(x){ return x.id===id; }); if (a) { _closeAllModals(); showModal(_accountsPanelHtml(window._accCache, a)); } }
 async function toggleAccountActive(id, active) {
   try { await _sb.from('accounts').update({ is_active:active, updated_at:new Date().toISOString() }).eq('id', id); openAccountsPanel(); }
   catch(e) { alert('Lỗi: ' + e.message); }

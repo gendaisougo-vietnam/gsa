@@ -4163,7 +4163,23 @@ function renderMonthOverview(ci) {
     </div>
   </div>
   `;
+  setTimeout(function(){ try { _syncTwoTables(); } catch(e){} }, 50);
 }
+
+// Ép 2 bảng (実施設計 + 担当者別) về CÙNG MỘT bề rộng pixel = bề rộng khung -> luôn bằng nhau
+function _syncTwoTables() {
+  var inner1 = document.getElementById('overviewTlInner');
+  var t1 = inner1 && inner1.querySelector('table');
+  var card2 = document.getElementById('monthGanttCard');
+  var t2 = card2 && card2.querySelector('table');
+  if (!inner1 || !t1) return;
+  // bề rộng đích = bề rộng nhìn thấy của khung chứa (đã trừ thanh cuộn)
+  var w = inner1.clientWidth;
+  if (!w) return;
+  t1.style.width = w + 'px';
+  if (t2) t2.style.width = w + 'px';
+}
+window.addEventListener('resize', function(){ clearTimeout(window._syncTblTimer); window._syncTblTimer = setTimeout(function(){ try{ _syncTwoTables(); }catch(e){} }, 150); });
 
 /* ══════════════════════════════════════════════════════
    MONTH GANTT — all projects, all staff, 3 weeks
@@ -8131,6 +8147,7 @@ function _refreshOverviewParts() {
   const ganttBody = document.querySelector('#monthGanttCard .card-body');
   const pjsGantt = pjsAll.filter(p => p._section === _sectionPool(activeSection) && _pjVisibleHere(p));
   if (ganttBody) ganttBody.innerHTML = renderMonthGantt(pjsGantt);
+  setTimeout(function(){ try { _syncTwoTables(); } catch(e){} }, 50);
 }
 
 /* PROJECT CRUD */

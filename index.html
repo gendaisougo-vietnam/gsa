@@ -1138,6 +1138,7 @@ async function sbLoadAll() {
           rate11:r.rate11,rate12:r.rate12,rate13:r.rate13,
           rate14:r.rate14,rate15:r.rate15,
           fromCarryover: !!r.from_carryover,
+          paperSize: r.paper_size || '',
           // PHASE 3: carryRef — load từ Supabase
           isCarryRef:  !!r.is_carry_ref,
           sourceRowId: r.source_row_id || null,
@@ -1305,7 +1306,7 @@ async function sbPushAll() {
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
         _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++, manual: !!g._manual, dept:(g.dept||'studio') });
-        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, tentative:!!r.tentative, sort_order:_sr++ }); });
+        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, tentative:!!r.tentative, paper_size:r.paperSize||null, sort_order:_sr++ }); });
       });
     });
   });
@@ -1352,7 +1353,7 @@ function _sbSaveRowDebounced(groupId, rowId, colData) {
 const _COL_MAP = {
   staff:'staff', status:'status', qty:'qty', note:'note',
   ot:'ot', otNote:'ot_note', dateFrom:'date_from', dateTo:'date_to',
-  upTime:'up_time', doneAt:'done_at', upScore:'up_score', tentative:'tentative',
+  upTime:'up_time', doneAt:'done_at', upScore:'up_score', tentative:'tentative', paperSize:'paper_size',
   rate0:'rate0',rate1:'rate1',rate2:'rate2',rate3:'rate3',rate4:'rate4',
   rate5:'rate5',rate6:'rate6',rate7:'rate7',rate8:'rate8',rate9:'rate9',
   rate10:'rate10',rate11:'rate11',rate12:'rate12',rate13:'rate13',
@@ -2083,6 +2084,25 @@ function curMonth() { return D.months[D.activeMonth]||{projects:[],projectsVN:[]
 function _sectionPool(sec){ return (sec==='vn') ? 'vn' : 'jp'; }           // jp & intl chung 1 pool dự án
 function _activeDept(){ return activeSection==='intl' ? 'intl' : (activeSection==='vn' ? null : 'studio'); } // null = không lọc theo phòng (VN)
 function _groupInDept(g){ const d=_activeDept(); return d===null ? true : ((g&&g.dept||'studio')===d); }
+// Tổng hợp số mai bản vẽ theo KHỔ GIẤY (A1/A2/A3) — chỉ hạng mục phòng Bản vẽ (dept='intl')
+function _paperBreakdown(p){
+  const b={A1:0,A2:0,A3:0,khac:0};
+  (p&&p.groups||[]).forEach(function(g){ if((g.dept||'studio')!=='intl') return;
+    (g.rows||[]).forEach(function(r){ if(r.isCarryRef) return; const k=(r.paperSize||''); if(k==='A1'||k==='A2'||k==='A3') b[k]+=(r.qty||0); else b.khac+=(r.qty||0); }); });
+  return b;
+}
+function _paperBreakdownMany(pjs){
+  const b={A1:0,A2:0,A3:0,khac:0};
+  (pjs||[]).forEach(function(p){ const x=_paperBreakdown(p); b.A1+=x.A1; b.A2+=x.A2; b.A3+=x.A3; b.khac+=x.khac; });
+  return b;
+}
+function _paperBreakdownHtml(b, big){
+  const fs = big?'15px':'13px';
+  function cell(lbl,v,col){ return '<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;background:'+col+'1a;border:1px solid '+col+'55;border-radius:99px"><b style="color:'+col+';font-size:10px">'+lbl+'</b><b style="font-size:'+fs+';color:'+col+'">'+v+'</b></span>'; }
+  return '<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">'
+    + cell('A1',b.A1,'#7c3aed') + cell('A2',b.A2,'#2563eb') + cell('A3',b.A3,'#0891b2')
+    + (b.khac?cell('Khác',b.khac,'#6b7280'):'') + '</span>';
+}
 function _sectionDeptJP(){ return activeSection==='vn' ? '設計室' : (activeSection==='intl' ? '国際設計室' : 'デザインスタジオ'); }
 // Danh sách nhân sự ĐÚNG phòng đang xem (lấy từ bảng Nhân sự / assignments). Dùng cho roster + ô chọn người.
 function _deptStaffNames(asOf){
@@ -2579,6 +2599,7 @@ async function _sbDumpMonthEntities(mid) {
           rate12: r.rate12||0, rate13: r.rate13||0,
           rate14: r.rate14||0, rate15: r.rate15||0,
           from_carryover: !!r.fromCarryover,
+          paper_size: r.paperSize || null,
           // PHASE 3: carryRef — số mai tính ở tháng GỐC
           is_carry_ref: !!r.isCarryRef,
           source_row_id: r.sourceRowId || null,
@@ -3846,9 +3867,14 @@ function renderMonthOverview(ci) {
         ${sumRev>=tgtRev&&tgtRev>0?'<div style="font-size:9px;color:#4ade80;margin-top:2px;font-weight:600">✓ Đã đạt mục tiêu!</div>':''}
       </div>
 
-      <div style="font-size:10px;color:rgba(255,255,255,.45);padding-top:4px;border-top:1px solid rgba(255,255,255,.1)" id="tgtTotal">Tổng = ${tgtAll} phối cảnh</div>
+      <div style="font-size:10px;color:rgba(255,255,255,.45);padding-top:4px;border-top:1px solid rgba(255,255,255,.1)" id="tgtTotal">Tổng = ${tgtAll} ${activeSection==='intl'?'tờ bản vẽ':'phối cảnh'}</div>
     </div>
   </div>
+
+  ${activeSection==='intl'?`<div style="margin:0 0 10px;padding:9px 14px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <span style="font-size:12px;font-weight:700;color:#6d28d9;text-transform:uppercase">📐 Tổng hợp bản vẽ theo khổ giấy (tháng này)</span>
+    ${_paperBreakdownHtml(_paperBreakdownMany(pjs), true)}
+  </div>`:''}
 
   <div class="card">
     <div class="card-hd">
@@ -5844,8 +5870,12 @@ function renderProjectDetail(ci, p) {
                 <span style="font-size:16px;font-weight:800;color:var(--rev-tx)" id="tfoot-tr-${p.id}">${tr}</span>
                 <span style="font-size:11px;color:var(--gray4);margin-left:8px">Tổng:</span>
                 <span style="font-size:18px;font-weight:800;color:var(--navy)" id="tfoot-ta-${p.id}">${ta}</span>
-                <span style="font-size:11px;color:var(--gray4)">phối cảnh</span>
+                <span style="font-size:11px;color:var(--gray4)">${activeSection==='intl'?'tờ bản vẽ':'phối cảnh'}</span>
               </div>
+              ${activeSection==='intl'?`<div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:11px;font-weight:700;color:#6d28d9;text-transform:uppercase">Theo khổ giấy:</span>
+                ${_paperBreakdownHtml(_paperBreakdown(p))}
+              </div>`:''}
               ${ot>0?`<div style="display:flex;align-items:center;gap:5px;padding:3px 10px;background:#fff3e0;border-radius:99px;border:1px solid var(--orange)">
                 <span style="font-size:11px;color:var(--gray4)">OT:</span>
                 <span style="font-size:13px;font-weight:700;color:var(--orange)">${ot.toFixed(1)}h</span>
@@ -7097,11 +7127,20 @@ function renderGroups(p) {
         </td>
         <td style="text-align:center;${cellDim}">
           ${rIsDone
-            ? `<span style="font-size:11px;color:${DONE_COLOR};font-weight:600">${r.qty||0}</span>`
+            ? `<span style="font-size:11px;color:${DONE_COLOR};font-weight:600">${r.qty||0}${activeSection==='intl'&&r.paperSize?` <span style="font-size:9px;color:#6d28d9">(${r.paperSize})</span>`:''}</span>`
             : r.isCarryRef
-            ? `<span title="So mai da tinh o thang goc - khong cong vao thang nay" style="font-size:11px;color:#999;font-weight:600">🔒 ${r.qty||0}</span>`
-            : `<input class="qty-inp" type="number" min="0" value="${r.qty||0}" style="width:54px"
-                onchange="updRow('${p.id}','${g.id}','${r.id}','qty',+this.value);refreshPjTotals('${p.id}')">`}
+            ? `<span title="So mai da tinh o thang goc - khong cong vao thang nay" style="font-size:11px;color:#999;font-weight:600">🔒 ${r.qty||0}${activeSection==='intl'&&r.paperSize?` (${r.paperSize})`:''}</span>`
+            : `<div style="display:flex;align-items:center;justify-content:center;gap:3px">
+                <input class="qty-inp" type="number" min="0" value="${r.qty||0}" style="width:46px"
+                  onchange="updRow('${p.id}','${g.id}','${r.id}','qty',+this.value);refreshPjTotals('${p.id}')">
+                ${activeSection==='intl'?`<select class="sel-sm" title="Khổ giấy bản vẽ" style="width:48px;font-size:10px;color:#6d28d9;font-weight:600"
+                  onchange="updRow('${p.id}','${g.id}','${r.id}','paperSize',this.value);refreshPjTotals('${p.id}')">
+                  <option value=""${!r.paperSize?' selected':''}>khổ</option>
+                  <option value="A1"${r.paperSize==='A1'?' selected':''}>A1</option>
+                  <option value="A2"${r.paperSize==='A2'?' selected':''}>A2</option>
+                  <option value="A3"${r.paperSize==='A3'?' selected':''}>A3</option>
+                </select>`:''}
+              </div>`}
         </td>
         <td style="text-align:center;${cellDim}">
           ${rIsDone

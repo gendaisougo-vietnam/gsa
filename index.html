@@ -11412,6 +11412,11 @@ function _asgInfo(name){
   const a=(D.assignments||[]).find(x=>x.staff_id===sid && !x.date_to);
   return {sid:sid, a:a||null};
 }
+// Chức danh hiển thị = title_jp từ phân công (đồng bộ với ô "Chức danh"); fallback prof.role cũ nếu chưa có.
+function _staffTitleText(name){
+  try{ var ai=_asgInfo(name); var t=(ai.a&&ai.a.title_jp)||''; if(t) return t; }catch(e){}
+  var p=getStaffProfile(name); return (p&&p.role)||'';
+}
 // Cập nhật phân công: đóng bản ghi cũ (date_to=hôm nay) + mở bản ghi mới (lưu lịch sử)
 async function saveStaffAssignment(name){
   try{
@@ -12029,9 +12034,7 @@ function renderStaffPage() {
           <div style="flex:1; min-width:0; display:flex; flex-direction:column; justify-content:space-between;">
             <div>
               <div style="font-size:20px; font-weight:500; color:#111827; line-height:1.2; margin-bottom:6px; word-break:break-word;">${x(s)}</div>
-              <input value="${x(_roleTxt)}" placeholder="Chức vụ chưa cập nhật"
-                style="background:transparent; border:none; color:#6b7280; font-size:13px; font-style:${_roleTxt?'normal':'italic'}; outline:none; width:100%; font-family:inherit; padding:0; line-height:1.3;"
-                onchange="saveStaffProfile('${s}','role',this.value)">
+              ${(function(){var _tt=_staffTitleText(s);return '<div style="color:#6b7280; font-size:13px; font-style:'+(_tt?'normal':'italic')+'; line-height:1.3;">'+(_tt?x(_tt):'Chức vụ chưa cập nhật')+'</div>';})()}
               ${(leaveToday || isStaffLeaving(s) || isProbation(s)) ? `
                 <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
                   ${isProbation(s) ? _probationBadgeHtml(s) : ''}
@@ -13135,9 +13138,8 @@ function renderStaffDetailModalContent(s) {
       </div>
       <div style="flex:1; min-width:0; padding-right:36px;">
         <div style="font-size:22px; font-weight:600; color:#111827; margin-bottom:4px; word-break:break-word;">${x(s)}</div>
-        <input value="${x(_roleTxt)}" placeholder="Chức vụ chưa cập nhật"
-          style="background:transparent; border:none; color:#6b7280; font-size:13px; font-style:${_roleTxt?'normal':'italic'}; outline:none; width:100%; font-family:inherit; padding:0; margin-bottom:8px; line-height:1.3;"
-          onchange="saveStaffProfile('${s}','role',this.value);refreshStaffDetailModal()">
+        <div title="Chức danh lấy từ ô 'Chức danh' trong Cập nhật phân công bên dưới"
+          style="color:#6b7280; font-size:13px; font-style:${(_curTitle||_roleTxt)?'normal':'italic'}; margin-bottom:8px; line-height:1.3;">${(_curTitle||_roleTxt) ? x(_curTitle||_roleTxt) : 'Chức vụ chưa cập nhật'}</div>
         <div>
           <span style="display:inline-block; padding:3px 10px; background:${_avt.bg}; color:${_avt.text}; font-size:11px; font-weight:600; border-radius:99px; letter-spacing:0.5px;">${_office}</span>
           ${isProbation(s) ? `<span style="margin-left:6px">${_probationBadgeHtml(s)}</span>` : ''}

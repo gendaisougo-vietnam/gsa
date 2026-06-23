@@ -3943,14 +3943,21 @@ function renderProjectTimeline(pjs) {
   const sumRev = pjs.reduce((s,p)=>s+(p._carryover?0:totalRev(p)),0);
   const NC = daysInMonth + 5;
 
-  const _leftPx = (isVN?240:34) + 175 + 26 + 26 + 90;
-  // width:100% + bố cục TỰ ĐỘNG (giống bảng 担当者別) -> phần dư tự giãn vào các cột ngày, lấp đầy 100%
-  return `<table class="detail-tl" style="border-collapse:collapse;width:100%;min-width:${_leftPx + allDays.length*16}px;font-size:11px;border:1px solid #ccc">
+  const _L1 = (isVN?240:34), _L2 = 175, _NOTE = isVN?100:60;
+  const _leftPx = _L1 + _L2 + 26 + 26 + _NOTE;
+  // table-layout:fixed + width:100% -> bảng LUÔN = 100% container; cột trái cố định, cột ngày tự chia đều phần dư -> lấp đầy
+  return `<table class="detail-tl" style="border-collapse:collapse;width:100%;min-width:${320 + allDays.length*16}px;table-layout:fixed;font-size:11px;border:1px solid #ccc">
+    <colgroup>
+      <col style="width:${_L1}px"><col style="width:${_L2}px">
+      <col style="width:26px"><col style="width:26px">
+      ${allDays.map(()=>'<col>').join('')}
+      <col style="width:${_NOTE}px">
+    </colgroup>
     <thead>
       ${monthHeaderRow}
       <tr style="background:var(--navy)">
-        <th style="width:${isVN?'240px':'34px'};text-align:${isVN?'left':'center'};padding:4px ${isVN?'8':'3'}px;font-size:9px;color:${isVN?'#FFC000':'rgba(255,255,255,.7)'};border-bottom:${PB};border-right:${CB};white-space:nowrap">${isVN?'Thông tin dự án':'VP'}</th>
-        <th style="width:175px;text-align:left;padding:4px 6px;font-size:9px;color:rgba(255,255,255,.9);border-bottom:${PB};border-right:${CB};white-space:nowrap">${isVN?'Hạng mục':'Dự án / Hạng mục'}</th>
+        <th style="text-align:${isVN?'left':'center'};padding:4px ${isVN?'8':'3'}px;font-size:9px;color:${isVN?'#FFC000':'rgba(255,255,255,.7)'};border-bottom:${PB};border-right:${CB};white-space:nowrap">${isVN?'Thông tin dự án':'VP'}</th>
+        <th style="text-align:left;padding:4px 6px;font-size:9px;color:rgba(255,255,255,.9);border-bottom:${PB};border-right:${CB};white-space:nowrap">${isVN?'Hạng mục':'Dự án / Hạng mục'}</th>
         <th style="width:26px;padding:4px 3px;font-size:8px;font-weight:700;color:#7CFC00;border-bottom:${PB};border-right:${CB};text-align:right;white-space:nowrap">作成</th>
         <th style="width:26px;padding:4px 3px;font-size:8px;font-weight:700;color:#FFC000;border-bottom:${PB};border-right:${CB};text-align:right;white-space:nowrap">修正</th>
         ${dayHeaders}
@@ -4514,12 +4521,16 @@ function renderMonthGantt(pjs) {
   }).join('');
 
   return `<div style="overflow-x:auto">
-  <table class="detail-tl" style="width:100%;border-collapse:collapse;font-size:11px;min-width:600px">
+  <table class="detail-tl" style="width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;min-width:${320 + allDaysStr.length*16}px">
+    <colgroup>
+      <col style="width:140px"><col style="width:36px"><col style="width:160px">
+      ${allDaysStr.map(()=>'<col>').join('')}
+    </colgroup>
     <thead>
       <tr>
-        <th style="background:var(--navy);width:140px;min-width:130px;padding:4px 8px;color:rgba(255,255,255,.7);font-size:10px;text-align:left">Nhân sự</th>
-        <th style="background:var(--navy);width:36px;min-width:36px;padding:4px 4px;color:#FFC000;font-size:10px;text-align:center;white-space:nowrap">OT</th>
-        <th style="background:var(--navy);width:160px;min-width:140px;padding:4px 8px;color:rgba(255,255,255,.9);font-size:10px;text-align:left">Hạng mục</th>
+        <th style="background:var(--navy);padding:4px 8px;color:rgba(255,255,255,.7);font-size:10px;text-align:left">Nhân sự</th>
+        <th style="background:var(--navy);padding:4px 4px;color:#FFC000;font-size:10px;text-align:center;white-space:nowrap">OT</th>
+        <th style="background:var(--navy);padding:4px 8px;color:rgba(255,255,255,.9);font-size:10px;text-align:left">Hạng mục</th>
         ${hdrMonths}
       </tr>
       <tr>

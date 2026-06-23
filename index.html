@@ -12905,6 +12905,15 @@ async function sbReloadData() {
   }
 }
 
+// Mở công trình từ báo cáo đầu ngày (đúng tháng + đúng phòng)
+function _openPjFromNotif(mid, section, pjId){
+  try{ closeModal(); }catch(e){}
+  if(mid && D.activeMonth!==mid){ D.activeMonth=mid; try{ save(); }catch(e){} try{ renderMonthStrip(); }catch(e){} }
+  try{ showPage('main'); }catch(e){}
+  try{ setSection(section||'jp'); }catch(e){}
+  try{ selectPj(pjId); }catch(e){}
+}
+
 function checkMorningNotification(force) {
   var now = new Date();
   var today = now.toISOString().slice(0,10);
@@ -12918,26 +12927,38 @@ function checkMorningNotification(force) {
   var day3 = new Date(now); day3.setDate(day3.getDate()+3);
   var day3Str = day3.toISOString().slice(0,10);
 
-  var ups = [], leaves = [], deadlines = [];
+  var ups = [], leaves = [], deadlines = [], overdue = [];
   var _seenMN = {};   // chống đếm đôi hạng mục carryover (hiện ở cả tháng cũ lẫn tháng mới)
+  // cửa sổ quá hạn: chỉ tính việc quá ngày UP trong vòng 60 ngày gần đây (tránh việc quá cũ)
+  var overdueMin = new Date(now); overdueMin.setDate(overdueMin.getDate()-60);
+  var overdueMinStr = overdueMin.toISOString().slice(0,10);
 
-  Object.values(D.months||{}).forEach(function(m) {
-    [].concat(m.projects||[], m.projectsVN||[]).forEach(function(p) {
-      var pName = p.nameVN || p.nameJP || p.id;
-      (p.groups||[]).forEach(function(g) {
-        var gName = g.type || '';
-        (g.rows||[]).forEach(function(r) {
-          if (!r.dateTo || r.doneAt) return;
-          var k = pName + '|' + gName + '|' + (r.staff||'') + '|' + r.dateTo;
-          if (_seenMN[k]) return;
-          if (r.dateTo === today) {
-            _seenMN[k] = 1;
-            ups.push({pj: pName, grp: gName, staff: r.staff||''});
-          } else if (r.dateTo > today && r.dateTo <= day3Str) {
-            _seenMN[k] = 1;
-            var daysLeft = Math.round((new Date(r.dateTo)-now)/(1000*60*60*24));
-            deadlines.push({pj: pName, grp: gName, staff: r.staff||'', date: r.dateTo, days: daysLeft});
-          }
+  Object.entries(D.months||{}).forEach(function(ent) {
+    var mid = ent[0], m = ent[1];
+    [['jp', m.projects||[]], ['vn', m.projectsVN||[]]].forEach(function(pair) {
+      var section = pair[0];
+      pair[1].forEach(function(p) {
+        var pName = p.nameVN || p.nameJP || p.id;
+        (p.groups||[]).forEach(function(g) {
+          var gName = g.type || '';
+          (g.rows||[]).forEach(function(r) {
+            if (!r.dateTo || r.doneAt) return;
+            var k = pName + '|' + gName + '|' + (r.staff||'') + '|' + r.dateTo;
+            if (_seenMN[k]) return;
+            if (r.dateTo === today) {
+              _seenMN[k] = 1;
+              ups.push({pj: pName, grp: gName, staff: r.staff||'', pjId: p.id, mid: mid, section: section});
+            } else if (r.dateTo > today && r.dateTo <= day3Str) {
+              _seenMN[k] = 1;
+              var daysLeft = Math.round((new Date(r.dateTo)-now)/(1000*60*60*24));
+              deadlines.push({pj: pName, grp: gName, staff: r.staff||'', date: r.dateTo, days: daysLeft, pjId: p.id, mid: mid, section: section});
+            } else if (r.dateTo < today && r.dateTo >= overdueMinStr) {
+              // ĐÃ QUA ngày UP nhưng CHƯA bấm UP (quên) — chưa có doneAt
+              _seenMN[k] = 1;
+              var daysOver = Math.round((now - new Date(r.dateTo))/(1000*60*60*24));
+              overdue.push({pj: pName, grp: gName, staff: r.staff||'', date: r.dateTo, days: daysOver, pjId: p.id, mid: mid, section: section});
+            }
+          });
         });
       });
     });
@@ -12948,12 +12969,16 @@ function checkMorningNotification(force) {
     var order = [], map = {};
     arr.forEach(function(it) {
       var key = it.pj + '|' + (it.date||'');
-      if (!map[key]) { map[key] = {pj: it.pj, date: it.date, days: it.days, grps: [], _g: {}}; order.push(map[key]); }
+      if (!map[key]) { map[key] = {pj: it.pj, date: it.date, days: it.days, pjId: it.pjId, mid: it.mid, section: it.section, grps: [], _g: {}}; order.push(map[key]); }
       var e = map[key];
       if (!e._g[it.grp]) { e._g[it.grp] = {name: it.grp, staff: []}; e.grps.push(e._g[it.grp]); }
       if (it.staff && e._g[it.grp].staff.indexOf(it.staff) < 0) e._g[it.grp].staff.push(it.staff);
     });
     return order;
+  }
+  // thuộc tính onclick mở dự án (nếu có pjId)
+  function _pjClick(e) {
+    return e.pjId ? ('style="cursor:pointer" onclick="_openPjFromNotif(\''+(e.mid||'')+'\',\''+(e.section||'jp')+'\',\''+e.pjId+'\')" title="Bấm để mở công trình"') : '';
   }
   function _pjDetailMN(e) {
     return e.grps.map(function(g) {
@@ -12991,7 +13016,7 @@ function checkMorningNotification(force) {
   });
 
   if (ups.length === 0 && leaves.length === 0 && deadlines.length === 0
-      && probReviews.length === 0 && probEnds.length === 0) return;
+      && overdue.length === 0 && probReviews.length === 0 && probEnds.length === 0) return;
 
   var todayFmt = today.split('-').reverse().join('/');
   var secStyle = 'margin-bottom:14px';
@@ -13005,12 +13030,24 @@ function checkMorningNotification(force) {
     + '<div><div style="font-weight:700;font-size:13px">Báo cáo ngày ' + todayFmt + '</div>'
     + '<div style="font-size:10px;opacity:.75;margin-top:1px">Cập nhật buổi sáng</div></div></div>';
 
+  if (overdue.length) {
+    overdue.sort(function(a,b){ return a.date.localeCompare(b.date); });
+    var ovPjs = _groupByPjMN(overdue);
+    html += '<div style="' + secStyle + '">'
+      + '<div style="' + hdrStyle('#b91c1c') + '"><span>🚨</span> Quá ngày UP — quên bấm UP? <span style="background:#b91c1c;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + ovPjs.length + ' công trình</span></div>'
+      + ovPjs.map(function(e){
+          var ovTxt = e.days<=0?'Hôm qua':'Quá '+e.days+' ngày';
+          return '<div style="' + rowStyle + 'background:#fff5f5;border-radius:4px;padding:5px 6px" ' + _pjClick(e) + '><span style="' + dotStyle('#dc2626') + '"></span><span style="flex:1"><b>' + e.pj + '</b> <span style="color:#2563eb;font-size:9px">↗ mở</span><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:#dc2626;color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+ovTxt+'</span></div>';
+        }).join('')
+      + '</div>';
+  }
+
   if (ups.length) {
     var upPjs = _groupByPjMN(ups);
     html += '<div style="' + secStyle + '">'
       + '<div style="' + hdrStyle('#c0392b') + '"><span>⏰</span> UP hôm nay <span style="background:#c0392b;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + upPjs.length + ' công trình</span></div>'
       + upPjs.map(function(e){
-          return '<div style="' + rowStyle + '"><span style="' + dotStyle('#ef4444') + '"></span><span><b>' + e.pj + '</b><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span></div>';
+          return '<div style="' + rowStyle + '" ' + _pjClick(e) + '><span style="' + dotStyle('#ef4444') + '"></span><span><b>' + e.pj + '</b>' + (e.pjId?' <span style="color:#2563eb;font-size:9px">↗ mở</span>':'') + '<div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span></div>';
         }).join('')
       + '</div>';
   }
@@ -13023,7 +13060,7 @@ function checkMorningNotification(force) {
       + dlPjs.map(function(e){
           var urgColor = e.days===0?'#ef4444':e.days===1?'#f97316':'#f59e0b';
           var urgText = e.days===0?'Hôm nay!':e.days===1?'Ngày mai':'Còn '+e.days+' ngày';
-          return '<div style="' + rowStyle + '"><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + e.pj + '</b><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
+          return '<div style="' + rowStyle + '" ' + _pjClick(e) + '><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + e.pj + '</b>' + (e.pjId?' <span style="color:#2563eb;font-size:9px">↗ mở</span>':'') + '<div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
         }).join('')
       + '</div>';
   }

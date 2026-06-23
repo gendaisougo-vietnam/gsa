@@ -7601,6 +7601,47 @@ async function fixIntlGroups() {
 }
 window.fixIntlGroups = fixIntlGroups;
 
+// ── XÓA hạng mục TRỐNG/RỖNG (không có dữ liệu) — dọn đám bị loạn ──
+// Admin chạy từ Console: purgeBlankGroups()  (xóa toàn bộ tháng đang xem trở đi)
+// Hoặc purgeBlankGroups(true) để CHỈ xóa trong dự án đang mở.
+async function purgeBlankGroups(onlyCurrentPj) {
+  if ((sessionStorage.getItem('splash_role')||'admin') !== 'admin') { alert('Chỉ admin mới chạy được.'); return; }
+  function blankRow(r){ return !(r.qty>0) && !r.dateFrom && !r.dateTo && !r.staff && !r.doneAt && !((r.note||'').trim()); }
+  function blankGroup(g){ return !(g.rows||[]).length || (g.rows||[]).every(blankRow); }
+  var targets = [];
+  var scopePjId = onlyCurrentPj ? (activePjId||null) : null;
+  for (const mid of Object.keys(D.months||{})) {
+    var m = D.months[mid];
+    for (const p of [...(m.projects||[]), ...(m.projectsVN||[])]) {
+      if (scopePjId && p.id !== scopePjId) continue;
+      var del = (p.groups||[]).filter(blankGroup);
+      if (del.length) targets.push({ p: p, mid: mid, del: del });
+    }
+  }
+  var totalG = targets.reduce(function(s,t){ return s+t.del.length; }, 0);
+  if (!totalG) { alert('Không có hạng mục trống nào để xóa.'); return; }
+  if (!confirm('Xóa ' + totalG + ' hạng mục TRỐNG (không có người làm / ngày / số mai)?\n' +
+               'Các hạng mục CÓ dữ liệu sẽ được GIỮ NGUYÊN.\n\nNên Backup trước cho chắc.')) return;
+  var done = 0;
+  for (const t of targets) {
+    var ids = new Set(t.del.map(function(g){ return g.id; }));
+    t.p.groups = (t.p.groups||[]).filter(function(g){ return !ids.has(g.id); });
+    if (window._sbReady) {
+      for (const g of t.del) {
+        try { await _sb.from('rows').delete().eq('group_id', g.id); } catch(e) {}
+        try { await _sb.from('groups').delete().eq('id', g.id); } catch(e) {}
+      }
+    }
+    done += t.del.length;
+  }
+  save();
+  if (typeof renderAll === 'function') renderAll();
+  else if (typeof renderContent === 'function') renderContent();
+  console.log('[purgeBlankGroups] đã xóa', done, 'hạng mục trống');
+  alert('✓ Đã xóa ' + done + ' hạng mục trống.');
+}
+window.purgeBlankGroups = purgeBlankGroups;
+
 async function delGroup(pjId,gid2) {
   if(!confirm('Xóa hạng mục này?')) return;
   const p=getPj(pjId); if(!p) return;

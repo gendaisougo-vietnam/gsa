@@ -1428,6 +1428,7 @@ async function _sbQueueChange(description, tableName, operation, recordId, paylo
       table_name: tableName, operation: operation, record_id: recordId,
       payload: payload || null, context: context || {},
       submitted_by: sessionStorage.getItem('splash_acc_name') || sessionStorage.getItem('splash_role') || 'edit',
+      dept: (typeof _sectionDept==='function' ? _sectionDept() : null),
       description: description, status: 'pending'
     });
     toast('📋 Đã gửi yêu cầu duyệt cho admin');
@@ -1452,6 +1453,7 @@ function _sbQueueRowDebounced(pjId, gid, rid, colData, desc) {
       table_name: 'rows', operation: 'upsert', record_id: rid,
       payload: payload, context: { projectId: b.pjId },
       submitted_by: sessionStorage.getItem('splash_acc_name') || sessionStorage.getItem('splash_role') || 'edit',
+      dept: (typeof _sectionDept==='function' ? _sectionDept() : null),
       description: b.desc || ('Sửa dòng | ' + b.pjId), status: 'pending'
     }).then(function() {
       toast('📋 Đã gửi yêu cầu duyệt cho admin');
@@ -1459,11 +1461,15 @@ function _sbQueueRowDebounced(pjId, gid, rid, colData, desc) {
   }, 1500);
 }
 
-// Update pending badge count (admin only)
+// Update pending badge count (admin HOẶC quản lý phòng — chỉ đếm phòng mình)
 async function refreshPendingBadge() {
-  if ((sessionStorage.getItem('splash_role')||SYNC.role) !== 'admin' || !window._sbReady) return;
+  if (!window._sbReady) return;
+  if (typeof _canApprove==='function' && !_canApprove()) return;
   try {
-    var res = await _sb.from('pending_changes').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+    var _isAdm = (sessionStorage.getItem('splash_role')||SYNC.role) === 'admin';
+    var _q = _sb.from('pending_changes').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+    if (!_isAdm) { var _md = _managedDepts(); _q = _q.in('dept', _md.length?_md:['__none__']); }
+    var res = await _q;
     var count = res.count || 0;
     window._pendingCount = count;
     var badge = document.getElementById('pendingBadge');
@@ -1521,22 +1527,30 @@ async function approveAllChanges() {
   setTimeout(function() { if (ids.length) toast('✓ Đã duyệt tất cả ' + ids.length + ' yêu cầu'); closeModal(); }, 400);
 }
 
-// Open admin review panel
-async function openPendingPanel() {
-  var role = sessionStorage.getItem('splash_role') || SYNC.role;
-  if (role !== 'admin') { toast('⛔ Chỉ admin mới được duyệt yêu cầu'); return; }
+var _DEPT_LABEL = { studio:'Phối cảnh', intl:'Bản vẽ', vn:'VN', '':'—' };
+var _DEPT_COLOR = { studio:'#5a9a35', intl:'#6d28d9', vn:'#db2777', '':'#9ca3af' };
+// Open review panel — admin xem tất cả (lọc theo phòng), quản lý phòng chỉ xem phòng mình
+async function openPendingPanel(filterDept) {
+  if (typeof _canApprove==='function' && !_canApprove()) { toast('⛔ Bạn không có quyền duyệt'); return; }
   if (!window._sbReady) { toast('Offline — không thể tải danh sách'); return; }
+  var _isAdm = (sessionStorage.getItem('splash_role')||SYNC.role) === 'admin';
+  var _md = _managedDepts();
   try {
-    var res = await _sb.from('pending_changes').select('*').eq('status', 'pending').order('created_at');
+    var _q = _sb.from('pending_changes').select('*').eq('status', 'pending').order('created_at');
+    if (!_isAdm) _q = _q.in('dept', _md.length?_md:['__none__']);
+    var res = await _q;
     var changes = res.data || [];
-    if (!changes.length) { toast('✅ Không có yêu cầu nào cần duyệt'); refreshPendingBadge(); return; }
+    if (filterDept) changes = changes.filter(function(c){ return (c.dept||'') === filterDept; });
+    if (!changes.length && !filterDept) { toast('✅ Không có yêu cầu nào cần duyệt'); refreshPendingBadge(); return; }
     var opLabel = { insert: '➕ Thêm', upsert: '✏ Sửa', update: '✏ Sửa', delete: '🗑 Xóa' };
     var rows = changes.map(function(c) {
       var time = c.created_at ? new Date(c.created_at).toLocaleString('vi-VN', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
       var opStr = opLabel[c.operation] || c.operation;
+      var dep = c.dept||''; var depB = '<span style="font-size:9px;padding:1px 6px;border-radius:99px;color:#fff;background:'+(_DEPT_COLOR[dep]||'#9ca3af')+'">'+(_DEPT_LABEL[dep]||dep||'—')+'</span>';
       return '<tr data-change-id="' + c.id + '" data-desc="' + x(c.description || '') + '" style="border-bottom:1px solid #eee">' +
-        '<td style="padding:8px 6px;font-size:13px;max-width:280px">' + opStr + ' ' + x(c.description || c.table_name) + '</td>' +
-        '<td style="padding:8px 6px;font-size:11px;color:#888">' + x(c.submitted_by || '?') + '</td>' +
+        '<td style="padding:8px 6px">'+depB+'</td>' +
+        '<td style="padding:8px 6px;font-size:13px;max-width:260px">' + opStr + ' ' + x(c.description || c.table_name) + '</td>' +
+        '<td style="padding:8px 6px;font-size:11px;color:#555;font-weight:600">' + x(c.submitted_by || '?') + '</td>' +
         '<td style="padding:8px 6px;font-size:11px;color:#888;white-space:nowrap">' + time + '</td>' +
         '<td style="padding:8px 6px;white-space:nowrap">' +
           '<button class="btn btn-sm" style="background:#27ae60;color:#fff;border:none;margin-right:4px;font-size:11px" ' +
@@ -1545,11 +1559,19 @@ async function openPendingPanel() {
             'onclick="rejectChange(\'' + c.id + '\')">✗ Từ chối</button>' +
         '</td>' +
       '</tr>';
-    }).join('');
-    showModal('<h3 style="color:var(--navy);margin-bottom:12px">📋 Yêu cầu chờ duyệt (' + changes.length + ')</h3>' +
+    }).join('') || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#9ca3af">Không có yêu cầu '+(filterDept?'phòng '+(_DEPT_LABEL[filterDept]||filterDept):'')+'</td></tr>';
+    // Tab lọc phòng (admin: cả 3; quản lý: chỉ phòng mình)
+    var tabDepts = _isAdm ? ['studio','intl','vn'] : _md;
+    var tabs = '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">'
+      + '<button onclick="openPendingPanel()" style="padding:4px 12px;border-radius:8px;border:1px solid '+(!filterDept?'#1e40af':'#d1d5db')+';background:'+(!filterDept?'#1e40af':'#fff')+';color:'+(!filterDept?'#fff':'#374151')+';cursor:pointer;font-size:12px;font-family:inherit">Tất cả</button>'
+      + tabDepts.map(function(d){ return '<button onclick="openPendingPanel(\''+d+'\')" style="padding:4px 12px;border-radius:8px;border:1px solid '+(filterDept===d?_DEPT_COLOR[d]:'#d1d5db')+';background:'+(filterDept===d?_DEPT_COLOR[d]:'#fff')+';color:'+(filterDept===d?'#fff':'#374151')+';cursor:pointer;font-size:12px;font-family:inherit">'+_DEPT_LABEL[d]+'</button>'; }).join('')
+      + '</div>';
+    showModal('<h3 style="color:var(--navy);margin-bottom:10px">📋 Yêu cầu chờ duyệt'+(_isAdm?'':' — phòng của bạn')+' ('+changes.length+')</h3>' +
+      tabs +
       '<div style="overflow-x:auto;max-height:400px;overflow-y:auto">' +
       '<table style="width:100%;border-collapse:collapse">' +
       '<thead><tr style="background:#f5f5f5;font-size:11px;position:sticky;top:0">' +
+        '<th style="padding:6px;text-align:left">Phòng</th>' +
         '<th style="padding:6px;text-align:left">Nội dung</th>' +
         '<th style="padding:6px;text-align:left">Người gửi</th>' +
         '<th style="padding:6px;text-align:left">Thời gian</th>' +
@@ -1559,7 +1581,7 @@ async function openPendingPanel() {
       '</table></div>' +
       '<div class="modal-ft" style="margin-top:12px">' +
         '<button class="btn" onclick="closeModal()">Đóng</button>' +
-        '<button class="btn btn-gold" onclick="approveAllChanges()">✓ Duyệt tất cả (' + changes.length + ')</button>' +
+        (changes.length?'<button class="btn btn-gold" onclick="approveAllChanges()">✓ Duyệt tất cả ('+changes.length+')</button>':'') +
       '</div>');
   } catch(e) { toast('Lỗi tải danh sách: ' + e.message.slice(0,50)); }
 }
@@ -1812,10 +1834,33 @@ const SYNC = {
   set role(v) { sessionStorage.setItem('sync_role', v); }
 };
 
+// Phòng tương ứng với tab đang xem
+function _sectionDept() { return activeSection === 'intl' ? 'intl' : (activeSection === 'vn' ? 'vn' : 'studio'); }
+// Các phòng mà tài khoản này được QUẢN LÝ (duyệt + sửa trực tiếp). Admin = tất cả.
+function _managedDepts() {
+  var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
+  if (r === 'admin') return ['studio','intl','vn'];
+  if (r !== 'custom') return [];
+  var p = _currentPerms(); var out = [];
+  ['studio','intl','vn'].forEach(function(d){ if (p['manage_'+d]) out.push(d); });
+  return out;
+}
+function _isManagerOf(d) { return _managedDepts().indexOf(d) >= 0; }
+function _canApprove() {
+  var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
+  return r === 'admin' || _managedDepts().length > 0;
+}
 // Phase 8: check if current user needs approval workflow
+//  - admin: không cần duyệt. Quản lý phòng: sửa TRỰC TIẾP phòng mình (không cần duyệt).
+//  - nhân sự thường (custom/edit/view): gửi yêu cầu chờ duyệt.
 function _needsApproval() {
   var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
-  return r === 'edit' || r === 'view' || r === 'custom';
+  if (r === 'admin') return false;
+  if (r === 'custom') {
+    if (_isManagerOf(_sectionDept())) return false;   // quản lý phòng -> sửa trực tiếp
+    return true;
+  }
+  return r === 'edit' || r === 'view';
 }
 // Chỉ admin (chủ) mới được xem tính năng ĐÁNH GIÁ nhân sự (KPI/rating)
 function _isAdmin() {
@@ -1840,8 +1885,8 @@ function _kpiColHidden() {
 
 // ── Phân quyền hiển thị theo tài khoản (accounts) ────────────────────────
 //   Nhóm "trang/phòng" (ẩn nút) + nhóm "chi tiết" (kpi/ot — ẩn cột trong hạng mục)
-const _PERM_FEATURES = ['studio','intl','vn','dashboard','staff','org','settings','report','kpi','ot','attendance'];
-const _PERM_LABELS = { studio:'Phòng Design Studio (phối cảnh)', intl:'Phòng International (bản vẽ)', vn:'Phòng Design Department (VN)', dashboard:'Dashboard', staff:'Nhân sự (đầy đủ)', org:'Sơ đồ tổ chức', settings:'Cài đặt', report:'Báo cáo / Xuất file', kpi:'Xem KPI / đánh giá trong hạng mục', ot:'Xem cột OT (giờ tăng ca)', attendance:'Chỉ theo dõi chấm công (nghỉ / đi muộn-sớm)' };
+const _PERM_FEATURES = ['studio','intl','vn','dashboard','staff','org','settings','report','kpi','ot','attendance','manage_studio','manage_intl','manage_vn'];
+const _PERM_LABELS = { studio:'Phòng Design Studio (phối cảnh)', intl:'Phòng International (bản vẽ)', vn:'Phòng Design Department (VN)', dashboard:'Dashboard', staff:'Nhân sự (đầy đủ)', org:'Sơ đồ tổ chức', settings:'Cài đặt', report:'Báo cáo / Xuất file', kpi:'Xem KPI / đánh giá trong hạng mục', ot:'Xem cột OT (giờ tăng ca)', attendance:'Chỉ theo dõi chấm công (nghỉ / đi muộn-sớm)', manage_studio:'⭐ Quản lý Design Studio (duyệt + sửa trực tiếp)', manage_intl:'⭐ Quản lý International (duyệt + sửa trực tiếp)', manage_vn:'⭐ Quản lý Design Dept VN (duyệt + sửa trực tiếp)' };
 // Tài khoản CHỈ được giao theo dõi chấm công (không thấy trang Nhân sự đầy đủ)
 function _attendanceOnly() {
   var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
@@ -1883,16 +1928,24 @@ function applyPermUI() {
   var perms = _currentPerms();
   // Ẩn cột OT nếu không được cấp quyền 'ot'
   try { document.body.classList.toggle('hide-ot', !_canSeeOT()); } catch(e){}
+  // Quản lý phòng nào -> tự được xem phòng đó
+  var canSee = { studio: perms.studio||perms.manage_studio, intl: perms.intl||perms.manage_intl, vn: perms.vn||perms.manage_vn,
+                 dashboard:perms.dashboard, staff:perms.staff, org:perms.org, settings:perms.settings };
   var navMap = { dashboard:'navDash', staff:'navStaff', org:'navOrg', settings:'navSettings', studio:'navMain', vn:'navMainVN', intl:'navMainIntl' };
-  Object.keys(navMap).forEach(function(f){ var el = document.getElementById(navMap[f]); if (el) el.style.display = perms[f] ? '' : 'none'; });
+  Object.keys(navMap).forEach(function(f){ var el = document.getElementById(navMap[f]); if (el) el.style.display = canSee[f] ? '' : 'none'; });
   // Quyền "chỉ chấm công" cũng được vào trang Nhân sự (bản rút gọn)
   if (perms.attendance) { var ns = document.getElementById('navStaff'); if (ns) ns.style.display = ''; }
+  // Quản lý phòng -> hiện nút Duyệt + badge
+  if (typeof _canApprove==='function' && _canApprove()) {
+    var pb = document.getElementById('pendingBtn'); if (pb) pb.style.display = 'inline-flex';
+    try { refreshPendingBadge(); } catch(e){}
+  }
   // Nút Báo cáo / Xuất / Theme
   document.querySelectorAll('.hdr-right .btn').forEach(function(btn){ var oc = btn.getAttribute('onclick')||''; if (oc.includes('openExportMenu')||oc.includes('openThemePicker')) btn.style.display = perms.report ? '' : 'none'; });
   // Online badge chỉ admin
   var ob = document.getElementById('onlineBtn'); if (ob) ob.style.display = 'none';
   // Vào section đầu tiên được phép
-  var firstSec = perms.studio ? 'jp' : perms.intl ? 'intl' : perms.vn ? 'vn' : null;
+  var firstSec = canSee.studio ? 'jp' : canSee.intl ? 'intl' : canSee.vn ? 'vn' : null;
   if (firstSec) { try { setSection(firstSec); } catch(e) { activeSection = firstSec; } }
   if (activePage !== 'main') showPage('main'); else showPage('main');
 }
@@ -13247,13 +13300,17 @@ function startRealtimeSync() {
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pending_changes' }, function(payload) {
       var role = sessionStorage.getItem('splash_role') || SYNC.role;
-      if (role === 'admin' && payload.new) {
+      var _n = payload.new;
+      // admin nhận tất cả; quản lý phòng chỉ nhận yêu cầu phòng mình
+      var _inScope = _n && (role === 'admin' || (typeof _managedDepts==='function' && _managedDepts().indexOf(_n.dept) >= 0));
+      if (_inScope) {
         window._pendingCount = (window._pendingCount || 0) + 1;
         var badge = document.getElementById('pendingBadge');
         var btn = document.getElementById('pendingBtn');
         if (badge) { badge.textContent = window._pendingCount; badge.style.display = 'inline-block'; }
         if (btn) btn.style.display = 'inline-flex';
-        toast('🔔 Yêu cầu duyệt mới từ ' + (payload.new.submitted_by || 'nhân viên') + ': ' + (payload.new.description || '').slice(0, 40), 4000);
+        var _depTxt = _DEPT_LABEL[_n.dept||''] || '';
+        toast('🔔 Yêu cầu duyệt mới'+(_depTxt?' ['+_depTxt+']':'')+' từ ' + (_n.submitted_by || 'nhân viên') + ': ' + (_n.description || '').slice(0, 40), 4000);
       }
     })
     .subscribe(function(status) {

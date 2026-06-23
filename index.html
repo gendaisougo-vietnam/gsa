@@ -3456,7 +3456,8 @@ function renderKouteiJP(pjs, win){
   if(!pjs.length) return '<div style="padding:24px;text-align:center;color:#aaa;font-size:12px">Chưa có dự án trong tháng này.</div>';
 
   const C_NEW=bw?'#000':'#5a9a35', C_REV=bw?'#000':'#d4900a', C_DONE=bw?'#9aa0a6':DONE_BAR_COLOR;
-  const NCOL=5; // 連絡(Người liên hệ),備考,項目,作成,修正 — 担当 gộp vào hàng tên dự án
+  const NCOL=6; // 連絡(Liên hệ),備考,項目,担当,作成,修正
+  const _BB='1.5px solid #555';  // đường kẻ ĐẬM phân ô khối trái (giống file gốc)
   const totCols = NCOL + allDays.length;
   const WJ=['日','月','火','水','木','金','土'];
   const SEP='2px solid #888';  // vạch đậm phân cách khối trái | timeline
@@ -3472,15 +3473,16 @@ function renderKouteiJP(pjs, win){
   // Header 2 hàng giống file gốc: (工事名称 | 担当 | 作成 | 修正 | tháng) rồi (備考 | 項目 | ngày)
   const thead = bandRow
     + '<tr>'
-    + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 3px;border-left:'+SEP+'">連絡<br><span style="font-size:7px;opacity:.7">Liên hệ</span></th>'
-    + '<th colspan="2" style="'+HB+';font-size:11px;padding:3px 6px">工事名称 <span style="font-size:9px;opacity:.7">／ 担当</span></th>'
+    + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 3px;border-left:'+SEP+';border-right:'+SEP+'">連絡<br><span style="font-size:7px;opacity:.7">Liên hệ</span></th>'
+    + '<th colspan="2" style="'+HB+';font-size:11px;padding:3px 6px;border-right:'+SEP+'">工事名称</th>'
+    + '<th rowspan="2" style="'+HB+';font-size:11px;padding:3px 4px;border-right:'+SEP+'">担当</th>'
     + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">作成</th>'
     + '<th rowspan="2" style="'+HB+';font-size:10px;padding:3px 2px">修正</th>'
     + monthCells
     + '</tr>'
     + '<tr>'
     + '<th style="'+HB+';font-size:11px;padding:3px 6px">備考</th>'
-    + '<th style="'+HB+';font-size:11px;padding:3px 6px">項目</th>'
+    + '<th style="'+HB+';font-size:11px;padding:3px 6px;border-right:'+SEP+'">項目</th>'
     + dayHeader
     + '</tr>';
 
@@ -3550,11 +3552,9 @@ function renderKouteiJP(pjs, win){
     let rows='';
     const pjName = x(p.nameJP||p.nameVN||'—');
     const carryBadge = (isCarry && !bw) ? ' <span style="font-size:8px;color:#f39c12">↩ T.cũ</span>' : '';
-    const _tanBadge = (pm && pm!=='—')
-      ? '<span style="font-size:10px;font-weight:700;color:'+(bw?'#000':'#1F3864')+';background:'+(bw?'#fff':'#eef3fb')+';border:1px solid '+(bw?'#000':'#c7d2fe')+';border-radius:4px;padding:0 6px;white-space:nowrap;flex-shrink:0">担当 '+x(pm)+'</span>'
-      : '';
     rows += '<tr>'
-      + '<td class="kj-bikou-name" colspan="2"><div style="display:flex;align-items:center;gap:6px"><div class="nm" style="flex:1;min-width:0" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="Mở dự án">'+pjName+carryBadge+'</div>'+_tanBadge+'</div></td>'
+      + '<td class="kj-bikou-name" colspan="2" style="border-right:'+_BB+'"><div class="nm" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="Mở dự án">'+pjName+carryBadge+'</div></td>'
+      + '<td class="kj-tan" style="border-bottom:'+_TL_CB+';border-right:'+_BB+';text-align:center;font-weight:700;white-space:nowrap">'+x(pm)+'</td>'
       + '<td class="kj-num" style="border-bottom:'+_TL_CB+'"></td>'
       + '<td class="kj-num" style="border-bottom:'+_TL_CB+'"></td>'
       + blankDays
@@ -3579,10 +3579,11 @@ function renderKouteiJP(pjs, win){
       const tipStaff = g ? x([...new Set((g.rows||[]).map(r=>r.staff).filter(Boolean))].join(', ')) : '';
       const rb=isLastRow?_TL_PB:_TL_CB;
       rows += '<tr class="kj-it-row">'
-        + '<td class="kj-bikou-line" style="border-bottom:'+rb+'">'+x(metaTxt)+'</td>'
+        + '<td class="kj-bikou-line" style="border-bottom:'+rb+';border-right:'+_BB+'">'+x(metaTxt)+'</td>'
         + (g
-            ? '<td class="kj-item" style="border-bottom:'+rb+'" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="'+(tipStaff?tipStaff+' · ':'')+'Mở dự án"><div class="nm" style="'+nmStyle+'">'+nmText+'</div></td>'
-            : '<td class="kj-empty" style="border-bottom:'+rb+'"></td>')
+            ? '<td class="kj-item" style="border-bottom:'+rb+';border-right:'+_BB+'" '+(bw?'':('onclick="selectPj(\''+p.id+'\')" '))+'title="'+(tipStaff?tipStaff+' · ':'')+'Mở dự án"><div class="nm" style="'+nmStyle+'">'+nmText+'</div></td>'
+            : '<td class="kj-empty" style="border-bottom:'+rb+';border-right:'+_BB+'"></td>')
+        + '<td style="border-bottom:'+rb+';border-right:'+_BB+';background:var(--table-bg)"></td>'
         + '<td class="kj-num" style="border-bottom:'+rb+';color:'+(bw?'#000':'#27ae60')+'">'+(gNew||'')+'</td>'
         + '<td class="kj-num" style="border-bottom:'+rb+';color:'+(bw?'#000':'#e67e22')+'">'+(gRev||'')+'</td>'
         + dayCells(g, isLastRow, isCarry)
@@ -3631,6 +3632,7 @@ function renderKouteiJP(pjs, win){
         + '<td style="border-bottom:'+_TL_PB+';border-right:'+SEP+';border-left:'+SEP+';background:#eee"></td>'
         + '<td class="kj-bikou-line" style="border-bottom:'+_TL_PB+';font-weight:800;text-align:right;background:#eee">'+x(o)+' 合計</td>'
         + '<td class="kj-item" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+label+'</td>'
+        + '<td style="border-bottom:'+_TL_PB+';border-right:'+_BB+';background:#eee"></td>'
         + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+nn+'</td>'
         + '<td class="kj-num" style="border-bottom:'+_TL_PB+';font-weight:800;background:#eee">'+rr+'</td>'
         + offDays + '</tr>'; };
@@ -3645,7 +3647,7 @@ function renderKouteiJP(pjs, win){
     }
   });
 
-  let cols='<col style="width:30px"><col style="width:130px"><col style="width:175px"><col style="width:30px"><col style="width:30px">';
+  let cols='<col style="width:30px"><col style="width:130px"><col style="width:165px"><col style="width:48px"><col style="width:30px"><col style="width:30px">';
   allDays.forEach(()=>cols+='<col style="width:16px">');
   return '<div style="overflow-x:auto"><table class="kj-tbl"><colgroup>'+cols+'</colgroup><thead>'+thead+'</thead><tbody>'+body+'</tbody></table></div>';
 }

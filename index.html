@@ -3943,12 +3943,14 @@ function renderProjectTimeline(pjs) {
   const sumRev = pjs.reduce((s,p)=>s+(p._carryover?0:totalRev(p)),0);
   const NC = daysInMonth + 5;
 
-  return `<table class="detail-tl" style="border-collapse:collapse;width:100%;min-width:${351 + allDays.length*16}px;table-layout:fixed;font-size:11px;border:1px solid #ccc">
+  const _leftPx = (isVN?240:34) + 175 + 26 + 26 + 90;   // tổng bề rộng cột trái + cột ghi chú phải
+  const _dayColW = 'calc((100% - ' + _leftPx + 'px) / ' + allDays.length + ')';  // mỗi cột ngày tự chia đều lấp đầy 100%
+  return `<table class="detail-tl" style="border-collapse:collapse;width:100%;min-width:${_leftPx + allDays.length*16}px;table-layout:fixed;font-size:11px;border:1px solid #ccc">
     <colgroup>
       <col style="width:${isVN?'240px':'34px'}">
       <col style="width:175px">
       <col style="width:26px"><col style="width:26px">
-      ${allDays.map(()=>'<col>').join('')}
+      ${allDays.map(()=>'<col style="width:'+_dayColW+';min-width:16px">').join('')}
       <col style="width:90px">
     </colgroup>
     <thead>

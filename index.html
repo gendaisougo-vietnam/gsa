@@ -2500,7 +2500,7 @@ function totalRev(p) {
 }
 function totalOT(p) {
   const a=(p.otLog||[]).reduce((s,e)=>s+(e.hours||0),0);
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).reduce((s,r)=>s+(r.ot||0),0);
+  const b=(p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).reduce((s,r)=>s+(r.ot||0),0);
   return a+b;
 }
 
@@ -3090,12 +3090,13 @@ function renderSidebar() {
     const tn = totalNew(p), tr = totalRev(p), ot = totalOT(p);
     const thumbHtml = thumb ? `<img src="${thumb}" alt="">` : `<div class="pj-thumb-ph">🏗</div>`;
 
-    const allRows = (p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.dateTo);
+    // CHỈ tính hạng mục của PHÒNG đang xem (lịch UP / trạng thái / nhân sự riêng từng phòng)
+    const allRows = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>r.dateTo);
 
     // Hàng có dateTo = hôm nay
     const todayRows = allRows.filter(r => r.dateTo === today);
     // Hàng đang active (lịch kéo qua hôm nay)
-    const activeRows = (p.groups||[]).flatMap(g=>g.rows||[]).filter(r => {
+    const activeRows = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r => {
       if (!r.staff) return false;
       const from = r.dateFrom||r.dateTo, to = r.dateTo||r.dateFrom;
       return from && to && from <= today && to >= today;
@@ -3120,8 +3121,8 @@ function renderSidebar() {
       statusBadge = `<div style="position:absolute;top:5px;right:5px;background:#27ae60;border-radius:99px;padding:1px 5px;font-size:8px;font-weight:700;color:#fff">● Đang làm</div>`;
     }
 
-    // ── Phân loại mức độ ưu tiên hiển thị ──
-    const allRowsAll = (p.groups||[]).flatMap(g=>g.rows||[]);
+    // ── Phân loại mức độ ưu tiên hiển thị (chỉ theo phòng đang xem) ──
+    const allRowsAll = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]);
     const hasTodayUp  = allRowsAll.some(r => r.dateTo === today && !r.doneAt);
     const hasFutureUp = allRowsAll.some(r => r.dateTo > today && !r.doneAt);
     const hasAnySchedule = allRowsAll.some(r => r.dateTo);

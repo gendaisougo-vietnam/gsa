@@ -1116,7 +1116,7 @@ async function sbLoadAll() {
   if ((photoRows||[]).length > 0) console.log('[Photos] sample row:', photoRows[0]);
   else console.warn('[Photos] photoRows EMPTY — kiểm tra RLS bảng project_photos');
   for (const m of (monthRows || [])) {
-    result.months[m.id] = { projects: [], projectsVN: [], targetNew: m.target_new, targetRev: m.target_rev };
+    result.months[m.id] = { projects: [], projectsVN: [], targetNew: m.target_new, targetRev: m.target_rev, targetNewIntl: m.target_new_intl||0, targetRevIntl: m.target_rev_intl||0 };
   }
   for (const p of (projectRows || [])) {
     if (!result.months[p.month_id]) continue;
@@ -1295,7 +1295,7 @@ async function sbPushAll() {
     } catch(e) { _errs.push('settings: '+e.message); }
   }
   // 2. Months
-  var _mRecs = Object.entries(D.months||{}).map(function(kv){ return { id:kv[0], target_new:kv[1].targetNew||0, target_rev:kv[1].targetRev||0 }; });
+  var _mRecs = Object.entries(D.months||{}).map(function(kv){ return { id:kv[0], target_new:kv[1].targetNew||0, target_rev:kv[1].targetRev||0, target_new_intl:kv[1].targetNewIntl||0, target_rev_intl:kv[1].targetRevIntl||0 }; });
   if (_mRecs.length) try { await _sb.from('months').upsert(_mRecs, {onConflict:'id'}); } catch(e) { _errs.push('months: '+e.message); }
   // 3. Projects
   var _pRecs = []; var _si = 0;
@@ -2362,6 +2362,34 @@ function _paperBreakdownHtml(b, big){
     + cell('A1',b.A1,'#7c3aed') + cell('A2',b.A2,'#2563eb') + cell('A3',b.A3,'#0891b2')
     + (b.khac?cell('Khác',b.khac,'#6b7280'):'') + '</span>';
 }
+// Breakdown khổ giấy theo trạng thái (new/rev) — cho box Làm mới / Sửa lại phòng Bản vẽ
+function _paperBreakdownStatus(pjs, status){
+  const b={A1:0,A2:0,A3:0,khac:0};
+  (pjs||[]).forEach(function(p){ (p.groups||[]).forEach(function(g){ if((g.dept||'studio')!=='intl') return;
+    (g.rows||[]).forEach(function(r){ if(r.isCarryRef) return; if(r.status!==status) return; const k=(r.paperSize||''); if(k==='A1'||k==='A2'||k==='A3') b[k]+=(r.qty||0); else b.khac+=(r.qty||0); }); }); });
+  return b;
+}
+// Dòng gọn "A1 8 · A3 2" — chỉ khổ có số (>0). Dùng trong box xanh/vàng (chữ trắng).
+function _paperMini(b){
+  const parts=[];
+  ['A1','A2','A3'].forEach(function(k){ if(b[k]>0) parts.push('<b>'+k+'</b> '+b[k]); });
+  if(b.khac>0) parts.push('<b>Khác</b> '+b.khac);
+  return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '';
+}
+// Mục tiêu tháng tách theo phòng: Bản vẽ (intl) dùng cột riêng; Phối cảnh + VN dùng cột gốc.
+function _tgtKeys(){
+  if(activeSection==='intl') return {n:'targetNewIntl', r:'targetRevIntl', cn:'target_new_intl', cr:'target_rev_intl'};
+  return {n:'targetNew', r:'targetRev', cn:'target_new', cr:'target_rev'};
+}
+function _curTgtNew(){ var m=curMonth(); return m[_tgtKeys().n]||0; }
+function _curTgtRev(){ var m=curMonth(); return m[_tgtKeys().r]||0; }
+// Chỉ admin hoặc trưởng phòng (manage_*) của phòng đang xem mới được sửa mục tiêu.
+function _canEditTarget(){
+  var r = sessionStorage.getItem('splash_role')||(window.SYNC&&SYNC.role)||'none';
+  if(r==='admin') return true;
+  var d = activeSection==='intl'?'intl':(activeSection==='vn'?'vn':'studio');
+  return (typeof _isManagerOf==='function') && _isManagerOf(d);
+}
 function _sectionDeptJP(){ return activeSection==='vn' ? '設計室' : (activeSection==='intl' ? '国際設計室' : 'デザインスタジオ'); }
 // Danh sách nhân sự ĐÚNG phòng đang xem (lấy từ bảng Nhân sự / assignments). Dùng cho roster + ô chọn người.
 function _deptStaffNames(asOf){
@@ -2792,7 +2820,7 @@ async function _sbDumpMonthEntities(mid) {
 
   // 1. months
   try {
-    const { error } = await _sb.from('months').upsert({ id: mid, target_new: m.targetNew || 0, target_rev: m.targetRev || 0 });
+    const { error } = await _sb.from('months').upsert({ id: mid, target_new: m.targetNew || 0, target_rev: m.targetRev || 0, target_new_intl: m.targetNewIntl || 0, target_rev_intl: m.targetRevIntl || 0 });
     if (error) { _sbReport('_sbDumpMonthEntities (months)', error, {op:'upsert', table:'months'}); errors++; }
   } catch(e) { _sbReport('_sbDumpMonthEntities (months)', e, {op:'upsert', table:'months'}); errors++; }
 
@@ -3028,6 +3056,8 @@ async function doAddMonth(prevMid, newMid) {
     projectsVN: copyProjects(srcMonth.projectsVN || []),
     targetNew:  srcMonth.targetNew || 0,
     targetRev:  srcMonth.targetRev || 0,
+    targetNewIntl: srcMonth.targetNewIntl || 0,
+    targetRevIntl: srcMonth.targetRevIntl || 0,
   };
 
   // ── Giữ NGUYÊN p.photos của prevMid trong D để hỗ trợ "Tải đầy đủ từ lịch sử" ──
@@ -4020,10 +4050,13 @@ function renderMonthOverview(ci) {
   const m=curMonth();
   const sumNew=pjs.reduce((s,p)=>s+_rowCountDept(p,'new'),0);
   const sumRev=pjs.reduce((s,p)=>s+_rowCountDept(p,'rev'),0);
-  const tgtNew=m.targetNew||0, tgtRev=m.targetRev||0;
+  const tgtNew=_curTgtNew(), tgtRev=_curTgtRev();
   const tgtAll=tgtNew+tgtRev;
   const pctNew=tgtNew>0?Math.min(100,Math.round(sumNew/tgtNew*100)):0;
   const pctRev=tgtRev>0?Math.min(100,Math.round(sumRev/tgtRev*100)):0;
+  const _tgtRO=_canEditTarget()?'':'disabled title="Chỉ admin/trưởng phòng được sửa"';
+  const _pbNew=activeSection==='intl'?_paperBreakdownStatus(pjs,'new'):null;
+  const _pbRev=activeSection==='intl'?_paperBreakdownStatus(pjs,'rev'):null;
 
   const otMap={};
   D.settings.staffList.forEach(s=>otMap[s]=0);
@@ -4074,6 +4107,7 @@ function renderMonthOverview(ci) {
       <div class="hero-num" id="heroSumNew" style="font-size:34px">${sumNew}</div>
       <div class="progress-track" style="margin-top:6px"><div class="progress-fill green" id="prgNew" style="width:${pctNew}%"></div></div>
       <div class="progress-label progress-label"><span>${pctNew}%</span><span id="lblNew">${sumNew}/${tgtNew}</span></div>
+      ${_pbNew&&_paperMini(_pbNew)?`<div style="font-size:10.5px;color:rgba(255,255,255,.95);margin-top:5px;font-weight:600;line-height:1.3;border-top:1px solid rgba(255,255,255,.25);padding-top:4px">${_paperMini(_pbNew)}</div>`:''}
     </div>
 
     <!-- Box 2: Sửa lại (nhỏ gọn) -->
@@ -4082,6 +4116,7 @@ function renderMonthOverview(ci) {
       <div class="hero-num" id="heroSumRev" style="font-size:34px">${sumRev}</div>
       <div class="progress-track" style="margin-top:6px"><div class="progress-fill gold" id="prgRev" style="width:${pctRev}%"></div></div>
       <div class="progress-label"><span>${pctRev}%</span><span id="lblRev">${sumRev}/${tgtRev}</span></div>
+      ${_pbRev&&_paperMini(_pbRev)?`<div style="font-size:10.5px;color:rgba(255,255,255,.95);margin-top:5px;font-weight:600;line-height:1.3;border-top:1px solid rgba(255,255,255,.25);padding-top:4px">${_paperMini(_pbRev)}</div>`:''}
     </div>
 
     <!-- Box 3: Hiệu suất nhân sự — 2 cột, mỗi cột 6 dòng -->
@@ -4127,7 +4162,7 @@ function renderMonthOverview(ci) {
           <div style="display:flex;align-items:center;gap:5px">
             <span id="tgt-actual-new" style="font-size:15px;font-weight:800;color:${sumNew>0&&tgtNew>0&&sumNew>=tgtNew?'#4ade80':'var(--gold)'}">${sumNew}</span>
             <span style="font-size:11px;color:rgba(255,255,255,.4)">/</span>
-            <input class="target-input" type="number" value="${tgtNew}" min="0" id="tgtN"
+            <input class="target-input" type="number" value="${tgtNew}" min="0" id="tgtN" ${_tgtRO}
               style="width:52px;font-size:13px;padding:3px 5px"
               onchange="updateMonthTarget('targetNew',+this.value)">
           </div>
@@ -4145,7 +4180,7 @@ function renderMonthOverview(ci) {
           <div style="display:flex;align-items:center;gap:5px">
             <span id="tgt-actual-rev" style="font-size:15px;font-weight:800;color:${sumRev>0&&tgtRev>0&&sumRev>=tgtRev?'#4ade80':'var(--gold)'}">${sumRev}</span>
             <span style="font-size:11px;color:rgba(255,255,255,.4)">/</span>
-            <input class="target-input" type="number" value="${tgtRev}" min="0" id="tgtR"
+            <input class="target-input" type="number" value="${tgtRev}" min="0" id="tgtR" ${_tgtRO}
               style="width:52px;font-size:13px;padding:3px 5px"
               onchange="updateMonthTarget('targetRev',+this.value)">
           </div>
@@ -4159,11 +4194,6 @@ function renderMonthOverview(ci) {
       <div style="font-size:10px;color:rgba(255,255,255,.45);padding-top:4px;border-top:1px solid rgba(255,255,255,.1)" id="tgtTotal">Tổng = ${tgtAll} ${activeSection==='intl'?'tờ bản vẽ':'phối cảnh'}</div>
     </div>
   </div>
-
-  ${activeSection==='intl'?`<div style="margin:0 0 10px;padding:9px 14px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-    <span style="font-size:12px;font-weight:700;color:#6d28d9;text-transform:uppercase">📐 Tổng hợp bản vẽ theo khổ giấy (tháng này)</span>
-    ${_paperBreakdownHtml(_paperBreakdownMany(pjs), true)}
-  </div>`:''}
 
   <div class="card">
     <div class="card-hd">
@@ -4605,11 +4635,14 @@ function renderMonthGantt(pjs) {
 }
 
 async function updateMonthTarget(field, val) {
+  if(!_canEditTarget()){ toast('🔒 Chỉ admin hoặc trưởng phòng mới được sửa mục tiêu'); renderMonthOverview(document.getElementById('contentInner')); return; }
   if(!D.months[D.activeMonth]) D.months[D.activeMonth]={projects:[],projectsVN:[],targetNew:0,targetRev:0};
-  D.months[D.activeMonth][field] = Math.max(0, val); save();
+  const _k=_tgtKeys();
+  const mkey = field === 'targetNew' ? _k.n : _k.r;
+  const col  = field === 'targetNew' ? _k.cn : _k.cr;
+  D.months[D.activeMonth][mkey] = Math.max(0, val); save();
   refreshHeroTargetDisplay();
   if (window._sbReady) {
-    const col = field === 'targetNew' ? 'target_new' : 'target_rev';
     try {
       const { error } = await _sb.from('months').update({ [col]: Math.max(0, val) }).eq('id', D.activeMonth);
       if (error) _sbReport('updateMonthTarget', error, {op:'update', table:'months'});
@@ -4620,9 +4653,9 @@ async function updateMonthTarget(field, val) {
 function refreshHeroTargetDisplay() {
   const m = curMonth();
   const pjs = curProjects();
-  const sumNew = pjs.reduce((s,p)=>s+totalNew(p),0);
-  const sumRev = pjs.reduce((s,p)=>s+totalRev(p),0);
-  const tgtNew = m.targetNew||0, tgtRev = m.targetRev||0;
+  const sumNew = pjs.reduce((s,p)=>s+_rowCountDept(p,'new'),0);
+  const sumRev = pjs.reduce((s,p)=>s+_rowCountDept(p,'rev'),0);
+  const tgtNew = _curTgtNew(), tgtRev = _curTgtRev();
   const pctNew = tgtNew>0?Math.min(100,Math.round(sumNew/tgtNew*100)):0;
   const pctRev = tgtRev>0?Math.min(100,Math.round(sumRev/tgtRev*100)):0;
   const doneNew = tgtNew>0 && sumNew>=tgtNew;
@@ -4705,18 +4738,21 @@ function backToOverview() {
 function updateHeroForProject(p) {
   // Update hero stats row to show project numbers + month totals
   const pjs = curProjects();
-  const sumNew = pjs.reduce((s,q) => s + totalNew(q), 0);
-  const sumRev = pjs.reduce((s,q) => s + totalRev(q), 0);
+  const sumNew = pjs.reduce((s,q) => s + _rowCountDept(q,'new'), 0);
+  const sumRev = pjs.reduce((s,q) => s + _rowCountDept(q,'rev'), 0);
   const m = curMonth();
-  const tgtNew = m.targetNew || 0, tgtRev = m.targetRev || 0;
+  const tgtNew = _curTgtNew(), tgtRev = _curTgtRev();
+  const _tgtRO = _canEditTarget()?'':'disabled title="Chỉ admin/trưởng phòng được sửa"';
+  const _tgtUnit = activeSection==='intl'?'tờ bản vẽ':'phối cảnh';
   const pctNew = tgtNew > 0 ? Math.min(100, Math.round(sumNew / tgtNew * 100)) : 0;
   const pctRev = tgtRev > 0 ? Math.min(100, Math.round(sumRev / tgtRev * 100)) : 0;
+  const _pjNew = _rowCountDept(p,'new'), _pjRev = _rowCountDept(p,'rev');
 
-  // Staff breakdown for this project
+  // Staff breakdown for this project — CHỈ hạng mục của phòng đang xem
   const sm = {};
   D.settings.staffList.forEach(s => sm[s] = {n:0, r:0, ot:0});
-  (p.groups||[]).flatMap(g => g.rows||[]).forEach(r => {
-    if(r.staff && sm[r.staff]) {
+  (p.groups||[]).filter(_groupInDept).flatMap(g => g.rows||[]).forEach(r => {
+    if(r.staff && sm[r.staff] && !r.isCarryRef) {
       if(r.status==='new') sm[r.staff].n += (r.qty||0);
       else sm[r.staff].r += (r.qty||0);
       sm[r.staff].ot += (r.ot||0);
@@ -4731,13 +4767,13 @@ function updateHeroForProject(p) {
 
   heroRow.innerHTML = `
     <div class="hero-box green">
-      <div class="hero-num">${totalNew(p)}</div>
+      <div class="hero-num">${_pjNew}</div>
       <div class="hero-lbl">作成 — Dự án này</div>
       <div style="font-size:10px;color:var(--gray4);margin-top:4px">Tháng: ${sumNew} / ${tgtNew}</div>
       <div class="progress-track"><div class="progress-fill green" style="width:${pctNew}%"></div></div>
     </div>
     <div class="hero-box gold">
-      <div class="hero-num">${totalRev(p)}</div>
+      <div class="hero-num">${_pjRev}</div>
       <div class="hero-lbl">修正 — Dự án này</div>
       <div style="font-size:10px;color:var(--gray4);margin-top:4px">Tháng: ${sumRev} / ${tgtRev}</div>
       <div class="progress-track"><div class="progress-fill gold" style="width:${pctRev}%"></div></div>
@@ -4761,13 +4797,13 @@ function updateHeroForProject(p) {
       <div class="tgt-title">🎯 Mục tiêu tháng</div>
       <div class="target-row">
         <label>作成 Mới</label>
-        <input class="target-input" type="number" value="${tgtNew}" min="0" id="tgtN" onchange="updateMonthTarget('targetNew',+this.value)">
+        <input class="target-input" type="number" value="${tgtNew}" min="0" id="tgtN" ${_tgtRO} onchange="updateMonthTarget('targetNew',+this.value)">
       </div>
       <div class="target-row">
         <label>修正 Sửa</label>
-        <input class="target-input" type="number" value="${tgtRev}" min="0" id="tgtR" onchange="updateMonthTarget('targetRev',+this.value)">
+        <input class="target-input" type="number" value="${tgtRev}" min="0" id="tgtR" ${_tgtRO} onchange="updateMonthTarget('targetRev',+this.value)">
       </div>
-      <div style="font-size:10px;color:rgba(255,255,255,.5);margin-top:4px" id="tgtTotal">Tổng = ${tgtNew+tgtRev} phối cảnh</div>
+      <div style="font-size:10px;color:rgba(255,255,255,.5);margin-top:4px" id="tgtTotal">Tổng = ${tgtNew+tgtRev} ${_tgtUnit}</div>
     </div>
   `;
 }
@@ -6096,7 +6132,7 @@ function renderProjectTimeline_VN(p) {
 function renderProjectDetail(ci, p) {
   const tn=totalNew(p), tr=totalRev(p), ta=tn+tr;
   const m=curMonth();
-  const tgtNew=m.targetNew||0, tgtRev=m.targetRev||0;
+  const tgtNew=_curTgtNew(), tgtRev=_curTgtRev();
   const ot=totalOT(p);
 
   const sm={};

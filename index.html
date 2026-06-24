@@ -13617,6 +13617,19 @@ function checkMorningNotification(force) {
   var day3 = new Date(now); day3.setDate(day3.getDate()+3);
   var day3Str = day3.toISOString().slice(0,10);
 
+  // Lọc theo PHÒNG được phân quyền: admin/view xem tất cả; còn lại chỉ phòng được cấp quyền (studio/intl/vn).
+  var _allowDepts = (function(){
+    var r = sessionStorage.getItem('splash_role')||(window.SYNC&&SYNC.role)||'none';
+    if(r==='admin'||r==='view') return null;            // null = không lọc (xem tất cả)
+    if(r==='edit') return ['intl'];                      // quản lý phòng Bản vẽ
+    var p=(typeof _currentPerms==='function')?_currentPerms():{};
+    var out=[];
+    if(p.studio||p.manage_studio) out.push('studio');
+    if(p.intl||p.manage_intl)     out.push('intl');
+    if(p.vn||p.manage_vn)         out.push('vn');
+    return out;                                          // [] = không phòng nào -> không hiện lịch UP
+  })();
+
   var ups = [], leaves = [], deadlines = [], overdue = [];
   var _seenMN = {};   // chống đếm đôi hạng mục carryover (hiện ở cả tháng cũ lẫn tháng mới)
   // cửa sổ quá hạn: chỉ tính việc quá ngày UP trong vòng 60 ngày gần đây (tránh việc quá cũ)
@@ -13630,6 +13643,9 @@ function checkMorningNotification(force) {
       pair[1].forEach(function(p) {
         var pName = p.nameVN || p.nameJP || p.id;
         (p.groups||[]).forEach(function(g) {
+          // Phòng của hạng mục: VN -> 'vn'; JP -> theo dept của nhóm ('studio'/'intl')
+          var _dept = (section==='vn') ? 'vn' : (g.dept||'studio');
+          if (_allowDepts && _allowDepts.indexOf(_dept) < 0) return;  // không có quyền xem phòng này -> bỏ qua
           var gName = g.type || '';
           (g.rows||[]).forEach(function(r) {
             if (!r.dateTo || r.doneAt) return;

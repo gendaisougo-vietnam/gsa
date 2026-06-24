@@ -1241,7 +1241,7 @@ async function sbLoadAll() {
     });
     const pObj = {
       id: p.id, nameVN: p.name_vn, nameJP: p.name_jp,
-      office: p.office, contact: p.contact, mainStaff: p.main_staff,
+      office: p.office, contact: p.contact, mainStaff: p.main_staff, mainStaffIntl: p.main_staff_intl||'',
       notes: p.notes, _carryover: p.is_carryover,
       studioOn: (p.studio_on===undefined ? true : p.studio_on), intlOn: (p.intl_on===undefined ? true : p.intl_on),
       client: p.client||'', buildingType: p.building_type||'',
@@ -1416,7 +1416,7 @@ async function _sbSaveProject(p, monthId, section) {
       id: p.id, month_id: monthId, section,
       name_vn: p.nameVN || '', name_jp: p.nameJP || '',
       office: p.office || '', contact: p.contact || '',
-      main_staff: p.mainStaff || '', notes: p.notes || '',
+      main_staff: p.mainStaff || '', main_staff_intl: p.mainStaffIntl || '', notes: p.notes || '',
       is_carryover: !!p._carryover,
     };
     // Lưu cột meta cho CẢ jp + vn (cột đã có sẵn; jp dùng cho khung tên 工程表)
@@ -2445,6 +2445,8 @@ function _tgtKeys(){
 }
 function _curTgtNew(){ var m=curMonth(); return m[_tgtKeys().n]||0; }
 function _curTgtRev(){ var m=curMonth(); return m[_tgtKeys().r]||0; }
+// Người triển khai chính tách theo phòng: Bản vẽ (intl) dùng field riêng; Phối cảnh + VN dùng field gốc.
+function _mainStaffKey(){ return activeSection==='intl' ? 'mainStaffIntl' : 'mainStaff'; }
 // Chỉ admin hoặc trưởng phòng (manage_*) của phòng đang xem mới được sửa mục tiêu.
 function _canEditTarget(){
   var r = sessionStorage.getItem('splash_role')||(window.SYNC&&SYNC.role)||'none';
@@ -2902,7 +2904,7 @@ async function _sbDumpMonthEntities(mid) {
       id: p.id, month_id: mid, section: sec,
       name_vn: p.nameVN || '', name_jp: p.nameJP || '',
       office: p.office || '', contact: p.contact || '',
-      main_staff: p.mainStaff || '', notes: p.notes || '',
+      main_staff: p.mainStaff || '', main_staff_intl: p.mainStaffIntl || '', notes: p.notes || '',
       is_carryover: !!p._carryover,
     };
     if (sec === 'vn') {
@@ -3103,6 +3105,7 @@ async function doAddMonth(prevMid, newMid) {
         office:    p.office    || '',
         contact:   p.contact   || '',
         mainStaff: p.mainStaff || '',
+        mainStaffIntl: p.mainStaffIntl || '',
         // VN-specific fields (Chi tiết dự án) — phải carry sang tháng mới
         client:            p.client            || '',
         buildingType:      p.buildingType      || '',
@@ -8516,7 +8519,8 @@ async function confirmAddPj() {
     const pj = { id:gid(), nameVN: nVN||src.nameVN||'', nameJP: nJP||src.nameJP||'',
       office: document.getElementById('ap-off').value || src.office || '',
       contact: (document.getElementById('ap-ct')?.value||'').trim(),
-      mainStaff: (document.getElementById('ap-st')?.value||''),
+      mainStaff: '',
+      mainStaffIntl: (document.getElementById('ap-st')?.value||''),
       client: (document.getElementById('ap-client')?.value||'').trim() || src.client || '',
       buildingType: (document.getElementById('ap-buildingType')?.value||'').trim() || src.buildingType || '',
       scope: (document.getElementById('ap-scope')?.value||'').trim() || src.scope || '',
@@ -8560,7 +8564,7 @@ async function confirmAddPj() {
       _sbQueueChange('Tải dự án từ lịch sử: "' + (pj.nameVN || pj.nameJP) + '" (' + nG + ' hạng mục, ' + nR + ' dòng)',
         'projects', 'insert', pj.id,
         { month_id: D.activeMonth, section: 'jp', name_vn: pj.nameVN||'', name_jp: pj.nameJP||'',
-          office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', notes: '', is_carryover: false },
+          office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', main_staff_intl: pj.mainStaffIntl||'', notes: '', is_carryover: false },
         { monthId: D.activeMonth });
     } else {
       _syncFullLoadedProject(pj, D.activeMonth, src);
@@ -8574,7 +8578,8 @@ async function confirmAddPj() {
   const pj={id:gid(),nameVN:nVN,nameJP:nJP,
     office:document.getElementById('ap-off').value,
     contact:(document.getElementById('ap-ct')?.value||'').trim(),
-    mainStaff:(document.getElementById('ap-st')?.value||''),
+    mainStaff:(activeSection==='intl'?'':(document.getElementById('ap-st')?.value||'')),
+    mainStaffIntl:(activeSection==='intl'?(document.getElementById('ap-st')?.value||''):''),
     groups:[],
     photos: hist?.photo ? [hist.photo] : [],
     otLog:[],notes:''};
@@ -8603,7 +8608,7 @@ async function confirmAddPj() {
     _sbQueueChange('Thêm dự án: "' + (pj.nameVN || pj.nameJP || 'mới') + '"',
       'projects', 'insert', pj.id,
       { month_id: D.activeMonth, section: activeSection, name_vn: pj.nameVN||'', name_jp: pj.nameJP||'',
-        office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', notes: pj.notes||'', is_carryover: false },
+        office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', main_staff_intl: pj.mainStaffIntl||'', notes: pj.notes||'', is_carryover: false },
       { monthId: D.activeMonth });
   } else {
     _sbSaveProject(pj, D.activeMonth, activeSection);
@@ -8630,7 +8635,7 @@ function openEditProject(id) {
           ${_contactOptionsHtml(p.contact)}</select></div>
       <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ep-st"><option value="">— Chọn —</option>
-          ${_deptStaffOptionsHtml(p.mainStaff)}</select></div>
+          ${_deptStaffOptionsHtml(p[_mainStaffKey()]||'')}</select></div>
     </div>
     <div style="font-size:11px;font-weight:700;color:#1F3864;margin:12px 0 8px;padding:4px 8px;background:#eef3fb;border-radius:4px">🏛 Khung tên dự án (工程表)</div>
     <div class="info-grid c2" style="gap:10px">
@@ -8680,7 +8685,7 @@ function openEditProject(id) {
           ${_contactOptionsHtml(p.contact)}</select></div>
       <div class="field"><label>Người triển khai chính (phòng này)</label>
         <select id="ep-st"><option value="">— Chọn —</option>
-          ${_deptStaffOptionsHtml(p.mainStaff)}</select></div>
+          ${_deptStaffOptionsHtml(p[_mainStaffKey()]||'')}</select></div>
     </div>
     <input type="hidden" id="ep-nJP" value="${x(p.nameJP||'')}">`;
 
@@ -8731,7 +8736,7 @@ function confirmEditPj(id) {
   p.nameVN = newVN; p.nameJP = newJP;
   p.office=(document.getElementById('ep-off')?.value||'');
   p.contact=(document.getElementById('ep-ct')?.value||'').trim();
-  p.mainStaff=(document.getElementById('ep-st')?.value||'');
+  p[_mainStaffKey()]=(document.getElementById('ep-st')?.value||'');
   // Khung tên: lưu cho CẢ JP + VN (JP: area=担当 PM, scope=địa chỉ, buildingType=quy cách)
   p.client           = (document.getElementById('ep-client')?.value||'').trim();
   p.buildingType     = (document.getElementById('ep-buildingType')?.value||'').trim();
@@ -8759,7 +8764,7 @@ function confirmEditPj(id) {
     _sbQueueChange('Sửa dự án: "' + (p.nameVN || p.nameJP || id) + '"',
       'projects', 'upsert', id,
       { month_id: D.activeMonth, section: (activeSection==='vn'?'vn':'jp'),
-        name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'',
+        name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'', main_staff_intl: p.mainStaffIntl||'',
         client: p.client||null, building_type: p.buildingType||null, scope: p.scope||null, area: p.area||null,
         construction_start: p.constructionStart||null, construction_end: p.constructionEnd||null,
         studio_on: (p.studioOn!==false), intl_on: (p.intlOn!==false) },
@@ -9048,7 +9053,7 @@ function savePjToHistory(p) {
   const entry = {
     nameVN: p.nameVN||'', nameJP: p.nameJP||'',
     office: p.office||'', contact: p.contact||'',
-    mainStaff: p.mainStaff||'',
+    mainStaff: p.mainStaff||'', mainStaffIntl: p.mainStaffIntl||'',
     groups: (p.groups||[]).map(g=>({type:g.type||''})), // chỉ lưu tên hạng mục
     photo: (p.photos||[]).filter(Boolean)[0]||'',       // ảnh đầu tiên
     savedAt: localDateStr(new Date())
@@ -9122,7 +9127,7 @@ async function cloneProjectFromHistory(srcPj, srcMonthId) {
     id: newId,
     nameVN: srcPj.nameVN || '', nameJP: srcPj.nameJP || '',
     office: srcPj.office || '', contact: srcPj.contact || '',
-    mainStaff: srcPj.mainStaff || '',
+    mainStaff: srcPj.mainStaff || '', mainStaffIntl: srcPj.mainStaffIntl || '',
     client: srcPj.client || '', buildingType: srcPj.buildingType || '',
     scope: srcPj.scope || '', area: srcPj.area || '',
     groups: newGroups,

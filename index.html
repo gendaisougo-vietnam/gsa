@@ -4287,7 +4287,7 @@ function renderMonthOverview(ci) {
   <div class="card" id="monthGanttCard">
     <div class="card-hd">
       <span class="card-hd-title">${activeSection==='vn'?'📅 Lịch công việc nhân sự':'担当者別工程表 <span style="font-size:10px;font-weight:500;opacity:.65;letter-spacing:.04em">Tantōsha-betsu Kōteihyō</span>'}</span>
-      <span style="font-size:10px;color:rgba(255,255,255,.5);flex:1">${activeSection==='vn'?'🇻🇳 Nhân sự dự án VN':'🇯🇵 Nhân sự dự án Nhật'} · Ai đang làm gì · Deadline · Ai rảnh</span>
+      <span style="flex:1"></span>
       <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-month')" title="Cuộn đến cột ngày hôm nay">📍 Hôm nay</button>
     </div>
     <div class="card-body" style="padding:0">
@@ -6321,9 +6321,7 @@ function renderProjectDetail(ci, p) {
 
   <!-- STAFF SCHEDULE -->
   <div class="card" id="staffSched-${p.id}">
-    <div class="card-hd"><span class="card-hd-title">📅 Lịch công việc nhân sự</span>
-      <span style="font-size:10px;color:rgba(255,255,255,.55)">Ai đang làm gì · deadline · ai rảnh</span>
-    </div>
+    <div class="card-hd"><span class="card-hd-title">📅 Lịch công việc nhân sự</span></div>
     <div class="card-body" style="padding:0">
       ${renderStaffSchedule(p)}
     </div>

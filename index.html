@@ -782,6 +782,7 @@ table.detail-tl tr.staff-last > td {
   </div>
   <div class="hdr-right">
     <div class="hdr-status">
+      <button class="btn btn-sm" id="notifBtn" onclick="checkMorningNotification(true)" title="Xem lại báo cáo đầu ngày (lịch UP, deadline…)" style="background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25);position:relative">🔔<span id="notifBadge" style="display:none;position:absolute;top:-6px;right:-6px;background:#e74c3c;color:#fff;border-radius:50%;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 3px"></span></button>
       <button class="sync-btn" id="syncBtn" onclick="(window._sbErrCount > 0) ? _sbToggleErrPanel() : sbReloadData()" title="Realtime — bấm để tải lại dữ liệu từ Supabase (hoặc xem panel lỗi sync nếu có)">
         <span class="dot"></span><span id="syncLabel">Live</span>
       </button>
@@ -3175,6 +3176,7 @@ function showStorageStatus() {
 function renderSidebar() {
   const pjs = curProjects();
   document.getElementById('pjCount').textContent = pjs.length;
+  try{ refreshNotifBadge(); }catch(_){}
   const _hdEl=document.getElementById('sidebarHd');
   if(_hdEl&&_hdEl.childNodes[0]) _hdEl.childNodes[0].nodeValue=(activeSection==='vn'?'設計室 ':activeSection==='intl'?'国際設計室 ':'デザインスタジオ ');
   const _addBtn=document.getElementById('addPjBtn');
@@ -3213,12 +3215,17 @@ function renderSidebar() {
     const hasTodayDeadline = allRows.some(r => r.dateTo === today && !r.doneAt);
     // Đang làm: có row dateTo tương lai và chưa doneAt
     const hasFutureDeadline = allRows.some(r => r.dateTo > today && !r.doneAt);
+    // Quá ngày UP nhưng QUÊN bấm UP (trong vòng 60 ngày)
+    const _ovCut = (function(){ var d=new Date(); d.setDate(d.getDate()-60); return localDateStr(d); })();
+    const hasOverdueUp = allRows.some(r => !r.doneAt && r.dateTo < today && r.dateTo >= _ovCut);
     const isActive = hasTodayDeadline || hasFutureDeadline;
     const activeStaff = [...new Set(activeRows.map(r=>r.staff))];
 
-    // Badge trạng thái
+    // Badge trạng thái (ưu tiên: Cần UP > Hoàn thành > Có lịch UP > Đang làm)
     let statusBadge = '';
-    if (isFullyDone) {
+    if (hasOverdueUp) {
+      statusBadge = `<div style="position:absolute;top:5px;right:5px;background:#b91c1c;border-radius:99px;padding:1px 6px;font-size:8px;font-weight:800;color:#fff;box-shadow:0 0 0 2px rgba(185,28,28,.25)">⚠ Cần UP</div>`;
+    } else if (isFullyDone) {
       statusBadge = `<div style="position:absolute;top:5px;right:5px;background:#fff;border:1px solid #FFC000;border-radius:99px;padding:1px 5px;font-size:8px;font-weight:700;color:#FFC000">✓ Hoàn thành</div>`;
     } else if (hasTodayDeadline) {
       statusBadge = `<div style="position:absolute;top:5px;right:5px;background:#e74c3c;border-radius:99px;padding:1px 5px;font-size:8px;font-weight:700;color:#fff">⚡ Có lịch UP</div>`;
@@ -13602,6 +13609,61 @@ function _openPjFromNotif(mid, section, pjId){
   try{ selectPj(pjId); }catch(e){}
 }
 
+// Phòng được phép xem báo cáo lịch UP: admin/view = tất cả; còn lại theo quyền phòng.
+function _notifAllowedDepts(){
+  var r = sessionStorage.getItem('splash_role')||(window.SYNC&&SYNC.role)||'none';
+  if(r==='admin'||r==='view') return null;            // null = không lọc
+  if(r==='edit') return ['intl'];
+  var p=(typeof _currentPerms==='function')?_currentPerms():{};
+  var out=[];
+  if(p.studio||p.manage_studio) out.push('studio');
+  if(p.intl||p.manage_intl)     out.push('intl');
+  if(p.vn||p.manage_vn)         out.push('vn');
+  return out;
+}
+// Checklist "đã xử lý" trong báo cáo — lưu cục bộ theo ngày (KHÔNG đụng dữ liệu thật).
+function _notifKey(today,e){ return 'mn_done_'+today+'_'+(e.section||'')+'_'+(e.pjId||e.pj||''); }
+function _notifIsHandled(today,e){ try{ return localStorage.getItem(_notifKey(today,e))==='1'; }catch(_){ return false; } }
+function _notifToggle(key, el){
+  try{ var on=localStorage.getItem(key)==='1'; if(on) localStorage.removeItem(key); else localStorage.setItem(key,'1'); on=!on;
+    el.innerHTML = on?'✓':''; el.style.background = on?'#16a34a':'transparent'; el.style.color = on?'#fff':'#94a3b8'; el.style.borderColor = on?'#16a34a':'#cbd5e1';
+    var row=el.parentNode; while(row && (!row.className||row.className.indexOf('mn-row')<0)) row=row.parentNode;
+    if(row) row.style.opacity = on?'.5':'1';
+  }catch(_){}
+}
+function _mnTick(today,e){
+  var key=_notifKey(today,e), on=_notifIsHandled(today,e);
+  return '<button onclick="event.stopPropagation();_notifToggle(\''+key+'\',this)" title="Đánh dấu đã xử lý" '
+    + 'style="flex-shrink:0;width:18px;height:18px;border-radius:50%;border:1.5px solid '+(on?'#16a34a':'#cbd5e1')+';background:'+(on?'#16a34a':'transparent')+';color:'+(on?'#fff':'#94a3b8')+';font-size:11px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;align-self:flex-start;margin-top:1px">'+(on?'✓':'')+'</button>';
+}
+// Badge số trên chuông = số công trình cần UP (quá hạn + hôm nay) trong phòng được phép.
+function refreshNotifBadge(){
+  try{
+    var el=document.getElementById('notifBadge'); if(!el) return;
+    var today=localDateStr(new Date());
+    var cut=new Date(); cut.setDate(cut.getDate()-60); var cutStr=localDateStr(cut);
+    var allow=_notifAllowedDepts();
+    var m=D.months&&D.months[D.activeMonth]; if(!m){ el.style.display='none'; return; }
+    var seen={}, n=0;
+    [['jp',m.projects||[]],['vn',m.projectsVN||[]]].forEach(function(pr){
+      var sec=pr[0];
+      pr[1].forEach(function(p){
+        var hit=false;
+        (p.groups||[]).forEach(function(g){
+          var dept=(sec==='vn')?'vn':(g.dept||'studio');
+          if(allow && allow.indexOf(dept)<0) return;
+          (g.rows||[]).forEach(function(r){
+            if(!r.dateTo||r.doneAt) return;
+            if(r.dateTo===today || (r.dateTo<today && r.dateTo>=cutStr)) hit=true;
+          });
+        });
+        if(hit && !seen[p.id]){ seen[p.id]=1; n++; }
+      });
+    });
+    if(n>0){ el.textContent=n>99?'99+':n; el.style.display='block'; } else el.style.display='none';
+  }catch(_){}
+}
+
 function checkMorningNotification(force) {
   var now = new Date();
   var today = now.toISOString().slice(0,10);
@@ -13615,18 +13677,8 @@ function checkMorningNotification(force) {
   var day3 = new Date(now); day3.setDate(day3.getDate()+3);
   var day3Str = day3.toISOString().slice(0,10);
 
-  // Lọc theo PHÒNG được phân quyền: admin/view xem tất cả; còn lại chỉ phòng được cấp quyền (studio/intl/vn).
-  var _allowDepts = (function(){
-    var r = sessionStorage.getItem('splash_role')||(window.SYNC&&SYNC.role)||'none';
-    if(r==='admin'||r==='view') return null;            // null = không lọc (xem tất cả)
-    if(r==='edit') return ['intl'];                      // quản lý phòng Bản vẽ
-    var p=(typeof _currentPerms==='function')?_currentPerms():{};
-    var out=[];
-    if(p.studio||p.manage_studio) out.push('studio');
-    if(p.intl||p.manage_intl)     out.push('intl');
-    if(p.vn||p.manage_vn)         out.push('vn');
-    return out;                                          // [] = không phòng nào -> không hiện lịch UP
-  })();
+  // Lọc theo PHÒNG được phân quyền (admin/view = tất cả).
+  var _allowDepts = _notifAllowedDepts();
 
   var ups = [], leaves = [], deadlines = [], overdue = [];
   var _seenMN = {};   // chống đếm đôi hạng mục carryover (hiện ở cả tháng cũ lẫn tháng mới)
@@ -13720,7 +13772,10 @@ function checkMorningNotification(force) {
   });
 
   if (ups.length === 0 && leaves.length === 0 && deadlines.length === 0
-      && overdue.length === 0 && probReviews.length === 0 && probEnds.length === 0) return;
+      && overdue.length === 0 && probReviews.length === 0 && probEnds.length === 0) {
+    if (force) { try { showModal('<div style="max-width:360px;text-align:center;padding:6px"><div style="font-size:34px">✅</div><div style="font-weight:700;color:var(--navy);margin:8px 0 2px">Không có lịch UP / deadline cần chú ý</div><div style="font-size:12px;color:#888">Báo cáo ngày '+today.split("-").reverse().join("/")+'</div><div class="modal-ft" style="justify-content:center"><button class="btn btn-gold" onclick="closeModal()">Đóng</button></div></div>'); } catch(e){} }
+    return;
+  }
 
   var todayFmt = today.split('-').reverse().join('/');
   var secStyle = 'margin-bottom:14px';
@@ -13732,7 +13787,8 @@ function checkMorningNotification(force) {
     + '<div style="background:var(--navy);color:#fff;margin:-16px -16px 14px;padding:12px 16px;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:10px">'
     + '<span style="font-size:18px">🌅</span>'
     + '<div><div style="font-weight:700;font-size:13px">Báo cáo ngày ' + todayFmt + '</div>'
-    + '<div style="font-size:10px;opacity:.75;margin-top:1px">Cập nhật buổi sáng</div></div></div>';
+    + '<div style="font-size:10px;opacity:.75;margin-top:1px">Cập nhật buổi sáng</div></div></div>'
+    + '<div style="font-size:10px;color:#888;margin:-4px 0 10px;padding:0 2px">Tích ✓ để đánh dấu công trình đã xử lý · bấm vào tên để mở công trình</div>';
 
   if (overdue.length) {
     overdue.sort(function(a,b){ return a.date.localeCompare(b.date); });
@@ -13741,7 +13797,7 @@ function checkMorningNotification(force) {
       + '<div style="' + hdrStyle('#b91c1c') + '"><span>🚨</span> Quá ngày UP — quên bấm UP? <span style="background:#b91c1c;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + ovPjs.length + ' công trình</span></div>'
       + ovPjs.map(function(e){
           var ovTxt = e.days<=0?'Hôm qua':'Quá '+e.days+' ngày';
-          return '<div style="' + rowStyle + 'background:#fff5f5;border-radius:4px;padding:5px 6px" ' + _pjClick(e) + '><span style="' + dotStyle('#dc2626') + '"></span><span style="flex:1"><b>' + e.pj + '</b> <span style="color:#2563eb;font-size:9px">↗ mở</span><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:#dc2626;color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+ovTxt+'</span></div>';
+          return '<div class="mn-row" style="' + rowStyle + ';background:#fff5f5;border-radius:4px;padding:5px 6px;opacity:'+(_notifIsHandled(today,e)?'.5':'1')+'" ' + _pjClick(e) + '>' + _mnTick(today,e) + '<span style="' + dotStyle('#dc2626') + '"></span><span style="flex:1"><b>' + e.pj + '</b> <span style="color:#2563eb;font-size:9px">↗ mở</span><div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:#dc2626;color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+ovTxt+'</span></div>';
         }).join('')
       + '</div>';
   }
@@ -13751,7 +13807,7 @@ function checkMorningNotification(force) {
     html += '<div style="' + secStyle + '">'
       + '<div style="' + hdrStyle('#c0392b') + '"><span>⏰</span> UP hôm nay <span style="background:#c0392b;color:#fff;border-radius:99px;font-size:10px;padding:0 7px">' + upPjs.length + ' công trình</span></div>'
       + upPjs.map(function(e){
-          return '<div style="' + rowStyle + '" ' + _pjClick(e) + '><span style="' + dotStyle('#ef4444') + '"></span><span><b>' + e.pj + '</b>' + (e.pjId?' <span style="color:#2563eb;font-size:9px">↗ mở</span>':'') + '<div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span></div>';
+          return '<div class="mn-row" style="' + rowStyle + ';opacity:'+(_notifIsHandled(today,e)?'.5':'1')+'" ' + _pjClick(e) + '>' + _mnTick(today,e) + '<span style="' + dotStyle('#ef4444') + '"></span><span style="flex:1"><b>' + e.pj + '</b>' + (e.pjId?' <span style="color:#2563eb;font-size:9px">↗ mở</span>':'') + '<div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span></div>';
         }).join('')
       + '</div>';
   }
@@ -13764,7 +13820,7 @@ function checkMorningNotification(force) {
       + dlPjs.map(function(e){
           var urgColor = e.days===0?'#ef4444':e.days===1?'#f97316':'#f59e0b';
           var urgText = e.days===0?'Hôm nay!':e.days===1?'Ngày mai':'Còn '+e.days+' ngày';
-          return '<div style="' + rowStyle + '" ' + _pjClick(e) + '><span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + e.pj + '</b>' + (e.pjId?' <span style="color:#2563eb;font-size:9px">↗ mở</span>':'') + '<div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
+          return '<div class="mn-row" style="' + rowStyle + ';opacity:'+(_notifIsHandled(today,e)?'.5':'1')+'" ' + _pjClick(e) + '>' + _mnTick(today,e) + '<span style="' + dotStyle(urgColor) + '"></span><span style="flex:1"><b>' + e.pj + '</b>' + (e.pjId?' <span style="color:#2563eb;font-size:9px">↗ mở</span>':'') + '<div style="color:#555;margin-top:2px;line-height:1.5">' + _pjDetailMN(e) + '</div></span><span style="font-size:10px;background:'+urgColor+';color:#fff;border-radius:99px;padding:1px 7px;white-space:nowrap">'+urgText+'</span></div>';
         }).join('')
       + '</div>';
   }
@@ -13800,7 +13856,7 @@ function checkMorningNotification(force) {
   }
 
   html += '<div class="modal-ft"><button class="btn btn-gold" onclick="closeModal()">Đã xem</button></div></div>';
-  setTimeout(function(){ try { showModal(html); } catch(e) {} }, 2500);
+  setTimeout(function(){ try { showModal(html); } catch(e) {} }, force?0:2500);
 }
 
 /* ── Search ── */

@@ -2410,7 +2410,7 @@ function _groupInDept(g){ const d=_activeDept(); return d===null ? true : ((g&&g
 function _paperBreakdown(p){
   const b={A1:0,A2:0,A3:0,khac:0};
   (p&&p.groups||[]).forEach(function(g){ if((g.dept||'studio')!=='intl') return;
-    (g.rows||[]).forEach(function(r){ if(r.isCarryRef) return; const k=(r.paperSize||''); if(k==='A1'||k==='A2'||k==='A3') b[k]+=(r.qty||0); else b.khac+=(r.qty||0); }); });
+    (g.rows||[]).forEach(function(r){ if(r.isCarryRef||r.tentative) return; const k=(r.paperSize||''); if(k==='A1'||k==='A2'||k==='A3') b[k]+=(r.qty||0); else b.khac+=(r.qty||0); }); });
   return b;
 }
 function _paperBreakdownMany(pjs){
@@ -2429,7 +2429,7 @@ function _paperBreakdownHtml(b, big){
 function _paperBreakdownStatus(pjs, status){
   const b={A1:0,A2:0,A3:0,khac:0};
   (pjs||[]).forEach(function(p){ (p.groups||[]).forEach(function(g){ if((g.dept||'studio')!=='intl') return;
-    (g.rows||[]).forEach(function(r){ if(r.isCarryRef) return; if(r.status!==status) return; const k=(r.paperSize||''); if(k==='A1'||k==='A2'||k==='A3') b[k]+=(r.qty||0); else b.khac+=(r.qty||0); }); }); });
+    (g.rows||[]).forEach(function(r){ if(r.isCarryRef||r.tentative) return; if(r.status!==status) return; const k=(r.paperSize||''); if(k==='A1'||k==='A2'||k==='A3') b[k]+=(r.qty||0); else b.khac+=(r.qty||0); }); }); });
   return b;
 }
 // Dòng gọn "A1 8 · A3 2" — chỉ khổ có số (>0). Dùng trong box xanh/vàng (chữ trắng).
@@ -2508,14 +2508,14 @@ function _pjVisibleHere(p){ return activeSection==='intl' ? _pjIntlOn(p) : (acti
 // Tổng số mai theo phòng đang xem (loại trừ carryRef) — dùng cho hero/perf của tab hiện tại
 function _rowCountDept(p, status){
   let s=0;
-  (p.groups||[]).forEach(function(g){ if(!_groupInDept(g)) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef) s+=(r.qty||0); }); });
+  (p.groups||[]).forEach(function(g){ if(!_groupInDept(g)) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef && !r.tentative) s+=(r.qty||0); }); });
   (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
   return s;
 }
 // Đếm số mai theo dept cụ thể ('studio'|'intl'|null=tất cả). Dùng cho Xuất báo cáo từng phòng.
 function _rowCountFor(p, status, deptFilter){
   let s=0;
-  (p.groups||[]).forEach(function(g){ if(deptFilter!==null && (g.dept||'studio')!==deptFilter) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef) s+=(r.qty||0); }); });
+  (p.groups||[]).forEach(function(g){ if(deptFilter!==null && (g.dept||'studio')!==deptFilter) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef && !r.tentative) s+=(r.qty||0); }); });
   if(deptFilter!=='intl') (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
   return s;
 }
@@ -2589,13 +2589,13 @@ function getPjGlobal(id) {
 function totalNew(p) {
   const a=(p.records||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
   // Phase 1: exclude isCarryRef — số mai chỉ tính ở tháng GỐC
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
   return a+b;
 }
 function totalRev(p) {
   const a=(p.records||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
   // Phase 1: exclude isCarryRef — số mai chỉ tính ở tháng GỐC
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
   return a+b;
 }
 function totalOT(p) {
@@ -2967,6 +2967,7 @@ async function _sbDumpMonthEntities(mid) {
           rate14: r.rate14||0, rate15: r.rate15||0,
           from_carryover: !!r.fromCarryover,
           paper_size: r.paperSize || null,
+          tentative: !!r.tentative,   // FIX: giữ lịch DỰ KIẾN (nét đứt) khi sang tháng mới
           // PHASE 3: carryRef — số mai tính ở tháng GỐC
           is_carry_ref: !!r.isCarryRef,
           source_row_id: r.sourceRowId || null,
@@ -3679,8 +3680,8 @@ function renderKouteiJP(pjs, win){
       const metaTxt = meta[i]!=null?meta[i]:'';
       let gNew=0, gRev=0, nmStyle='color:'+(bw?'#000':'#666')+';font-weight:500', nmText='';
       if(g){
-        gNew=(g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
-        gRev=(g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+        gNew=(g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef&&!r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+        gRev=(g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef&&!r.tentative).reduce((s,r)=>s+(r.qty||0),0);
         const gDone=(g.rows||[]).length>0 && (g.rows||[]).every(r=>r.doneAt);
         const gTodayUp=(g.rows||[]).some(r=>r.dateTo===todayStr && !r.doneAt);
         const gPend=(g.rows||[]).some(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
@@ -7466,8 +7467,8 @@ function renderGroups(p) {
         </td>
       </tr>`;
     }
-    const gNew = rows.filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
-    const gRev = rows.filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+    const gNew = rows.filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+    const gRev = rows.filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
     const gOT  = rows.reduce((s,r)=>s+(r.ot||0),0);
     const gTot = gNew+gRev;
     const gc   = GRP[gi % GRP.length];
@@ -14425,12 +14426,12 @@ function exportProjectReport(section) {
 
     // Group rows: type name + new count + rev count (+ khổ giấy nếu là phòng Bản vẽ)
     const groupRows = groups.filter(g=>{
-      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
-      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
       return gNew+gRev > 0;
     }).map(g => {
-      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
-      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef).reduce((s,r)=>s+(r.qty||0),0);
+      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
       let _ps='';
       if(isIntl){ const pc={}; (g.rows||[]).forEach(r=>{ if(r.isCarryRef)return; const k=r.paperSize||''; if(k==='A1'||k==='A2'||k==='A3') pc[k]=(pc[k]||0)+(r.qty||0); }); const tags=['A1','A2','A3'].filter(k=>pc[k]).map(k=>k+':'+pc[k]).join(' '); if(tags) _ps=` <span style="font-size:9px;color:#6d28d9;font-weight:600">(${tags})</span>`; }
       return `<tr>

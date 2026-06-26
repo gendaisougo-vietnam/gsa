@@ -2935,6 +2935,7 @@ async function _sbDumpMonthEntities(mid) {
         sort_order: gi,
         tl_task_id: g.tlTaskId || null,
         manual: !!g._manual,
+        dept: (g.dept || 'studio'),   // FIX: giữ phòng (studio/intl) khi sang tháng mới — tránh nhóm bản vẽ nhảy sang phối cảnh
       });
     });
   });

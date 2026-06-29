@@ -2907,15 +2907,17 @@ async function _sbDumpMonthEntities(mid) {
       office: p.office || '', contact: p.contact || '',
       main_staff: p.mainStaff || '', main_staff_intl: p.mainStaffIntl || '', notes: p.notes || '',
       is_carryover: !!p._carryover,
+      // FIX: khung tên (担当/quy cách/địa chỉ/ngày/chủ đầu tư) + cờ hiển thị phòng — ghi cho CẢ jp/intl/vn
+      // (trước đây chỉ ghi cho vn -> sang tháng mới phối cảnh/bản vẽ bị mất thông tin dự án)
+      client:            p.client            || null,
+      building_type:     p.buildingType      || null,
+      scope:             p.scope             || null,
+      area:              p.area              || null,
+      construction_start:p.constructionStart || null,
+      construction_end:  p.constructionEnd   || null,
+      studio_on:         (p.studioOn !== false),
+      intl_on:           !!p.intlOn,
     };
-    if (sec === 'vn') {
-      row.client            = p.client            || null;
-      row.building_type     = p.buildingType      || null;
-      row.scope             = p.scope             || null;
-      row.area              = p.area              || null;
-      row.construction_start= p.constructionStart || null;
-      row.construction_end  = p.constructionEnd   || null;
-    }
     return row;
   });
   if (pjPayload.length) {

@@ -8715,9 +8715,9 @@ function confirmEditPj(id) {
   const newJP = (document.getElementById('ep-nJP')?.value||'').trim();
   const nameChanged = (oldVN !== newVN) || (oldJP !== newJP);
 
-  // Tìm projects khác cùng identity (strict: CẢ 2 name khớp old, tránh false positive)
+  // Tìm projects khác cùng identity (CẢ 2 name khớp old) — LUÔN tìm để đồng bộ thông tin dự án sang mọi tháng
   const matched = [];
-  if (nameChanged) {
+  if (oldVN || oldJP) {
     Object.entries(D.months).forEach(([mid, m]) => {
       (m.projects||[]).forEach(q => {
         if (q.id !== id && (q.nameVN||'') === oldVN && (q.nameJP||'') === oldJP) {
@@ -8754,18 +8754,25 @@ function confirmEditPj(id) {
   p.constructionStart= (document.getElementById('ep-constructionStart')?.value||'');
   p.constructionEnd  = (document.getElementById('ep-constructionEnd')?.value||'');
 
-  // Sync CHỈ NAME sang các projects khác (giữ office/contact/... riêng từng tháng)
+  // Đồng bộ THÔNG TIN DỰ ÁN sang mọi tháng (cùng dự án):
+  //  - Tên + Văn phòng + Người liên hệ + Khung tên (担当/quy cách/địa chỉ/ngày/chủ đầu tư): giống nhau mọi tháng
+  //  - Người triển khai chính: CHỈ field của phòng đang sửa (phối cảnh / bản vẽ / VN riêng), phòng khác giữ nguyên
+  const _msKey = _mainStaffKey();
+  const _editPool = isVN ? 'vn' : 'jp';
   let syncedCount = 0;
-  if (nameChanged) {
-    matched.forEach(({ p: q, mid, section }) => {
-      q.nameVN = newVN; q.nameJP = newJP;
-      _sbSaveProject(q, mid, section);  // sync trực tiếp Supabase (bypass approval cross-month)
-      syncedCount++;
-    });
-  }
+  matched.forEach(({ p: q, mid, section }) => {
+    q.nameVN = newVN; q.nameJP = newJP;
+    q.office = p.office;
+    q.contact = p.contact;
+    q.client = p.client; q.buildingType = p.buildingType; q.scope = p.scope; q.area = p.area;
+    q.constructionStart = p.constructionStart; q.constructionEnd = p.constructionEnd;
+    if (section === _editPool) q[_msKey] = p[_msKey];   // người triển khai chính: chỉ phòng đang sửa
+    _sbSaveProject(q, mid, section);  // ghi thẳng Supabase (bỏ qua duyệt cho các tháng khác)
+    syncedCount++;
+  });
 
   save(); closeModal(); renderSidebar(); renderContent();
-  toast(syncedCount > 0 ? `✓ Đã lưu + đồng bộ tên ở ${syncedCount} tháng khác` : '✓ Đã lưu');
+  toast(syncedCount > 0 ? `✓ Đã lưu + đồng bộ thông tin sang ${syncedCount} dự án (các tháng khác)` : '✓ Đã lưu');
   _sbAuditLog('update', 'projects', id, 'Sửa dự án: "' + (p.nameVN || p.nameJP || id) + '"' + (syncedCount > 0 ? ` (sync ${syncedCount} tháng)` : ''));
 
   // Current month: theo approval workflow như cũ

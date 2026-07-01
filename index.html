@@ -7147,6 +7147,15 @@ function saveUpRating(pjId, gId, rowId) {
         .then(function(r){ if (r.error) _sbReport('saveUpRating', r.error, {op:'update', table:'rows'}); })
         .catch(function(e){ _sbReport('saveUpRating', e, {op:'update', table:'rows'}); });
     }
+    // Đồng bộ ĐÁNH GIÁ sang các dòng cùng chuỗi carryover ở mọi tháng (kể cả đã UP)
+    try {
+      var _rtTwins = (typeof _rowTwinsAcrossMonths==='function') ? _rowTwinsAcrossMonths(rowId, true) : [];
+      _rtTwins.forEach(function(t){
+        fields.forEach(function(rf){ if (row[rf.field] != null) t.r[rf.field] = row[rf.field]; });
+        if (window._sbReady && Object.keys(rateData).length) _sb.from('rows').update(rateData).eq('id', t.r.id).then(function(){},function(){});
+      });
+      if (_rtTwins.length) persistD();
+    } catch(e){}
     var tbody = document.getElementById('rbody-' + pjId);
     if (tbody) { var pp = getPjGlobal(pjId)||getPj(pjId); if (pp) tbody.innerHTML = renderGroups(pp); }
   }
@@ -7202,6 +7211,17 @@ async function markRowDone(pjId, gId, rId, overrideDoneAt, overrideUpScore) {
       }
     }
   }
+
+  // ĐỒNG BỘ UP + điểm sang MỌI dòng cùng chuỗi carryover (cả tháng cũ lẫn tháng sau, 2 chiều).
+  try {
+    const _upTwins = (typeof _rowTwinsAcrossMonths==='function') ? _rowTwinsAcrossMonths(rId) : [];
+    for (const t of _upTwins) {
+      if (t.r.doneAt) continue;
+      t.r.doneAt = doneAt; t.r.upScore = score;
+      if (t.r.staff && typeof recalcStaffUpKPI==='function') { try { recalcStaffUpKPI(t.r.staff); } catch(e){} }
+      if (window._sbReady) { try { await _sb.from('rows').update({ done_at: doneAt, up_score: score }).eq('id', t.r.id); } catch(e) { _sbReport('markRowDone(twin)', e, {op:'update', table:'rows'}); } }
+    }
+  } catch(e){}
 
   const label = score===10?'● SỚM':score===8?'✓ ĐÚNG GIỜ':score===7?'✓ TRONG NGÀY':score>=1?'● MUỘN':'● QUÁ HẠN';
   const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -8194,7 +8214,7 @@ async function delGroup(pjId,gid2) {
   if(twins.length) toast('✓ Đã xóa hạng mục + đồng bộ '+twins.length+' tháng khác');
 }
 // Tìm "bản sao" cùng DÒNG ở các tháng khác qua chuỗi carryover (sourceRowId), CHƯA bấm UP.
-function _rowTwinsAcrossMonths(rid){
+function _rowTwinsAcrossMonths(rid, includeDone){
   const idx={};
   Object.entries(D.months).forEach(([mid,m])=>{ [['jp',m.projects||[]],['vn',m.projectsVN||[]]].forEach(([sec,list])=>{ list.forEach(p=>{ (p.groups||[]).forEach(g=>{ (g.rows||[]).forEach(r=>{ idx[r.id]={mid,section:sec,p,g,r}; }); }); }); }); });
   const seen={}; const queue=[rid];
@@ -8203,7 +8223,7 @@ function _rowTwinsAcrossMonths(rid){
     Object.keys(idx).forEach(k=>{ if(idx[k].r.sourceRowId===id && !seen[k]) queue.push(k); });
   }
   delete seen[rid];
-  return Object.keys(seen).map(k=>idx[k]).filter(n=>n && !n.r.doneAt);
+  return Object.keys(seen).map(k=>idx[k]).filter(n=>n && (includeDone || !n.r.doneAt));
 }
 async function delRow(pjId,gid2,rid) {
   const p=getPj(pjId); if(!p) return;

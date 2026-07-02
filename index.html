@@ -9536,18 +9536,24 @@ function findLatestProjectInD(nameVN, nameJP, section) {
 
 async function cloneProjectFromHistory(srcPj, srcMonthId) {
   const newId = 'pj_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  // TẢI KÈM DỮ LIỆU THỰC: giữ số mai, ngày, giờ UP, trạng thái đã UP + điểm; giữ đúng phòng (dept).
+  // Tạo bản sao ĐỘC LẬP (id/chainId mới, originMonth = tháng hiện tại) — không liên kết chuỗi với tháng gốc.
   const newGroups = (srcPj.groups || []).map(g => ({
     id: gid(),
     type: g.type || '',
+    dept: (g.dept || 'studio'),
     rows: (g.rows || []).map(r => ({
       id: gid(),
       staff: r.staff || '',
       status: r.status || 'new',
-      qty: 0, ot: 0, otNote: '', note: '',
-      dateFrom: '', dateTo: '', upTime: '', doneAt: '', upScore: null,
-      rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,
-      rate6:0,rate7:0,rate8:0,rate9:0,rate10:0,
-      rate11:0,rate12:0,rate13:0,rate14:0,rate15:0,
+      qty: r.qty || 0, ot: r.ot || 0, otNote: r.otNote || '', note: r.note || '',
+      dateFrom: r.dateFrom || '', dateTo: r.dateTo || '', upTime: r.upTime || '',
+      doneAt: r.doneAt || '', upScore: (r.upScore != null ? r.upScore : null),
+      tentative: !!r.tentative, paperSize: r.paperSize || '',
+      originMonth: D.activeMonth, chainId: gid(),
+      rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,
+      rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,
+      rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0,
     }))
   }));
 
@@ -9588,12 +9594,19 @@ async function _syncFullLoadedProject(pj, monthId, srcPj) {
     await _sbSaveProject(pj, monthId, 'jp');
     const gRecs = [], rRecs = [];
     (pj.groups||[]).forEach((g, gi) => {
-      gRecs.push({ id: g.id, project_id: pj.id, type: g.type||'', sort_order: gi });
+      gRecs.push({ id: g.id, project_id: pj.id, type: g.type||'', sort_order: gi, dept: (g.dept||'studio') });
       (g.rows||[]).forEach((r, ri) => {
         rRecs.push({
           id: r.id, group_id: g.id, sort_order: ri,
           staff: r.staff || null, status: r.status || 'new',
-          qty: 0, ot: 0,
+          qty: r.qty||0, ot: r.ot||0, ot_note: r.otNote||'',
+          date_from: r.dateFrom||null, date_to: r.dateTo||null, up_time: r.upTime||null,
+          done_at: r.doneAt||null, up_score: (r.upScore!=null?r.upScore:null),
+          tentative: !!r.tentative, paper_size: r.paperSize||null,
+          origin_month: r.originMonth||null, chain_id: r.chainId||null,
+          rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,
+          rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,
+          rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0,
         });
       });
     });

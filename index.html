@@ -8514,6 +8514,7 @@ function updRow(pjId,gid2,rid,field,val) {
     } catch(e){}
   }
   persistD();
+  try { _broadcastEditing(p.nameVN||p.nameJP||''); } catch(e){}
   if (['dateFrom','dateTo','doneAt','status','qty','tentative'].includes(field)) {
     clearTimeout(_ovTlRefreshTimer[pjId]);
     _ovTlRefreshTimer[pjId] = setTimeout(function() { _refreshOverviewParts(); }, 1000);
@@ -13843,6 +13844,34 @@ function startRealtimeSync() {
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setSyncStatus('error', '🔴 Offline');
       else setSyncStatus('syncing', '⏳');
     });
+  try { _startEditPresence(); } catch(e){}
+}
+
+// ── "Ai đang sửa" — awareness qua Realtime broadcast (KHÔNG ghi DB, chỉ tín hiệu tạm) ──
+function _startEditPresence(){
+  if (!window._sbReady || _startEditPresence._ch) return;
+  _startEditPresence.me = sessionStorage.getItem('splash_acc_name')
+    || ((sessionStorage.getItem('splash_role')||SYNC.role)==='admin' ? 'Admin' : 'Người dùng');
+  _startEditPresence._recvAt = {};
+  _startEditPresence._ch = _sb.channel('edit-presence', { config:{ broadcast:{ self:false } } })
+    .on('broadcast', { event:'edit' }, function(msg){
+      var p = msg && msg.payload; if (!p || !p.pj) return;
+      var now = Date.now();
+      if ((_startEditPresence._recvAt[p.pj]||0) > now - 6000) return; // chống spam 6s/dự án
+      _startEditPresence._recvAt[p.pj] = now;
+      try { toast('✎ ' + (p.name||'Người khác') + ' đang sửa: ' + p.pj, 3500); } catch(e){}
+    })
+    .subscribe();
+}
+function _broadcastEditing(pjName){
+  try {
+    if (!pjName || !_startEditPresence._ch) return;
+    var now = Date.now();
+    _broadcastEditing._at = _broadcastEditing._at || {};
+    if ((_broadcastEditing._at[pjName]||0) > now - 3000) return; // gửi tối đa 1 lần/3s/dự án
+    _broadcastEditing._at[pjName] = now;
+    _startEditPresence._ch.send({ type:'broadcast', event:'edit', payload:{ pj:pjName, name:_startEditPresence.me, ts:now } });
+  } catch(e){}
 }
 
 function applyRowChange(payload) {

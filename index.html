@@ -238,7 +238,13 @@ body.night .kj-tbl td, body.night .kj-tbl th{ border-color:#2b3a58 !important; c
 body.night .kj-tbl th{ background:#141d30 !important; color:#cdd6e6 !important; }
 body.night .kj-bikou-name{ background:#141d30 !important; }
 body.night .kj-bikou-name .nm{ color:#e2e8f4 !important; }
+body.night .kj-bikou-line{ background:#141d30 !important; color:#cdd6e6 !important; }
 body.night .kj-tan{ background:#141d30 !important; color:#cdd6e6 !important; }
+/* chữ "đã xong / tháng trước" (DONE_COLOR #374151) quá tối -> sáng dịu */
+body.night :is(.content,.modal) [style*="color:#374151"]{ color:#9fb0c8 !important; }
+/* Đồng bộ hover bảng 担当者別/Chi tiết (detail-tl) giống bảng koutei: dịu, không chói */
+body.night table.detail-tl tr.grp-row:hover > td{ box-shadow:inset 0 0 0 9999px rgba(255,255,255,.07) !important; }
+body.night table.detail-tl tr.grp-row:hover .grp-name-text{ color:#eef2f9 !important; background:transparent !important; }
 /* office header + tổng (nền #eee/#dde3ee) -> tối */
 body.night .kj-tbl td[style*="background:#eee"], body.night .kj-tbl td[style*="background:#dde3ee"]{ background:#1e2a42 !important; }
 /* giữ nhận diện: hôm nay (xanh), ô liên hệ hồng/xanh */

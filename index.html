@@ -160,6 +160,16 @@ body.hide-ot .tl-ot-col{display:none !important}
 /* Sơ đồ tổ chức: phông nền chiều sâu (stage) — nhẹ, không ảnh hưởng animation */
 #orgContent{ background:radial-gradient(ellipse at 50% 38%, #ffffff 0%, #eef1f7 60%, #e2e7ef 100%); border-radius:14px; box-shadow:inset 0 2px 26px rgba(31,56,100,.09); }
 
+/* ===== DARK MODE (thử nghiệm — nền tối, thẻ vẫn sáng để không lỗi nội dung) ===== */
+body.night{ --app-bg:#0e1729; --sidebar-bg:#0f1a2e; }
+body.night .content{ background:linear-gradient(180deg,#0e1729,#0b1120) !important; }
+body.night h2{ color:#eef2f9 !important; }
+body.night .sidebar{ border-right-color:#22304a !important; }
+body.night .sidebar-ft{ border-top-color:#22304a !important; }
+body.night #storageBar span{ color:#9fb0c8 !important; }
+body.night ::-webkit-scrollbar-thumb{ background:#31405c; }
+body.night .card:hover{ box-shadow:0 8px 30px rgba(0,0,0,.5); }
+
 /* MONTH STRIP */
 .month-strip{background:var(--navy2);display:flex;align-items:stretch;padding:0 14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.1)}
 .month-strip::-webkit-scrollbar{display:none}
@@ -777,6 +787,7 @@ table.detail-tl tr.staff-last > td {
       <button id="accountsBtn" class="hdr-menu-item" onclick="openAccountsPanel()" style="display:none">🔑&nbsp; Tài khoản &amp; phân quyền</button>
       <button id="menuReport" class="hdr-menu-item" onclick="openExportMenu()">📤&nbsp; Xuất báo cáo</button>
       <button id="menuTheme" class="hdr-menu-item" onclick="openThemePicker()">🎨&nbsp; Màu giao diện</button>
+      <button id="nightToggle" class="hdr-menu-item" onclick="_toggleNight()"><span id="nightLbl">🌙&nbsp; Chế độ tối</span></button>
       <div style="height:1px;background:#eee;margin:5px 8px"></div>
       <div style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;padding:5px 12px 3px">Dữ liệu</div>
       <button class="hdr-menu-item" onclick="exportToFile()">💾&nbsp; Backup ra file</button>
@@ -2022,6 +2033,12 @@ function _toggleHdrMenu(id, ev){
 }
 function _closeHdrMenus(){ document.querySelectorAll('.hdr-menu').forEach(function(m){ m.style.display='none'; }); }
 document.addEventListener('click', _closeHdrMenus);
+
+// ===== Dark mode (nền tối – thẻ sáng) =====
+function _applyNight(on){ try{ document.body.classList.toggle('night', !!on); var el=document.getElementById('nightLbl'); if(el) el.innerHTML = on ? '☀️&nbsp; Chế độ sáng' : '🌙&nbsp; Chế độ tối'; }catch(e){} }
+function _toggleNight(){ var on=!document.body.classList.contains('night'); _applyNight(on); try{ localStorage.setItem('night_mode', on?'1':'0'); }catch(e){} }
+try{ _applyNight(localStorage.getItem('night_mode')==='1'); }catch(e){}
+document.addEventListener('DOMContentLoaded', function(){ try{ _applyNight(localStorage.getItem('night_mode')==='1'); }catch(e){} });
 
 // ===== Nhóm B: số đếm động (count-up) + vòng tròn tiến độ (progress ring) =====
 function _fmtCount(n){ return (Math.round(n)).toLocaleString('vi-VN'); }

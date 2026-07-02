@@ -161,7 +161,7 @@ body.hide-ot .tl-ot-col{display:none !important}
 #orgContent{ background:radial-gradient(ellipse at 50% 38%, #ffffff 0%, #eef1f7 60%, #e2e7ef 100%); border-radius:14px; box-shadow:inset 0 2px 26px rgba(31,56,100,.09); }
 
 /* ===== DARK MODE (thử nghiệm — nền tối, thẻ vẫn sáng để không lỗi nội dung) ===== */
-body.night{ --app-bg:#0e1729; --sidebar-bg:#0f1a2e; }
+body.night{ --app-bg:#0e1729; --sidebar-bg:#0f1a2e; --table-bg:#172236; --table-stripe:#1c2740; --table-hover:rgba(255,255,255,.07); }
 body.night .content{ background:linear-gradient(180deg,#0e1729,#0b1120) !important; }
 body.night h2{ color:#eef2f9 !important; }
 body.night .sidebar{ border-right-color:#22304a !important; }
@@ -233,8 +233,25 @@ body.night :is(#pageDashboard,#pageStaff,#pageSettings,#pageOrg) [style*="color:
 /* ===== FULL DARK — MÀN LÀM VIỆC (工程表 + hạng mục) + MODAL. Giữ thanh màu + chữ 作成/修正 + màu trạng thái. ===== */
 body.night .content{ color:#cdd6e6; }
 body.night .content .card{ background:#141d30 !important; border-color:#2b3a58 !important; }
-body.night .kj-tbl{ background:#141d30 !important; }
+body.night .kj-tbl{ background:#172236 !important; }
 body.night .kj-tbl td, body.night .kj-tbl th{ border-color:#2b3a58 !important; color:#cdd6e6; }
+body.night .kj-tbl th{ background:#141d30 !important; color:#cdd6e6 !important; }
+body.night .kj-bikou-name{ background:#141d30 !important; }
+body.night .kj-bikou-name .nm{ color:#e2e8f4 !important; }
+body.night .kj-tan{ background:#141d30 !important; color:#cdd6e6 !important; }
+/* office header + tổng (nền #eee/#dde3ee) -> tối */
+body.night .kj-tbl td[style*="background:#eee"], body.night .kj-tbl td[style*="background:#dde3ee"]{ background:#1e2a42 !important; }
+/* giữ nhận diện: hôm nay (xanh), ô liên hệ hồng/xanh */
+body.night .kj-tbl td[style*="rgba(52,152,219"]{ background:rgba(52,152,219,.20) !important; }
+body.night .kj-tbl td[style*="background:#fde2e4"]{ background:#3a2230 !important; }
+body.night .kj-tbl td[style*="background:#dbeafe"]{ background:#1c2f4a !important; }
+/* hover dịu, không chói (thay #fff8e1) */
+body.night .kj-it-row:hover td{ background:rgba(255,255,255,.07) !important; }
+body.night .rtbl tbody tr:hover td, body.night .sum-tbl tr:hover td{ background:rgba(255,255,255,.07) !important; }
+/* 担当者別工程表 (#monthGanttCard) — lưới + chữ tối */
+body.night #monthGanttCard td, body.night #monthGanttCard th{ border-color:#2b3a58 !important; }
+body.night #monthGanttCard th{ color:#cdd6e6 !important; }
+body.night #monthGanttCard td[style*="rgba(52,152,219"]{ background:rgba(52,152,219,.20) !important; }
 /* nền ô sáng -> tối */
 body.night :is(.content,.modal) [style*="background:#fff"],
 body.night :is(.content,.modal) [style*="background:#ffffff"],

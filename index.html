@@ -305,11 +305,18 @@ body.night :is(.content,.modal) textarea::placeholder{ color:#8a95a8 !important;
 body.night [style*="background:#e8fdf0"]{ background:#16302a !important; }
 /* ô ảnh trống (photo-slot) -> tối */
 body.night .photo-slot{ background:#141d30 !important; border-color:#33415a !important; }
+/* NỀN HÀNG (kể cả hàng có lịch UP #f0fff4) -> tối; chỉ ô nhập bên trong sáng */
+body.night .content [style*="background:#f0fff4"]{ background:#141d30 !important; }
 /* hàng ĐÃ UP: chip Mới/Sửa (span) -> xám dịu (không còn nổi như đang sửa) */
 body.night .content span[style*="background:var(--new-bg)"],
 body.night .content span[style*="background:var(--rev-bg)"],
 body.night .content span[style*="background:#ede9fe"],
 body.night .content span[style*="background:#fce7f3"]{ background:#26314a !important; color:#9fb0c8 !important; }
+/* ô Mới/Sửa ĐANG SỬA (select) -> giữ đúng màu xanh (mới) / vàng (sửa), vẫn sáng để nhập */
+body.night .content select[style*="background:var(--new-bg)"],
+body.night .content select[style*="background:#ede9fe"]{ background:#dff0d6 !important; color:#2f5720 !important; border-color:#7fae6a !important; }
+body.night .content select[style*="background:var(--rev-bg)"],
+body.night .content select[style*="background:#fce7f3"]{ background:#f6e7b6 !important; color:#6b5500 !important; border-color:#c9a84a !important; }
 /* modal */
 body.night .modal{ background:#141d30 !important; color:#cdd6e6 !important; }
 body.night .modal h2, body.night .modal h3{ color:#eef2f9 !important; }

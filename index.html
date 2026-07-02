@@ -161,7 +161,10 @@ body.hide-ot .tl-ot-col{display:none !important}
 #orgContent{ background:radial-gradient(ellipse at 50% 38%, #ffffff 0%, #eef1f7 60%, #e2e7ef 100%); border-radius:14px; box-shadow:inset 0 2px 26px rgba(31,56,100,.09); }
 
 /* ===== DARK MODE (thử nghiệm — nền tối, thẻ vẫn sáng để không lỗi nội dung) ===== */
-body.night{ --app-bg:#0e1729; --sidebar-bg:#0f1a2e; --table-bg:#172236; --table-stripe:#1c2740; --table-hover:rgba(255,255,255,.07); }
+body.night{ --app-bg:#0e1729; --sidebar-bg:#0f1a2e; --table-bg:#172236; --table-stripe:#1c2740; --table-hover:rgba(255,255,255,.07); --dark:#e4e9f2; --gray4:#9fb0c8; --gray3:#7f8ba3; }
+/* Tên dự án ở sidebar (dùng biến --dark) */
+body.night .pj-card-name{ color:#e4e9f2 !important; }
+body.night .pj-card-name-jp{ color:#9fb0c8 !important; }
 body.night .content{ background:linear-gradient(180deg,#0e1729,#0b1120) !important; }
 body.night h2{ color:#eef2f9 !important; }
 body.night .sidebar{ border-right-color:#22304a !important; }
@@ -310,6 +313,11 @@ body.night :is(.content,.modal) [style*="color:var(--gray4)"]{ color:#9fb0c8 !im
 body.night :is(.content,.modal) input,
 body.night :is(.content,.modal) select,
 body.night :is(.content,.modal) textarea{ background:#eef2f8 !important; color:#15213a !important; border-color:#c3ccdb !important; }
+/* Ô nhập CÓ inline style (vd ô ngày nền #fffbf0/#fff5f5): giữ FIELD SÁNG, chữ TỐI để đọc được.
+   Đặc thù cao hơn luật darken nền [style*="background:#fff"]. Trừ status select giữ màu xanh/vàng. */
+body.night :is(.content,.modal) input[style]:not([type=checkbox]):not([type=radio]),
+body.night :is(.content,.modal) textarea[style],
+body.night :is(.content,.modal) select[style]:not([style*="--new-bg"]):not([style*="--rev-bg"]){ background:#eef2f8 !important; color:#15213a !important; border-color:#c3ccdb !important; }
 body.night :is(.content,.modal) input::placeholder,
 body.night :is(.content,.modal) textarea::placeholder{ color:#8a95a8 !important; }
 /* hàng nhân sự "Rảnh" (xanh nhạt #e8fdf0) + chip rảnh -> tối */

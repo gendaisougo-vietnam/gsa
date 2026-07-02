@@ -157,6 +157,8 @@ body.hide-ot .tl-ot-col{display:none !important}
 .skeleton{ position:relative; overflow:hidden; background:#e9edf3; border-radius:8px; }
 .skeleton::after{ content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent); animation:shimmer 1.25s infinite; }
 @keyframes shimmer{ 100%{ transform:translateX(100%);} }
+/* Sơ đồ tổ chức: phông nền chiều sâu (stage) — nhẹ, không ảnh hưởng animation */
+#orgContent{ background:radial-gradient(ellipse at 50% 38%, #ffffff 0%, #eef1f7 60%, #e2e7ef 100%); border-radius:14px; box-shadow:inset 0 2px 26px rgba(31,56,100,.09); }
 
 /* MONTH STRIP */
 .month-strip{background:var(--navy2);display:flex;align-items:stretch;padding:0 14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.1)}
@@ -1225,6 +1227,7 @@ async function sbLoadAll() {
           sourceRowId: r.source_row_id || null,
           sourceMonth: r.source_month  || null,
           originMonth: r.origin_month  || null,
+          chainId:     r.chain_id      || null,
           tentative:   !!r.tentative,
           _fromTlTask: tlStaffSet.size > 0 && r.staff && tlStaffSet.has(r.staff) ? true : undefined,
         }))
@@ -1390,7 +1393,7 @@ async function sbPushAll() {
     [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){
       (p.groups||[]).forEach(function(g){
         _gRecs.push({ id:g.id, project_id:p.id, type:g.type||'', sort_order:_sg++, manual: !!g._manual, dept:(g.dept||'studio') });
-        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, origin_month:r.originMonth||null, tentative:!!r.tentative, paper_size:r.paperSize||null, sort_order:_sr++ }); });
+        (g.rows||[]).forEach(function(r){ _rRecs.push({ id:r.id, group_id:g.id, staff:r.staff||'', status:r.status||'new', qty:r.qty||0, note:r.note||'', ot:r.ot||0, ot_note:r.otNote||'', date_from:r.dateFrom||null, date_to:r.dateTo||null, up_time:r.upTime||null, done_at:r.doneAt||null, up_score:r.upScore||null, rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0, from_carryover:!!r.fromCarryover, is_carry_ref:!!r.isCarryRef, source_row_id:r.sourceRowId||null, source_month:r.sourceMonth||null, origin_month:r.originMonth||null, chain_id:r.chainId||null, tentative:!!r.tentative, paper_size:r.paperSize||null, sort_order:_sr++ }); });
       });
     });
   });
@@ -1437,7 +1440,7 @@ function _sbSaveRowDebounced(groupId, rowId, colData) {
 const _COL_MAP = {
   staff:'staff', status:'status', qty:'qty', note:'note',
   ot:'ot', otNote:'ot_note', dateFrom:'date_from', dateTo:'date_to',
-  upTime:'up_time', doneAt:'done_at', upScore:'up_score', tentative:'tentative', paperSize:'paper_size', originMonth:'origin_month',
+  upTime:'up_time', doneAt:'done_at', upScore:'up_score', tentative:'tentative', paperSize:'paper_size', originMonth:'origin_month', chainId:'chain_id',
   rate0:'rate0',rate1:'rate1',rate2:'rate2',rate3:'rate3',rate4:'rate4',
   rate5:'rate5',rate6:'rate6',rate7:'rate7',rate8:'rate8',rate9:'rate9',
   rate10:'rate10',rate11:'rate11',rate12:'rate12',rate13:'rate13',
@@ -2056,10 +2059,10 @@ function _staffMonthlyTotals(name, n){
 function _skeletonSidebar(){ var s=''; for(var i=0;i<5;i++){ s+='<div style="padding:10px 12px"><div class="skeleton" style="height:88px;margin-bottom:8px"></div><div class="skeleton" style="height:12px;width:70%;margin-bottom:5px"></div><div class="skeleton" style="height:10px;width:40%"></div></div>'; } return s; }
 function _skeletonContent(){ return '<div style="padding:14px"><div style="display:flex;gap:12px;margin-bottom:14px"><div class="skeleton" style="height:120px;flex:1"></div><div class="skeleton" style="height:120px;flex:1"></div><div class="skeleton" style="height:120px;flex:2"></div><div class="skeleton" style="height:120px;flex:1.3"></div></div><div class="skeleton" style="height:52px;margin-bottom:12px"></div><div class="skeleton" style="height:300px"></div></div>'; }
 function _showLoadingSkeleton(){ try{ var pl=document.getElementById('pjList'); if(pl && !pl.children.length) pl.innerHTML=_skeletonSidebar(); var ci=document.getElementById('contentInner'); if(ci && !ci.children.length) ci.innerHTML=_skeletonContent(); }catch(e){} }
-function _ringSvg(pct, color, size){
-  pct=Math.max(0,Math.min(100,pct||0)); size=size||44; var sw=5, r=(size-sw)/2, c=2*Math.PI*r, off=c*(1-pct/100);
+function _ringSvg(pct, color, size, track){
+  pct=Math.max(0,Math.min(100,pct||0)); size=size||44; track=track||'#e5e7eb'; var sw=Math.max(4,Math.round(size*0.11)), r=(size-sw)/2, c=2*Math.PI*r, off=c*(1-pct/100);
   return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" style="display:block;transform:rotate(-90deg)">'
-   +'<circle cx="'+(size/2)+'" cy="'+(size/2)+'" r="'+r+'" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="'+sw+'"/>'
+   +'<circle cx="'+(size/2)+'" cy="'+(size/2)+'" r="'+r+'" fill="none" stroke="'+track+'" stroke-width="'+sw+'"/>'
    +'<circle cx="'+(size/2)+'" cy="'+(size/2)+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="'+sw+'" stroke-linecap="round" stroke-dasharray="'+c.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" style="transition:stroke-dashoffset .8s cubic-bezier(.3,1,.4,1)"/>'
    +'</svg>';
 }
@@ -3050,6 +3053,7 @@ async function _sbDumpMonthEntities(mid) {
           paper_size: r.paperSize || null,
           tentative: !!r.tentative,   // FIX: giữ lịch DỰ KIẾN (nét đứt) khi sang tháng mới
           origin_month: r.originMonth || null,   // tháng gốc của dòng (gộp lịch sử theo tháng)
+          chain_id: r.chainId || null,           // mã chuỗi cố định (đồng bộ liên tháng)
           // PHASE 3: carryRef — số mai tính ở tháng GỐC
           is_carry_ref: !!r.isCarryRef,
           source_row_id: r.sourceRowId || null,
@@ -3173,6 +3177,8 @@ async function doAddMonth(prevMid, newMid) {
             sourceMonth: rowActive ? prevMid : null,
             // Tháng gốc của dòng: giữ nguyên nếu đã có, nếu chưa thì = tháng nguồn (prevMid) — để gộp lịch sử theo tháng
             originMonth: r.originMonth || prevMid,
+            // Mã chuỗi cố định: kế thừa từ dòng gốc để mọi tháng cùng chuỗi khớp nhau chắc chắn
+            chainId: r.chainId || (_srcId + '_c'),
           };
         });
         return {
@@ -4276,7 +4282,7 @@ function renderMonthOverview(ci) {
       <div class="hero-lbl" style="margin-bottom:4px">作成 — Làm mới</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
         <div class="hero-num" id="heroSumNew" data-count="${sumNew}" style="font-size:32px">${sumNew}</div>
-        <div style="position:relative;width:42px;height:42px;flex-shrink:0">${_ringSvg(pctNew,'#ffffff',42)}<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff">${pctNew}%</span></div>
+        <div style="position:relative;width:42px;height:42px;flex-shrink:0">${_ringSvg(pctNew,'#ffffff',42,'rgba(255,255,255,.28)')}<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff">${pctNew}%</span></div>
       </div>
       <div class="progress-track" style="margin-top:6px"><div class="progress-fill green" id="prgNew" style="width:${pctNew}%"></div></div>
       <div class="progress-label progress-label"><span id="lblNew">${sumNew}/${tgtNew}</span></div>
@@ -4288,7 +4294,7 @@ function renderMonthOverview(ci) {
       <div class="hero-lbl" style="margin-bottom:4px">修正 — Sửa lại</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
         <div class="hero-num" id="heroSumRev" data-count="${sumRev}" style="font-size:32px">${sumRev}</div>
-        <div style="position:relative;width:42px;height:42px;flex-shrink:0">${_ringSvg(pctRev,'#1F3864',42)}<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#1F3864">${pctRev}%</span></div>
+        <div style="position:relative;width:42px;height:42px;flex-shrink:0">${_ringSvg(pctRev,'#1F3864',42,'rgba(0,0,0,.16)')}<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#1F3864">${pctRev}%</span></div>
       </div>
       <div class="progress-track" style="margin-top:6px"><div class="progress-fill gold" id="prgRev" style="width:${pctRev}%"></div></div>
       <div class="progress-label"><span id="lblRev">${sumRev}/${tgtRev}</span></div>
@@ -8141,7 +8147,7 @@ async function addGroup(pjId) {
 async function addRow(pjId,gid2) {
   const p=getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
-  g.rows.push({id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',originMonth:D.activeMonth,rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0});
+  g.rows.push({id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',originMonth:D.activeMonth,chainId:gid(),rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0});
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
   if (window._sbReady) {
     const r = g.rows[g.rows.length - 1];
@@ -8149,10 +8155,10 @@ async function addRow(pjId,gid2) {
       var pObjAR = getPj(pjId);
       var pNameAR = pObjAR && (pObjAR.nameVN || pObjAR.nameJP) || pjId;
       _sbQueueChange('Thêm dòng vào "' + pNameAR + '"',
-        'rows', 'upsert', r.id, { group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00', origin_month: D.activeMonth }, { projectId: pjId });
+        'rows', 'upsert', r.id, { group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00', origin_month: D.activeMonth, chain_id: r.chainId }, { projectId: pjId });
     } else {
       try {
-        const { error } = await _sb.from('rows').insert({ id: r.id, group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00', origin_month: D.activeMonth });
+        const { error } = await _sb.from('rows').insert({ id: r.id, group_id: gid2, status: '', qty: 0, ot: 0, up_time: '18:00', origin_month: D.activeMonth, chain_id: r.chainId });
         if (error) _sbReport('addRow', error, {op: 'insert', table: 'rows'});
       } catch(e) { _sbReport('addRow', e, {op: 'insert', table: 'rows'}); }
     }
@@ -8325,6 +8331,11 @@ async function delGroup(pjId,gid2) {
 function _rowTwinsAcrossMonths(rid, includeDone){
   const idx={};
   Object.entries(D.months).forEach(([mid,m])=>{ [['jp',m.projects||[]],['vn',m.projectsVN||[]]].forEach(([sec,list])=>{ list.forEach(p=>{ (p.groups||[]).forEach(g=>{ (g.rows||[]).forEach(r=>{ idx[r.id]={mid,section:sec,p,g,r}; }); }); }); }); });
+  // ƯU TIÊN chainId (bền, không đứt xích khi xóa tháng giữa); fallback lần vết sourceRowId cho dữ liệu cũ chưa có chainId.
+  const _self = idx[rid];
+  if (_self && _self.r.chainId) {
+    return Object.keys(idx).map(k=>idx[k]).filter(n=> n.r.id!==rid && n.r.chainId===_self.r.chainId && (includeDone || !n.r.doneAt));
+  }
   const seen={}; const queue=[rid];
   while(queue.length){ const id=queue.shift(); if(seen[id]) continue; seen[id]=1; const node=idx[id]; if(!node) continue;
     if(node.r.sourceRowId && !seen[node.r.sourceRowId]) queue.push(node.r.sourceRowId);
@@ -8333,6 +8344,36 @@ function _rowTwinsAcrossMonths(rid, includeDone){
   delete seen[rid];
   return Object.keys(seen).map(k=>idx[k]).filter(n=>n && (includeDone || !n.r.doneAt));
 }
+// Migration: gán chainId cho dữ liệu CŨ theo chuỗi sourceRowId (union-find). Chỉ THÊM, không xóa. Chạy 1 lần/phiên (admin/quản lý).
+async function _migrateChainIds(){
+  if (window._chainIdMigrated) return; window._chainIdMigrated = true;
+  var nodes={};
+  Object.values(D.months||{}).forEach(function(m){ [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){ (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ nodes[r.id]=r; }); }); }); });
+  var parent={};
+  function find(x){ while(parent[x]!==undefined && parent[x]!==x) x=parent[x]; return x; }
+  Object.keys(nodes).forEach(function(id){ parent[id]=id; });
+  Object.keys(nodes).forEach(function(id){ var s=nodes[id].sourceRowId; if(s && nodes[s]!==undefined){ var a=find(id), b=find(s); if(a!==b) parent[a]=b; } });
+  var groups={};
+  Object.keys(nodes).forEach(function(id){ var root=find(id); (groups[root]=groups[root]||[]).push(id); });
+  var changed=[];
+  Object.keys(groups).forEach(function(root){
+    var ids=groups[root], cid=null;
+    ids.forEach(function(id){ if(nodes[id].chainId && !cid) cid=nodes[id].chainId; });
+    if(!cid) cid='ch_'+root;
+    ids.forEach(function(id){ if(nodes[id].chainId!==cid){ nodes[id].chainId=cid; changed.push(id); } });
+  });
+  if(changed.length){
+    try{ persistD(); }catch(e){}
+    if(window._sbReady){
+      for(var i=0;i<changed.length;i+=80){
+        var slice=changed.slice(i,i+80);
+        try{ await Promise.all(slice.map(function(id){ return _sb.from('rows').update({chain_id: nodes[id].chainId}).eq('id', id); })); }catch(e){}
+      }
+    }
+    console.log('[Migrate chainId] gán', changed.length, 'dòng');
+  }
+}
+window._migrateChainIds = _migrateChainIds;
 async function delRow(pjId,gid2,rid) {
   const p=getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
@@ -8440,16 +8481,11 @@ function updRow(pjId,gid2,rid,field,val) {
   // Số mai vẫn CHỈ tính ở tháng gốc (row carryRef bị loại khỏi tổng), nhưng giá trị hiển thị cần khớp.
   if (['staff','dateFrom','dateTo','upTime','qty'].includes(field)) {
     const _scol = _COL_MAP[field];
-    // (a) đang sửa row carryRef -> ghi về row GỐC tháng cũ
-    if (r.isCarryRef && r.sourceMonth && r.sourceRowId) _syncCarryRow(r.sourceMonth, r.sourceRowId, field, _scol, val);
-    // (b) đang sửa row GỐC -> ghi sang mọi row carryRef trỏ tới nó (mọi tháng)
-    Object.keys(D.months).forEach(function(m2){
-      [...(D.months[m2].projects||[]),...(D.months[m2].projectsVN||[])].forEach(function(p2){
-        (p2.groups||[]).forEach(function(g2){ (g2.rows||[]).forEach(function(r2){
-          if(r2.isCarryRef && r2.sourceRowId===rid && r2.id!==rid){ r2[field]=val; if(_scol && window._sbReady) _sb.from('rows').update({[_scol]:(val===''||val===undefined)?null:val}).eq('id', r2.id).then(function(){},function(){}); }
-        }); });
-      });
-    });
+    // Đồng bộ sang MỌI dòng cùng chuỗi (ưu tiên chainId; fallback sourceRowId) — bền, 2 chiều.
+    try {
+      const _tw = (typeof _rowTwinsAcrossMonths==='function') ? _rowTwinsAcrossMonths(rid, true) : [];
+      _tw.forEach(function(t){ t.r[field]=val; if(_scol && window._sbReady) _sb.from('rows').update({[_scol]:(val===''||val===undefined)?null:val}).eq('id', t.r.id).then(function(){},function(){}); });
+    } catch(e){}
   }
   persistD();
   if (['dateFrom','dateTo','doneAt','status','qty','tentative'].includes(field)) {
@@ -9696,7 +9732,26 @@ function renderDashboard() {
   }).filter(x=>x.sc2.totalUp>0||x.sc2.avgRating>0||x.sc2.lateCount>0)
     .sort((a,b)=>b.sc2.score-a.sc2.score);
 
+  const _totTgtD = mData.reduce((s,m)=>s+(m.tN||0)+(m.tR||0),0);
+  const _prodPctD = _totTgtD>0?Math.round((totN+totR)/_totTgtD*100):0;
+  const _prodColD = _prodPctD>=100?'#27ae60':_prodPctD>=80?'#f39c12':'#e74c3c';
   dc.innerHTML=`
+  <!-- Tổng quan năm: gauge năng suất -->
+  <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:16px 20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+    <div style="position:relative;width:132px;height:132px;flex-shrink:0">
+      ${_ringSvg(_prodPctD, _prodColD, 132)}
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <span data-count="${_prodPctD}" data-suffix="%" style="font-size:30px;font-weight:800;color:${_prodColD};line-height:1">${_prodPctD}%</span>
+        <span style="font-size:10px;color:#888;font-weight:600;margin-top:2px">Năng suất ${year}</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:28px;flex-wrap:wrap;flex:1">
+      <div><div data-count="${totN+totR}" style="font-size:26px;font-weight:800;color:var(--navy)">${totN+totR}</div><div style="font-size:11px;color:#888">Tổng số mai</div></div>
+      <div><div data-count="${totN}" style="font-size:26px;font-weight:800;color:#375623">${totN}</div><div style="font-size:11px;color:#888">作成 Làm mới</div></div>
+      <div><div data-count="${totR}" style="font-size:26px;font-weight:800;color:#7F6000">${totR}</div><div style="font-size:11px;color:#888">修正 Sửa lại</div></div>
+      <div><div data-count="${Math.round(totOT)}" data-suffix="h" style="font-size:26px;font-weight:800;color:var(--orange)">${totOT.toFixed(0)}h</div><div style="font-size:11px;color:#888">OT ${year}</div></div>
+    </div>
+  </div></div>
   <!-- Realtime panels -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
     <!-- Hôm nay UP -->
@@ -9790,6 +9845,7 @@ function renderDashboard() {
   ${buildPerfTable(activeSVN, staffAnnVN, RATING_VN, 'Hiệu suất 設計室 (Design Department) — ' + year, '🇻🇳', 'vn')}
   ${buildCombinedTable(activeS, staffAnn)}
   `;
+  try { _runCountUps(dc); } catch(e){}
   setTimeout(()=>{
     new Chart(document.getElementById('cMonthly'),{type:'bar',data:{labels,datasets:[
       {label:'作成 Mới',data:mData.map(m=>m.n),backgroundColor:'#70AD47',borderRadius:3},
@@ -14988,7 +15044,7 @@ window.addEventListener('beforeunload', function() {
           var roleLabel = role==='admin'?'Admin':role==='edit'?'Edit':'View';
           setSyncStatus('syncing', '⏳');
           try { checkMorningNotification(); } catch(e) {}
-          try { if (typeof _needsApproval!=='function' || !_needsApproval()) setTimeout(function(){ try{ reconcileUpChains(true); }catch(e){} }, 3500); } catch(e) {}
+          try { if (typeof _needsApproval!=='function' || !_needsApproval()) setTimeout(async function(){ try{ await _migrateChainIds(); }catch(e){} try{ reconcileUpChains(true); }catch(e){} }, 3500); } catch(e) {}
           if (role === 'admin') { try { refreshPendingBadge(); } catch(e) {} }
           try { _sbSessionCreate(role); } catch(e) {}
         } catch(e) {}
@@ -15041,7 +15097,7 @@ window.addEventListener('beforeunload', function() {
           renderAll();
           startRealtimeSync();
           try { checkMorningNotification(); } catch(e) {}
-          try { if (typeof _needsApproval!=='function' || !_needsApproval()) setTimeout(function(){ try{ reconcileUpChains(true); }catch(e){} }, 3500); } catch(e) {}
+          try { if (typeof _needsApproval!=='function' || !_needsApproval()) setTimeout(async function(){ try{ await _migrateChainIds(); }catch(e){} try{ reconcileUpChains(true); }catch(e){} }, 3500); } catch(e) {}
           if (sessionRole === 'admin') { try { refreshPendingBadge(); } catch(e) {} }
           try { _sbSessionCreate(sessionRole); } catch(e) {}
         } catch(e) { setSyncStatus('error', '🔴'); }

@@ -153,6 +153,10 @@ body.hide-ot .tl-ot-col{display:none !important}
 .hdr-menu{ animation:menuDrop .16s ease; transform-origin:top; }
 @keyframes menuDrop{ from{ opacity:0; transform:translateY(-6px) scale(.98);} to{ opacity:1; transform:none;} }
 @media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
+/* Skeleton loading (shimmer) */
+.skeleton{ position:relative; overflow:hidden; background:#e9edf3; border-radius:8px; }
+.skeleton::after{ content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent); animation:shimmer 1.25s infinite; }
+@keyframes shimmer{ 100%{ transform:translateX(100%);} }
 
 /* MONTH STRIP */
 .month-strip{background:var(--navy2);display:flex;align-items:stretch;padding:0 14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.1)}
@@ -2027,6 +2031,31 @@ function _animateCount(el){
   if (Math.abs(to)>0) requestAnimationFrame(step); else el.textContent=_fmtCount(to)+suffix;
 }
 function _runCountUps(root){ try{ (root||document).querySelectorAll('[data-count]').forEach(_animateCount); }catch(e){} }
+function _sparklineSvg(vals, color, w, h){
+  w=w||120; h=h||30; color=color||'#4472C4';
+  if(!vals||!vals.length) return '';
+  var max=Math.max(1,...vals), min=Math.min(0,...vals), n=vals.length, pad=3;
+  var pts=vals.map(function(v,i){ var x=pad+(w-2*pad)*(n===1?0.5:i/(n-1)); var y=h-pad-(h-2*pad)*((v-min)/((max-min)||1)); return [x,y]; });
+  var line=pts.map(function(p,i){ return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1); }).join(' ');
+  var area='M'+pts[0][0].toFixed(1)+' '+(h-pad)+' '+pts.map(function(p){ return 'L'+p[0].toFixed(1)+' '+p[1].toFixed(1); }).join(' ')+' L'+pts[n-1][0].toFixed(1)+' '+(h-pad)+' Z';
+  var last=pts[n-1];
+  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="display:block">'
+    +'<path d="'+area+'" fill="'+color+'22"/>'
+    +'<path d="'+line+'" fill="none" stroke="'+color+'" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+    +'<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.4" fill="'+color+'"/></svg>';
+}
+function _staffMonthlyTotals(name, n){
+  n=n||6;
+  var mids=Object.keys(D.months||{}).sort().slice(-n);
+  return mids.map(function(mid){
+    var m=D.months[mid], tot=0;
+    [...(m.projects||[]),...(m.projectsVN||[])].forEach(function(p){ (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ if(r.staff===name && !r.isCarryRef && !r.tentative) tot+=(r.qty||0); }); }); });
+    return {mid:mid, v:tot};
+  });
+}
+function _skeletonSidebar(){ var s=''; for(var i=0;i<5;i++){ s+='<div style="padding:10px 12px"><div class="skeleton" style="height:88px;margin-bottom:8px"></div><div class="skeleton" style="height:12px;width:70%;margin-bottom:5px"></div><div class="skeleton" style="height:10px;width:40%"></div></div>'; } return s; }
+function _skeletonContent(){ return '<div style="padding:14px"><div style="display:flex;gap:12px;margin-bottom:14px"><div class="skeleton" style="height:120px;flex:1"></div><div class="skeleton" style="height:120px;flex:1"></div><div class="skeleton" style="height:120px;flex:2"></div><div class="skeleton" style="height:120px;flex:1.3"></div></div><div class="skeleton" style="height:52px;margin-bottom:12px"></div><div class="skeleton" style="height:300px"></div></div>'; }
+function _showLoadingSkeleton(){ try{ var pl=document.getElementById('pjList'); if(pl && !pl.children.length) pl.innerHTML=_skeletonSidebar(); var ci=document.getElementById('contentInner'); if(ci && !ci.children.length) ci.innerHTML=_skeletonContent(); }catch(e){} }
 function _ringSvg(pct, color, size){
   pct=Math.max(0,Math.min(100,pct||0)); size=size||44; var sw=5, r=(size-sw)/2, c=2*Math.PI*r, off=c*(1-pct/100);
   return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" style="display:block;transform:rotate(-90deg)">'
@@ -13391,6 +13420,7 @@ function renderStaffDetailModalContent(s) {
         <span>作成: <strong style="color:var(--new-tx)">${v.n}</strong> · 修正: <strong style="color:var(--rev-tx)">${v.r}</strong></span>
         <span>Tổng: <strong style="color:var(--navy)">${t}</strong> phối cảnh</span>
       </div>
+      ${(function(){ var tr=_staffMonthlyTotals(s,6); var vals=tr.map(x=>x.v); if(!vals.length||vals.every(v=>v===0)) return ''; return '<div style="margin-top:10px;padding-top:8px;border-top:0.5px dashed #e5e7eb"><div style="font-size:10px;color:#9ca3af;margin-bottom:2px;font-weight:600">📈 Xu hướng '+tr.length+' tháng (số mai)</div>'+_sparklineSvg(vals,perfColor,270,38)+'<div style="display:flex;justify-content:space-between;font-size:8px;color:#bbb;margin-top:1px">'+tr.map(x=>'<span>'+x.mid.slice(5)+'</span>').join('')+'</div></div>'; })()}
     </div>
 
     <!-- 3 stats -->
@@ -14213,6 +14243,7 @@ function importBackup(input) {
           setSyncStatus('syncing', '⏳ Đang push…');
           const _pushErrs = await sbPushAll();
           setSyncStatus('syncing', '⏳ Đang tải lại…');
+          try { _showLoadingSkeleton(); } catch(e){}
           const sbData = await sbLoadAll();
           if (sbData) {
             D = sbData; injectSyncHashes();
@@ -14939,7 +14970,8 @@ window.addEventListener('beforeunload', function() {
         if (window._sbReady) {
           try {
             setSyncStatus('syncing', 'Đang tải…');
-            const sbData = await sbLoadAll();
+            try { _showLoadingSkeleton(); } catch(e){}
+          const sbData = await sbLoadAll();
             if (sbData) {
               D = sbData;
               injectSyncHashes(); // đảm bảo hashes luôn đúng dù Supabase data có gì
@@ -14998,7 +15030,8 @@ window.addEventListener('beforeunload', function() {
           if (window._sbReady) {
             setSyncStatus('syncing', '⏳ Đang tải…');
             try {
-              const sbData = await sbLoadAll();
+              try { _showLoadingSkeleton(); } catch(e){}
+          const sbData = await sbLoadAll();
               if (sbData) { D = sbData; injectSyncHashes(); try { localStorage.setItem(SK, JSON.stringify(D)); } catch(e) {} }
             } catch(e) {
               console.warn('[Session restore] sbLoadAll failed:', e.message);

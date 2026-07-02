@@ -180,6 +180,11 @@ body.night #pageSettings > div:first-child h2,
 body.night #pageOrg > div:first-child h2{ color:#eef2f9 !important; }
 
 /* ===== FULL DARK — DASHBOARD (thử nghiệm, chỉ trang xem, KHÔNG đụng bảng nhập liệu) ===== */
+/* Màu chữ nền cho trang tối — ô không đặt màu (tên nhân sự, số TỔNG…) sẽ sáng; ô có màu riêng vẫn giữ */
+body.night :is(#pageDashboard,#pageStaff,#pageSettings){ color:#cdd6e6; }
+body.night :is(#pageDashboard,#pageStaff,#pageSettings) .perf-tbl td,
+body.night :is(#pageDashboard,#pageStaff,#pageSettings) table td,
+body.night :is(#pageDashboard,#pageStaff,#pageSettings) table th{ color:#cdd6e6; }
 body.night :is(#pageDashboard,#pageStaff,#pageSettings) .card,
 body.night :is(#pageDashboard,#pageStaff,#pageSettings) .chart-box,
 body.night :is(#pageDashboard,#pageStaff,#pageSettings) [style*="background:#fff"],

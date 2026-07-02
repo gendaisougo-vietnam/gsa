@@ -169,6 +169,15 @@ body.night .sidebar-ft{ border-top-color:#22304a !important; }
 body.night #storageBar span{ color:#9fb0c8 !important; }
 body.night ::-webkit-scrollbar-thumb{ background:#31405c; }
 body.night .card:hover{ box-shadow:0 8px 30px rgba(0,0,0,.5); }
+/* Phụ đề/tiêu đề trên nền tối (ngoài thẻ) — làm sáng để không bị chìm */
+body.night #pageDashboard > div:first-child div,
+body.night #pageStaff > div:first-child div,
+body.night #pageSettings > div:first-child div,
+body.night #pageOrg > div:first-child div{ color:#9fb0c8 !important; }
+body.night #pageDashboard > div:first-child h2,
+body.night #pageStaff > div:first-child h2,
+body.night #pageSettings > div:first-child h2,
+body.night #pageOrg > div:first-child h2{ color:#eef2f9 !important; }
 
 /* MONTH STRIP */
 .month-strip{background:var(--navy2);display:flex;align-items:stretch;padding:0 14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.1)}

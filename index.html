@@ -276,9 +276,15 @@ body.night :is(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageOrg)
 body.night :is(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageOrg) [style*="background:#fef3c7"],
 body.night :is(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageOrg) [style*="background:#ffe59a"],
 body.night :is(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageOrg) [style*="background:#fff0f0"]{ background:#1c2740 !important; }
-/* Dong "Tong du an" (tfoot) + hang nen vang var(--rev-bg)/--new-bg -> toi */
+/* Dong "Tong du an" (tfoot) + hang nen vang var(--rev-bg)/--new-bg -> nen TOI, chu VANG gold */
 body.night :is(.content,.modal) tr[style*="background:var(--rev-bg)"],
-body.night :is(.content,.modal) tr[style*="background:var(--new-bg)"]{ background:#1c2740 !important; }
+body.night :is(.content,.modal) tr[style*="background:var(--new-bg)"],
+body.night :is(.content,.modal) tfoot tr,
+body.night :is(.content,.modal) tr[style*="background:var(--rev-bg)"] > td,
+body.night :is(.content,.modal) tr[style*="background:var(--new-bg)"] > td,
+body.night :is(.content,.modal) tfoot tr > td{ background:#1a2438 !important; }
+/* nhan chu trong dong tong -> vang gold cho de doc & giu tong */
+body.night :is(.content,.modal) tfoot tr [style*="color:var(--gray4)"]{ color:#e6c14d !important; }
 
 /* === Vien sang (grid lines) -> toi === */
 body.night :is(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageOrg) [style*="solid #ddd"],
@@ -452,6 +458,10 @@ body.night :is(.content,.modal) [style*="color:var(--gray4)"],
 body.night :is(.content,.modal) [style*="color:var(--gray3)"]{ color:#9fb0c8 !important; }
 /* Nút thường trong modal/content (bg sáng -> đã tối, chữ var(--dark)) -> chữ sáng. Trừ nút vàng/primary. */
 body.night :is(.content,.modal) .btn:not(.btn-gold):not(.btn-primary){ color:#e4e9f2 !important; }
+/* Nút "✓ UP" (nền xanh nhạt) -> nút XANH ĐẶC chữ trắng, rõ ràng dễ đọc trên nền tối */
+body.night :is(.content,.modal) .btn[style*="background:#e8f5e9"]{ background:#1f9d55 !important; color:#ffffff !important; border-color:#2fbf6c !important; }
+/* Nút "✓ UP" bị khóa (chưa có ngày/số lượng) -> xám tối rõ */
+body.night :is(.content,.modal) .btn[style*="background:#f5f5f5"]{ background:#232f47 !important; color:#8a95a8 !important; border-color:#33415a !important; }
 /* Màu CHỨC NĂNG tối trên badge/tint (đã bị darken nền) -> sáng cùng tông cho dễ đọc.
    Loại trừ select/input/textarea để giữ chip trạng thái xanh/vàng (nền sáng chữ tối). */
 body.night :is(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageOrg) *:not(select):not(input):not(textarea)[style*="color:#991b1b"],

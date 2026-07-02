@@ -133,6 +133,27 @@ body.hide-ot .tl-ot-col{display:none !important}
 .search-item-badge{display:inline-block;font-size:10px;padding:0 5px;border-radius:99px;background:var(--navy);color:#FFC000;margin-left:5px;font-weight:600;vertical-align:middle}
 .search-empty{padding:18px;text-align:center;color:#aaa;font-size:12px}
 
+/* ===== POLISH — Nhóm A: chiều sâu + chuyển động mượt (tinh tế, không ảnh hưởng hiệu năng) ===== */
+.header{ background:rgba(31,56,100,.90); -webkit-backdrop-filter:saturate(150%) blur(10px); backdrop-filter:saturate(150%) blur(10px); }
+.card{ transition:box-shadow .22s ease, transform .22s ease; }
+.card:hover{ box-shadow:0 8px 26px rgba(15,32,66,.10); }
+.pj-card{ transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .16s ease; will-change:transform; }
+.pj-card:hover{ transform:translateY(-3px); box-shadow:0 12px 28px rgba(15,32,66,.18); }
+.pj-thumb img{ transition:transform .4s ease; }
+.pj-card:hover .pj-thumb img{ transform:scale(1.05); }
+.hero-box{ transition:transform .18s ease, box-shadow .18s ease; }
+.hero-box:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(0,0,0,.14); }
+.btn{ transition:all .15s ease; }
+.btn:active{ transform:scale(.97); }
+.nav-btn{ transition:all .16s ease; }
+.modal{ animation:modalPop .24s cubic-bezier(.2,.9,.25,1.05); }
+.modal-bg{ animation:fadeIn .18s ease; }
+@keyframes modalPop{ from{ opacity:0; transform:translateY(10px) scale(.985);} to{ opacity:1; transform:none;} }
+@keyframes fadeIn{ from{ opacity:0;} to{ opacity:1;} }
+.hdr-menu{ animation:menuDrop .16s ease; transform-origin:top; }
+@keyframes menuDrop{ from{ opacity:0; transform:translateY(-6px) scale(.98);} to{ opacity:1; transform:none;} }
+@media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
+
 /* MONTH STRIP */
 .month-strip{background:var(--navy2);display:flex;align-items:stretch;padding:0 14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.1)}
 .month-strip::-webkit-scrollbar{display:none}
@@ -7252,6 +7273,37 @@ async function markRowDone(pjId, gId, rId, overrideDoneAt, overrideUpScore) {
   openUpRatingModal(pjId, gId, rId, label, timeStr);
 }
 
+// ── Rà & KHỚP LẠI các dòng UP bị lệch giữa các tháng (mục cũ trước bản đồng bộ 2 chiều) ──
+// An toàn: chỉ ĐIỀN done_at/điểm cho các dòng CÙNG CHUỖI đang trống (không xóa, không đổi dữ liệu đã có).
+async function reconcileUpChains(silent) {
+  var doneRows = [];
+  Object.values(D.months||{}).forEach(function(m){
+    [...(m.projects||[]), ...(m.projectsVN||[])].forEach(function(p){
+      (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){ if(r.doneAt) doneRows.push(r); }); });
+    });
+  });
+  var fixed = 0;
+  for (const dr of doneRows) {
+    var twins;
+    try { twins = _rowTwinsAcrossMonths(dr.id, true); } catch(e) { twins = []; }
+    for (const t of twins) {
+      if (!t.r.doneAt) {
+        t.r.doneAt = dr.doneAt;
+        if (dr.upScore != null && t.r.upScore == null) t.r.upScore = dr.upScore;
+        fixed++;
+        if (window._sbReady) { try { await _sb.from('rows').update({ done_at: dr.doneAt, up_score: (dr.upScore!=null?dr.upScore:null) }).eq('id', t.r.id); } catch(e){} }
+      }
+    }
+  }
+  if (fixed) {
+    try { persistD(); } catch(e){}
+    try { if (activePage==='main') renderContent(); renderSidebar(); } catch(e){}
+  }
+  if (!silent) alert('Đã khớp lại ' + fixed + ' dòng UP giữa các tháng.\n(Dữ liệu chỉ được ĐIỀN thêm, không mất gì.)');
+  return fixed;
+}
+window.reconcileUpChains = reconcileUpChains;
+
 // ── Popup chọn thời điểm UP — 4 lựa chọn (SỚM / ĐÚNG GIỜ / MUỘN / NHẬP TAY) ──
 function openUpConfirmModal(pjId, gId, rowId) {
   const pj = allCurProjects().find(p => p.id === pjId);
@@ -14208,15 +14260,17 @@ function renderStorageMeter() {
   try {
     const data = localStorage.getItem(SK) || '';
     const kb = Math.round(data.length * 0.75 / 1024);
-    const color = kb > 3000 ? '#E67E22' : '#27AE60';
+    const pct = Math.min(100, Math.round(kb/5120*100));   // mốc 5MB
+    const color = pct>=90 ? '#C0392B' : pct>=80 ? '#E67E22' : '#27AE60';
     bar.innerHTML = `
       <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--gray4);margin-bottom:3px">
-        <span style="color:${color}">💾 Cache offline: ${(kb/1024).toFixed(1)}MB</span>
-        <span style="font-size:10px;color:var(--gray4)">Dữ liệu lưu trên Supabase ☁</span>
+        <span style="color:${color}">💾 Cache offline: ${(kb/1024).toFixed(1)}MB (${pct}%)</span>
+        <span style="font-size:10px;color:var(--gray4)">Lưu trên Supabase ☁</span>
       </div>
-      <div style="height:4px;background:var(--gray2);border-radius:2px;overflow:hidden">
-        <div style="height:100%;background:${color};width:${Math.min(100, Math.round(kb/4096*100))}%;border-radius:2px;transition:width .4s"></div>
+      <div style="height:5px;background:var(--gray2);border-radius:2px;overflow:hidden">
+        <div style="height:100%;background:${color};width:${pct}%;border-radius:2px;transition:width .4s"></div>
       </div>
+      ${pct>=80?`<div style="font-size:9px;color:${color};margin-top:3px;font-weight:600;cursor:pointer" onclick="showStorageAlert(${kb},${pct},'${pct>=90?'danger':'warn'}')">⚠ Gần đầy — bấm để xử lý (backup / dọn ảnh)</div>`:''}
     `;
   } catch(e) {}
 }
@@ -14287,39 +14341,46 @@ function autoCleanOldPhotos() {
 // Kiểm tra dung lượng cache offline — ngưỡng nâng lên vì ảnh đã lưu trên Supabase Storage
 function checkStorageAndWarn() {
   try {
-    const json = JSON.stringify(D);
-    const usedKB = Math.round(json.length * 0.75 / 1024);
+    const usedKB = Math.round(JSON.stringify(D).length * 0.75 / 1024);
     const pct = usedKB / 5120 * 100;
-    // Chỉ cảnh báo nếu cache vẫn >90% (ít xảy ra sau khi ảnh đã chuyển sang Supabase Storage)
-    if (pct >= 90) {
-      const freed = autoCleanOldPhotos();
-      if (freed === 0) showStorageAlert(usedKB, pct, 'danger');
+    // CẢNH BÁO ở mốc 80% (không tự cắt tháng — dữ liệu giữ nguyên, để anh chủ động xử lý).
+    if (pct >= 80) {
+      const today = (typeof localDateStr==='function') ? localDateStr(new Date()) : new Date().toISOString().slice(0,10);
+      const key = 'storage_warned_' + (pct>=90?'danger':'warn');
+      // 80%: nhắc 1 lần/ngày; 90%: luôn nhắc.
+      if (pct>=90 || localStorage.getItem(key)!==today) {
+        try { localStorage.setItem(key, today); } catch(e){}
+        showStorageAlert(usedKB, pct, pct>=90?'danger':'warn');
+      }
     }
     return pct;
   } catch(e) { return 0; }
 }
 
 function showStorageAlert(usedKB, pct, level) {
-  const color = '#C0392B';
+  const danger = level==='danger';
+  const color = danger ? '#C0392B' : '#E67E22';
   showModal(`
     <div style="text-align:center;padding:10px 0">
-      <div style="font-size:40px;margin-bottom:10px">🚨</div>
-      <div style="font-size:16px;font-weight:700;color:${color};margin-bottom:8px">Cache offline gần đầy</div>
+      <div style="font-size:40px;margin-bottom:10px">${danger?'🚨':'⚠️'}</div>
+      <div style="font-size:16px;font-weight:700;color:${color};margin-bottom:8px">Cache offline đã đạt ${Math.round(pct)}%</div>
       <div style="font-size:13px;color:#555;margin-bottom:14px">
-        Cache: <strong style="color:${color}">${(usedKB/1024).toFixed(1)}MB / 5MB (${Math.round(pct)}%)</strong>
+        Cache: <strong style="color:${color}">${(usedKB/1024).toFixed(1)}MB / 5MB</strong>
       </div>
       <div style="height:12px;background:#eee;border-radius:6px;overflow:hidden;margin-bottom:16px">
-        <div style="height:100%;width:${Math.min(100,pct)}%;background:${color};border-radius:6px"></div>
+        <div style="height:100%;width:${Math.min(100,pct)}%;background:${color};border-radius:6px;transition:width .4s"></div>
       </div>
       <div style="font-size:12px;color:#777;line-height:1.7;margin-bottom:16px;text-align:left;background:#f9f9f9;padding:10px;border-radius:6px">
-        ☁ Dữ liệu chính đã lưu trên Supabase.<br>
-        Cache cục bộ chủ yếu là chuỗi URL ảnh và data metadata.<br>
-        Có thể xóa cache ảnh tháng cũ để giải phóng dung lượng.
+        ☁ <b>Dữ liệu chính vẫn an toàn trên Supabase</b> — cache cục bộ chỉ là bản offline.<br>
+        Khuyến nghị để giải phóng (KHÔNG mất dữ liệu):<br>
+        • <b>Xuất backup</b> ra file để lưu an toàn.<br>
+        • <b>Dọn cache ảnh</b> tháng cũ (ảnh gốc vẫn còn trên Supabase).
       </div>
     </div>
     <div class="modal-ft">
       <button class="btn" onclick="closeModal()">Để sau</button>
-      <button class="btn btn-gold" onclick="closeModal();autoCleanOldPhotos()">🗑 Dọn cache ảnh cũ</button>
+      <button class="btn" onclick="closeModal();exportToFile()">💾 Xuất backup</button>
+      <button class="btn btn-gold" onclick="closeModal();openClearPhotosModal()">🖼 Dọn cache ảnh</button>
     </div>
   `);
 }
@@ -14868,6 +14929,7 @@ window.addEventListener('beforeunload', function() {
           var roleLabel = role==='admin'?'Admin':role==='edit'?'Edit':'View';
           setSyncStatus('syncing', '⏳');
           try { checkMorningNotification(); } catch(e) {}
+          try { if (typeof _needsApproval!=='function' || !_needsApproval()) setTimeout(function(){ try{ reconcileUpChains(true); }catch(e){} }, 3500); } catch(e) {}
           if (role === 'admin') { try { refreshPendingBadge(); } catch(e) {} }
           try { _sbSessionCreate(role); } catch(e) {}
         } catch(e) {}
@@ -14919,6 +14981,7 @@ window.addEventListener('beforeunload', function() {
           renderAll();
           startRealtimeSync();
           try { checkMorningNotification(); } catch(e) {}
+          try { if (typeof _needsApproval!=='function' || !_needsApproval()) setTimeout(function(){ try{ reconcileUpChains(true); }catch(e){} }, 3500); } catch(e) {}
           if (sessionRole === 'admin') { try { refreshPendingBadge(); } catch(e) {} }
           try { _sbSessionCreate(sessionRole); } catch(e) {}
         } catch(e) { setSyncStatus('error', '🔴'); }

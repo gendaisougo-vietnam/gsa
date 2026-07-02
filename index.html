@@ -167,6 +167,17 @@ body.night h2{ color:#eef2f9 !important; }
 body.night .sidebar{ border-right-color:#22304a !important; }
 body.night .sidebar-ft{ border-top-color:#22304a !important; }
 body.night #storageBar span{ color:#9fb0c8 !important; }
+/* ===== QUÉT TOÀN CỤC: nền tối => KHÔNG chữ đen/xám-đậm (chữ inline) — tối thiểu ghi-xám → trắng ===== */
+body.night [style*="color:#000"], body.night [style*="color:#111"], body.night [style*="color:#1a1a1a"],
+body.night [style*="color:#222"], body.night [style*="color:#111827"], body.night [style*="color:var(--navy)"],
+body.night [style*="color:var(--dark)"], body.night [style*="color:#374151"], body.night [style*="color:#1F3864"]{ color:#e4e9f2 !important; }
+body.night [style*="color:#333"], body.night [style*="color:#444"], body.night [style*="color:#475569"]{ color:#dbe2ee !important; }
+body.night [style*="color:#555"], body.night [style*="color:#666"], body.night [style*="color:#777"],
+body.night [style*="color:#888"], body.night [style*="color:#999"], body.night [style*="color:#aaa"],
+body.night [style*="color:var(--gray4)"], body.night [style*="color:var(--gray3)"]{ color:#9fb0c8 !important; }
+/* Sidebar: thẻ dự án nền tối + chữ sáng */
+body.night .sidebar{ color:#cdd6e6; }
+body.night .pj-card{ background:#141d30 !important; border-color:#2b3a58 !important; }
 body.night ::-webkit-scrollbar-thumb{ background:#31405c; }
 body.night .card:hover{ box-shadow:0 8px 30px rgba(0,0,0,.5); }
 /* Phụ đề/tiêu đề trên nền tối (ngoài thẻ) — làm sáng để không bị chìm */

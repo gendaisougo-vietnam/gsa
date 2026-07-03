@@ -305,9 +305,11 @@ body.night :where(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageO
 body.night table.detail-tl, body.night table.detail-tl td, body.night table.detail-tl th{ border-color:#2b3a58 !important; }
 /* Cot HANG MUC (o nhom) trong bang chi tiet: nen TOI, chi o nhap ten sang (input rule lo) */
 body.night .kj-grp-cell{ background:#141d30 !important; }
-/* Ngay T7/CN + le trong gantt: xanh nhat noi NHE tren nen toi de phan biet (khong qua choi) */
+/* Ngay T7/CN + le: xanh XÁM DỊU (mờ) — chỉ để phân biệt nhẹ */
 body.night [style*="background:rgba(231,76,60,.04)"],
-body.night [style*="background:rgba(0,0,0,.03)"]{ background:rgba(96,150,225,.14) !important; }
+body.night [style*="background:rgba(0,0,0,.03)"]{ background:rgba(92,124,168,.13) !important; }
+/* Cột HÔM NAY: xanh CYAN tươi, rõ hơn hẳn cuối tuần nhưng vẫn nhạt hơn thanh lịch UP (cam/xanh lá) */
+body.night [style*="rgba(52,152,219"]{ background:rgba(64,196,255,.24) !important; }
 body.night #pageStaff .staff-card{ background:#141d30 !important; border-color:#2b3a58 !important; }
 body.night #pageStaff .staff-card [style*="background:#f3f4f6"]{ background:#0f1626 !important; }
 /* ===== DARK cho modal "Bao cao danh gia nhan su" (#staffReviewOverlay) ===== */
@@ -425,7 +427,7 @@ body.night table.detail-tl tr.grp-row:hover .grp-name-text{ color:#eef2f9 !impor
 /* office header + tổng (nền #eee/#dde3ee) -> tối */
 body.night .kj-tbl td[style*="background:#eee"], body.night .kj-tbl td[style*="background:#dde3ee"]{ background:#1e2a42 !important; }
 /* giữ nhận diện: hôm nay (xanh), ô liên hệ hồng/xanh */
-body.night .kj-tbl td[style*="rgba(52,152,219"]{ background:rgba(52,152,219,.20) !important; }
+body.night .kj-tbl td[style*="rgba(52,152,219"]{ background:rgba(64,196,255,.24) !important; }
 body.night .kj-tbl td[style*="background:#fde2e4"]{ background:#3a2230 !important; }
 body.night .kj-tbl td[style*="background:#dbeafe"]{ background:#1c2f4a !important; }
 /* hover dịu, không chói (thay #fff8e1) */
@@ -434,7 +436,7 @@ body.night .rtbl tbody tr:hover td, body.night .sum-tbl tr:hover td{ background:
 /* 担当者別工程表 (#monthGanttCard) — lưới + chữ tối */
 body.night #monthGanttCard td, body.night #monthGanttCard th{ border-color:#2b3a58 !important; }
 body.night #monthGanttCard th{ color:#cdd6e6 !important; }
-body.night #monthGanttCard td[style*="rgba(52,152,219"]{ background:rgba(52,152,219,.20) !important; }
+body.night #monthGanttCard td[style*="rgba(52,152,219"]{ background:rgba(64,196,255,.24) !important; }
 /* nền ô sáng -> tối */
 body.night :is(.content,.modal) [style*="background:#fff"],
 body.night :is(.content,.modal) [style*="background:#ffffff"],

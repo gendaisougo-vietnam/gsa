@@ -1394,6 +1394,10 @@ function _rowIsLocked(r) {
   if (r.doneAt) return true;
   // 2) Carryover từ tháng cũ (flag từ doAddMonth hoặc migration)
   if (r.fromCarryover) return true;
+  // 2.5) Dòng thuộc THÁNG QUÁ KHỨ (deadline hoặc tháng gốc < tháng đang xem) → khóa (chỉ xem lịch sử).
+  //      Overdue CÙNG tháng (dateTo cùng tháng đang xem) vẫn để mở để nhắc UP.
+  if (r.originMonth && r.originMonth < D.activeMonth) return true;
+  if (r.dateTo && String(r.dateTo).slice(0,7) < D.activeMonth) return true;
   // 3) Data cũ: rate auto-fill (recalcStaffUpKPI sau UP) + KHÔNG có dateTo
   //    → chắc chắn đã từng UP, không phải row đang chuẩn bị UP.
   if (r.dateTo) return false;
@@ -1405,6 +1409,8 @@ function _rowIsLocked(r) {
 function _rowDisplayMonth(r){
   if (r && r.doneAt) return String(r.doneAt).slice(0,7);
   if (r && r.originMonth) return r.originMonth;
+  // Dòng chưa UP nhưng deadline thuộc tháng trước → gộp vào lịch sử tháng đó (không hiện như dòng hiện tại).
+  if (r && r.dateTo && String(r.dateTo).slice(0,7) < D.activeMonth) return String(r.dateTo).slice(0,7);
   return D.activeMonth;
 }
 // Mở/đóng nhóm lịch sử theo tháng trong 1 hạng mục

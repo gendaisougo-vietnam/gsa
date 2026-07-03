@@ -5011,16 +5011,12 @@ function renderMonthGantt(pjs) {
   if(!window._ganttShowDone){
     Object.keys(staffMap).forEach(function(s){
       const tasks = staffMap[s]; if(!tasks || !tasks.length) return;
-      const groups = {};
-      tasks.forEach(function(t){ const k=(t.pjName||'')+'∥'+(t.groupName||''); (groups[k]=groups[k]||[]).push(t); });
-      const kept=[];
-      Object.keys(groups).forEach(function(k){
-        const arr=groups[k];
-        const hasPending = arr.some(function(t){ return !t.doneAt; });                                   // còn lịch chưa UP
-        const doneToday  = arr.some(function(t){ return t.doneAt && String(t.doneAt).slice(0,10)===todayStr; }); // vừa UP hôm nay
-        if(hasPending || doneToday) kept.push.apply(kept, arr);
+      staffMap[s] = tasks.filter(function(t){
+        const done      = !!t.doneAt;                                                  // đã UP thật
+        const doneToday = done && String(t.doneAt).slice(0,10)===todayStr;             // vừa UP hôm nay -> còn hiện hết hôm nay
+        const upcoming  = !done && t.dateTo && String(t.dateTo).slice(0,10) >= todayStr; // deadline hôm nay/tương lai, chưa UP
+        return upcoming || doneToday;
       });
-      staffMap[s]=kept;
     });
   }
 

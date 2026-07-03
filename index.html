@@ -305,6 +305,9 @@ body.night :where(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageO
 body.night table.detail-tl, body.night table.detail-tl td, body.night table.detail-tl th{ border-color:#2b3a58 !important; }
 /* Cot HANG MUC (o nhom) trong bang chi tiet: nen TOI, chi o nhap ten sang (input rule lo) */
 body.night .kj-grp-cell{ background:#141d30 !important; }
+/* Ngay T7/CN + le trong gantt: xanh nhat noi NHE tren nen toi de phan biet (khong qua choi) */
+body.night [style*="background:rgba(231,76,60,.04)"],
+body.night [style*="background:rgba(0,0,0,.03)"]{ background:rgba(96,150,225,.14) !important; }
 body.night #pageStaff .staff-card{ background:#141d30 !important; border-color:#2b3a58 !important; }
 body.night #pageStaff .staff-card [style*="background:#f3f4f6"]{ background:#0f1626 !important; }
 /* ===== DARK cho modal "Bao cao danh gia nhan su" (#staffReviewOverlay) ===== */
@@ -487,6 +490,8 @@ body.night :is(.content,.modal) [style*="color:var(--gray4)"],
 body.night :is(.content,.modal) [style*="color:var(--gray3)"]{ color:#9fb0c8 !important; }
 /* Nút thường trong modal/content (bg sáng -> đã tối, chữ var(--dark)) -> chữ sáng. Trừ nút vàng/primary. */
 body.night :is(.content,.modal) .btn:not(.btn-gold):not(.btn-primary){ color:#e4e9f2 !important; }
+/* Nút .btn KHÔNG có nền inline (vd "Bỏ qua"): nền class #fff không bị quét -> ép nền tối + chữ sáng */
+body.night :is(.content,.modal) .btn:not(.btn-gold):not(.btn-primary):not([style*="background"]){ background:#232f47 !important; color:#e4e9f2 !important; border-color:#3a4a66 !important; }
 /* Nút "✓ UP" (nền xanh nhạt) -> nút XANH ĐẶC chữ trắng, rõ ràng dễ đọc trên nền tối */
 body.night :is(.content,.modal) .btn[style*="background:#e8f5e9"]{ background:#1f9d55 !important; color:#ffffff !important; border-color:#2fbf6c !important; }
 /* Nút "✓ UP" bị khóa (chưa có ngày/số lượng) -> xám tối rõ */
@@ -12150,25 +12155,35 @@ async function saveStaffAssignment(name){
     const T2R={'取締役':0,'所長':0,'統括室長':1,'室長':1,'副室長':2,'主任':3,'副主任':4,'':5};
     const rank=(T2R[title]!=null?T2R[title]:5);
     const today=localDateStr(new Date());
-    const old=(D.assignments||[]).find(x=>x.staff_id===sid && !x.date_to);
+    // Đóng TẤT CẢ phân công đang mở (tránh còn sót phân công cũ khiến thẻ kẹt phòng cũ)
+    const opens=(D.assignments||[]).filter(x=>x.staff_id===sid && !x.date_to);
+    const old=opens[0]||null;
     let mgrId=null, rtt=false;
     if(mgrSel==='__lead') rtt=true;
     else if(mgrSel==='__none'){ mgrId=null; rtt=false; }
     else if(mgrSel) mgrId=(window._sbStaffIdByName||{})[mgrSel]||null;
     else if(old){ mgrId=old.manager_staff_id||null; rtt=!!old.reports_to_top; }
     const bim=old?!!old.is_bim:false, sho=old?!!old.is_shoene:false, cop=(old?old.comanager_staff_id:null)||null;
-    if(old && window._sbReady){ const r1=await _sb.from('assignments').update({date_to:today}).eq('id',old.id); if(r1&&r1.error) throw r1.error; }
-    if(old) old.date_to=today;
+    for(const o of opens){
+      if(window._sbReady){ const r1=await _sb.from('assignments').update({date_to:today}).eq('id',o.id); if(r1&&r1.error) throw r1.error; }
+      o.date_to=today;
+    }
     const rec={staff_id:sid, unit_id:unitId, title_jp:title, rank:rank, is_primary:true, manager_staff_id:mgrId, comanager_staff_id:cop, reports_to_top:rtt, is_bim:bim, is_shoene:sho, office:office, date_from:today, note:'transfer'};
     if(window._sbReady){ const ins=await _sb.from('assignments').insert(rec).select().single(); if(ins&&ins.error) throw ins.error; if(ins&&ins.data) rec.id=ins.data.id; }
     (D.assignments=D.assignments||[]).push(rec);
     try{ if(window._sbReady) await _sb.from('staff').update({office:office}).eq('full_name',name); }catch(e){}
     if(D.staffById && D.staffById[sid]) D.staffById[sid].office=office;
     if(typeof save==='function') save();
-    if(typeof refreshStaffDetailModal==='function') refreshStaffDetailModal();
+    // Chuyển tab nhân sự sang PHÒNG MỚI để thấy thẻ đã dời (và biến mất ở phòng cũ)
+    try{
+      const _units={}; (D.orgUnits||[]).forEach(u=>_units[u.id]=u);
+      let _nu=_units[unitId]; if(_nu && _nu.kind==='group' && _nu.parent_id && _units[_nu.parent_id]) _nu=_units[_nu.parent_id];
+      if(_nu && _nu.name_jp) window._staffDeptTab=_nu.name_jp;
+    }catch(e){}
+    if(typeof closeStaffDetailModal==='function') closeStaffDetailModal();
     if(typeof renderStaffPage==='function') renderStaffPage();
     const po=document.getElementById('pageOrg'); if(po && po.style.display!=='none' && typeof renderOrgChart==='function') renderOrgChart();
-    alert('Đã cập nhật phân công: '+name);
+    alert('Đã chuyển phòng: '+name+(  (window._staffDeptTab)?(' → '+window._staffDeptTab):'' ));
   }catch(e){ alert('Lỗi cập nhật phân công: '+(e&&e.message?e.message:e)); }
 }
 

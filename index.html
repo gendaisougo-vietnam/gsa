@@ -3724,8 +3724,29 @@ function renderSidebar() {
   const today = localDateStr(new Date());
   const tomorrow = localDateStr(new Date(Date.now() + 86400000));
 
-  // Lọc và sắp xếp: ẩn dự án đã hoàn thành từ hôm qua trở về trước
-  const visiblePjs = pjs;
+  // ── SẮP XẾP CỘT DỰ ÁN theo lịch UP (chỉ tính hạng mục của PHÒNG đang xem) ──
+  //  Nhóm 0: có lịch UP HÔM NAY  -> lên trên cùng (ưu tiên ngày BẮT ĐẦU sớm nhất).
+  //  Nhóm 1: có lịch UP các ngày TỚI (chưa UP) -> tiếp theo (cũng theo ngày bắt đầu).
+  //  Nhóm 2: đã hết lịch UP (có lịch nhưng đã UP hết) -> dưới nữa.
+  //  Nhóm 3: chưa có lịch nào (mới tạo / lấy từ lịch sử chưa xếp lịch) -> DƯỚI CÙNG (giữ thứ tự thêm vào).
+  function _pjSortInfo(p){
+    const rows=(p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>r.dateTo);
+    const todayUp  = rows.some(r=>r.dateTo===today && !r.doneAt);
+    const futureUp = rows.some(r=>r.dateTo>today && !r.doneAt);
+    const hasSched = rows.length>0;
+    // ngày bắt đầu sớm nhất trong các hạng mục CÒN lịch UP (hôm nay/tương lai, chưa UP)
+    const starts = rows.filter(r=>!r.doneAt && r.dateTo>=today).map(r=>r.dateFrom||r.dateTo).filter(Boolean).sort();
+    const earliest = starts.length ? starts[0] : '9999-99-99';
+    const tier = todayUp?0 : futureUp?1 : hasSched?2 : 3;
+    return {tier, earliest};
+  }
+  const _ordered = pjs.map((p,idx)=>({p, idx, info:_pjSortInfo(p)}));
+  _ordered.sort((a,b)=>
+    (a.info.tier-b.info.tier)
+    || (a.info.earliest<b.info.earliest?-1 : a.info.earliest>b.info.earliest?1 : 0)
+    || (a.idx-b.idx)
+  );
+  const visiblePjs = _ordered.map(o=>o.p);
 
   list.innerHTML = visiblePjs.map((p, i) => {
     const thumb = (p.photos || []).find(Boolean);

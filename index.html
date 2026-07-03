@@ -8084,6 +8084,15 @@ function renderGroups(p) {
       if (!_locked || _mo === _vMonth) _curRows.push(r);
       else (_histMap[_mo] = _histMap[_mo] || []).push(r);
     });
+    // Sắp xếp trong hạng mục: dòng ĐANG SỬA/MỚI (chưa khóa) LÊN TRÊN CÙNG;
+    // các dòng đã UP xuống dưới theo THÁNG mới → cũ.
+    _curRows.sort(function(a,b){
+      const la=_rowIsLocked(a)?1:0, lb=_rowIsLocked(b)?1:0;
+      if(la!==lb) return la-lb;                       // chưa khóa (0) lên trên
+      const ka=_ymKey(a.doneAt)||_ymKey(a.dateTo)||0;
+      const kb=_ymKey(b.doneAt)||_ymKey(b.dateTo)||0;
+      return kb-ka;                                    // mới → cũ
+    });
     const _histMonths = Object.keys(_histMap).sort().reverse();
     const _visible = [];
     _curRows.forEach(function(r){ _visible.push({k:'row', r:r}); });
@@ -8183,24 +8192,23 @@ function renderGroups(p) {
         </td>
         <td style="text-align:center;${cellDim}">
           ${rIsDone
-            ? `<span style="font-size:10px;color:${DONE_COLOR}">${r.dateFrom||'—'}</span>`
+            ? `<span style="font-size:10px;color:${DONE_COLOR}">${r.dateFrom?String(r.dateFrom).split('-').reverse().join('/'):'—'}</span>`
             : `<input type="date" class="tbl-input" value="${r.dateFrom||''}" style="font-size:10px;padding:3px 5px;min-width:0"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','dateFrom',this.value);refreshStaffSched('${p.id}')">`}
         </td>
         <td style="text-align:center;${cellDim}">
           ${rIsDone
-            ? (r.doneAt
-                ? `<div style="text-align:center">
-                    <span style="font-size:9px;font-weight:700;color:#27ae60">✓ Đã UP ${r.doneAt.slice(0,10)}</span>
-                  </div>`
-                : r.fromCarryover
-                  ? `<div style="text-align:center">
-                      <span style="font-size:9px;font-weight:700;color:${DONE_COLOR};font-style:italic">✓ Hạng mục tháng trước</span>
-                    </div>`
-                  : `<div style="text-align:center">
-                      <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
-                      <div style="font-size:8px;color:#888;font-style:italic">(data cũ)</div>
-                    </div>`)
+            ? (function(){
+                const _dTo = r.dateTo?String(r.dateTo).split('-').reverse().join('/'):'';
+                const _dateLine = _dTo?`<div style="font-size:10px;color:${DONE_COLOR}">${_dTo}</div>`:'';
+                if (r.doneAt) return `<div style="text-align:center">${_dateLine}
+                    <span style="font-size:9px;font-weight:700;color:#27ae60">✓ Đã UP ${r.doneAt.slice(0,10)}</span></div>`;
+                if (r.fromCarryover) return `<div style="text-align:center">${_dateLine}
+                    <span style="font-size:9px;font-weight:700;color:${DONE_COLOR};font-style:italic">✓ Hạng mục tháng trước</span></div>`;
+                return `<div style="text-align:center">${_dateLine}
+                    <span style="font-size:9px;font-weight:700;color:${DONE_COLOR}">✓ Đã UP</span>
+                    ${_dTo?'':'<div style="font-size:8px;color:#888;font-style:italic">(data cũ)</div>'}</div>`;
+              })()
             : `<input type="date" class="tbl-input" value="${r.dateTo||''}"
                 style="font-size:10px;padding:3px 5px;min-width:0;${deadlinePast?'border-color:#e74c3c;background:#fff5f5':deadlineSoon?'border-color:var(--orange);background:#fffbf0':''}"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','dateTo',this.value);refreshStaffSched('${p.id}')">

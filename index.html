@@ -4836,6 +4836,7 @@ function renderMonthOverview(ci) {
     <div class="card-hd">
       <span class="card-hd-title">${activeSection==='vn'?'📅 Lịch công việc nhân sự':'担当者別工程表 <span style="font-size:10px;font-weight:500;opacity:.65;letter-spacing:.04em">Tantōsha-betsu Kōteihyō</span>'}</span>
       <span style="flex:1"></span>
+      <button id="ganttDoneToggle" class="btn btn-sm" style="background:#eef3fb;color:#1F3864;border:1px solid #b3c6e6;font-size:11px;padding:3px 10px;margin-right:6px" onclick="_toggleGanttDone()" title="Mặc định chỉ hiện hạng mục còn lịch UP sắp tới. Bấm để xem lại cả hạng mục đã UP xong.">${window._ganttShowDone?'🙈 Ẩn đã UP':'👁 Hiện cả đã UP'}</button>
       <button class="btn btn-sm" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:11px;padding:3px 10px" onclick="_scrollGanttToToday('gantt-today-month')" title="Cuộn đến cột ngày hôm nay">📍 Hôm nay</button>
     </div>
     <div class="card-body" style="padding:0">
@@ -5002,6 +5003,26 @@ function renderMonthGantt(pjs) {
   allTasks.filter(overlaps).forEach(r=>{
     if(r.staff){ if(!staffMap[r.staff]) staffMap[r.staff]=[]; staffMap[r.staff].push(r); }
   });
+
+  // ── LỌC GỌN: chỉ giữ HẠNG MỤC còn lịch UP sắp tới (chưa UP xong). ─────────────────
+  //   • Hạng mục đã UP xong hoàn toàn -> ẩn (từ NGÀY HÔM SAU; hôm UP vẫn hiện).
+  //   • Khi hạng mục có lịch mới (dòng chưa UP, vd sửa lại) -> hiện lại KÈM các bar đã UP trước đó.
+  //   • Bật _ganttShowDone = xem lại toàn bộ (kể cả đã UP).
+  if(!window._ganttShowDone){
+    Object.keys(staffMap).forEach(function(s){
+      const tasks = staffMap[s]; if(!tasks || !tasks.length) return;
+      const groups = {};
+      tasks.forEach(function(t){ const k=(t.pjName||'')+'∥'+(t.groupName||''); (groups[k]=groups[k]||[]).push(t); });
+      const kept=[];
+      Object.keys(groups).forEach(function(k){
+        const arr=groups[k];
+        const hasPending = arr.some(function(t){ return !t.doneAt; });                                   // còn lịch chưa UP
+        const doneToday  = arr.some(function(t){ return t.doneAt && String(t.doneAt).slice(0,10)===todayStr; }); // vừa UP hôm nay
+        if(hasPending || doneToday) kept.push.apply(kept, arr);
+      });
+      staffMap[s]=kept;
+    });
+  }
 
   // monthSpans + holidaySet + allDaysStr đã có từ _tlComputeWindow ở đầu hàm
   const _jpG = (activeSection!=='vn');   // Design Studio -> header tiếng Nhật
@@ -8560,6 +8581,21 @@ function renderStaffSchedule(p) {
   </div>`;
 }
 
+// Bật/tắt hiện các hạng mục ĐÃ UP xong trên bảng 担当者別工程表 (mặc định ẩn cho gọn).
+function _toggleGanttDone(){
+  window._ganttShowDone = !window._ganttShowDone;
+  const gb=document.querySelector('#monthGanttCard .card-body');
+  if(gb){
+    try{
+      const pjsAll=allActiveProjects();
+      const pjsGantt=pjsAll.filter(p=>p._section===_sectionPool(activeSection) && _pjVisibleHere(p));
+      gb.innerHTML=renderMonthGantt(pjsGantt);
+      setTimeout(function(){ try{_syncTwoTables();}catch(e){} },50);
+    }catch(e){ try{_refreshOverviewParts();}catch(e2){} }
+  }
+  const b=document.getElementById('ganttDoneToggle');
+  if(b) b.textContent = window._ganttShowDone?'🙈 Ẩn đã UP':'👁 Hiện cả đã UP';
+}
 function refreshStaffSched(pjId) {
   const p = getPj(pjId); if(!p) return;
   const el = document.getElementById('staffSched-' + pjId);

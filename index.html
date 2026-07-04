@@ -8725,7 +8725,7 @@ function refreshStaffSched(pjId) {
 async function addGroup(pjId) {
   const p=getPj(pjId); if(!p) return;
   if(!p.groups) p.groups=[];
-  p.groups.push({id:gid(),type:'',_manual:true,dept:(_activeDept()||'studio'),rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
+  p.groups.push({id:gid(),type:'',_manual:true,dept:(_activeDept()||'studio'),rows:[{id:gid(),status:'',staff:'',qty:0,note:'',ot:0,otNote:'',dateFrom:'',dateTo:'',upTime:'18:00',originMonth:D.activeMonth,chainId:gid(),rate0:0,rate1:0,rate2:0,rate3:0,rate4:0,rate5:0,rate6:0,rate7:0,rate8:0}]});
   save(); rebuildGroups(pjId); refreshPjTotals(pjId); _refreshVnTimeline(pjId); _refreshOverviewParts();
   _sbAuditLog('create', 'groups', p.groups[p.groups.length-1] && p.groups[p.groups.length-1].id || '', 'Thêm hạng mục cho "' + (p.nameVN||p.nameJP||pjId) + '"');
   setTimeout(()=>{ const inputs=document.querySelectorAll(`#rbody-${pjId} .grp-hd .tbl-input-dark`); if(inputs.length) inputs[inputs.length-1].focus(); },50);
@@ -8737,12 +8737,12 @@ async function addGroup(pjId) {
       _sbQueueChange('Thêm hạng mục vào "' + pNameAG + '"',
         'groups', 'upsert', g.id, { project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true, dept: (g.dept||'studio') }, { projectId: pjId });
       _sbQueueChange('Thêm dòng đầu tiên cho hạng mục mới | ' + pNameAG,
-        'rows', 'upsert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' }, { projectId: pjId });
+        'rows', 'upsert', g.rows[0].id, { group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00', origin_month: D.activeMonth, chain_id: g.rows[0].chainId }, { projectId: pjId });
     } else {
       try {
         const { error: err1 } = await _sb.from('groups').insert({ id: g.id, project_id: pjId, type: '', sort_order: p.groups.length - 1, manual: true, dept: (g.dept||'studio') });
         if (err1) _sbReport('addGroup (groups)', err1, {op: 'insert', table: 'groups'});
-        const { error: err2 } = await _sb.from('rows').insert({ id: g.rows[0].id, group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00' });
+        const { error: err2 } = await _sb.from('rows').insert({ id: g.rows[0].id, group_id: g.id, status: '', qty: 0, ot: 0, up_time: '18:00', origin_month: D.activeMonth, chain_id: g.rows[0].chainId });
         if (err2) _sbReport('addGroup (rows)', err2, {op: 'insert', table: 'rows'});
       } catch(e) { _sbReport('addGroup (groups+rows)', e, {op: 'insert', table: 'groups+rows'}); }
     }

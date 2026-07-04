@@ -3050,14 +3050,14 @@ function _pjVisibleHere(p){ return activeSection==='intl' ? _pjIntlOn(p) : (acti
 // Tổng số mai theo phòng đang xem (loại trừ carryRef) — dùng cho hero/perf của tab hiện tại
 function _rowCountDept(p, status){
   let s=0;
-  (p.groups||[]).forEach(function(g){ if(!_groupInDept(g)) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef && !r.tentative && !_rowIsPastHistory(r)) s+=(r.qty||0); }); });
+  (p.groups||[]).forEach(function(g){ if(!_groupInDept(g)) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef && !r.tentative && _rowCountsIn(r,D.activeMonth)) s+=(r.qty||0); }); });
   (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
   return s;
 }
 // Đếm số mai theo dept cụ thể ('studio'|'intl'|null=tất cả). Dùng cho Xuất báo cáo từng phòng.
 function _rowCountFor(p, status, deptFilter){
   let s=0;
-  (p.groups||[]).forEach(function(g){ if(deptFilter!==null && (g.dept||'studio')!==deptFilter) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef && !r.tentative && !_rowIsPastHistory(r)) s+=(r.qty||0); }); });
+  (p.groups||[]).forEach(function(g){ if(deptFilter!==null && (g.dept||'studio')!==deptFilter) return; (g.rows||[]).forEach(function(r){ if(r.status===status && !r.isCarryRef && !r.tentative && _rowCountsIn(r,D.activeMonth)) s+=(r.qty||0); }); });
   if(deptFilter!=='intl') (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
   return s;
 }
@@ -3128,24 +3128,27 @@ function getPjGlobal(id) {
   return null;
 }
 
-// Dòng LỊCH SỬ tải lại (originMonth gán = tháng hiện tại nhưng ngày làm/UP thực tế ở quá khứ)
-// -> KHÔNG cộng vào số mai của tháng đang xem (tránh nhảy số). Cờ nội tại, không phụ thuộc activeMonth.
-function _rowIsPastHistory(r){
-  if(!r) return false;
-  const om=_ymKey(r.originMonth); if(om==null) return false;
-  const dm=_ymKey(r.doneAt||r.dateTo); if(dm==null) return false;
-  return dm < om;
+// Một dòng có được TÍNH số mai vào tháng `forMonth` không?
+//  • Đã UP (doneAt): CHỈ tính vào đúng tháng doneAt (sản xuất thật ở tháng đó).
+//  • Chưa UP: tính vào forMonth (kế hoạch tháng này), TRỪ dòng lịch sử tải lại (deadline ở tháng TRƯỚC forMonth).
+// -> Dự án tải từ lịch sử: các dòng đã UP ở quá khứ KHÔNG cộng nhầm vào tháng hiện tại.
+function _rowCountsIn(r, forMonth){
+  const fm=_ymKey(forMonth); if(fm==null) return true;
+  if(r.doneAt){ const dk=_ymKey(r.doneAt); return dk!=null ? dk===fm : true; }
+  const dt=_ymKey(r.dateTo);
+  if(dt!=null && dt<fm) return false;
+  return true;
 }
-function totalNew(p) {
+function totalNew(p, forMonth) {
+  const fm = forMonth || D.activeMonth;
   const a=(p.records||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
-  // Phase 1: exclude isCarryRef — số mai chỉ tính ở tháng GỐC; loại thêm dòng lịch sử tải lại
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative && !_rowIsPastHistory(r)).reduce((s,r)=>s+(r.qty||0),0);
+  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative && _rowCountsIn(r,fm)).reduce((s,r)=>s+(r.qty||0),0);
   return a+b;
 }
-function totalRev(p) {
+function totalRev(p, forMonth) {
+  const fm = forMonth || D.activeMonth;
   const a=(p.records||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
-  // Phase 1: exclude isCarryRef — số mai chỉ tính ở tháng GỐC; loại thêm dòng lịch sử tải lại
-  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative && !_rowIsPastHistory(r)).reduce((s,r)=>s+(r.qty||0),0);
+  const b=(p.groups||[]).flatMap(g=>g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative && _rowCountsIn(r,fm)).reduce((s,r)=>s+(r.qty||0),0);
   return a+b;
 }
 function totalOT(p) {
@@ -8158,8 +8161,8 @@ function renderGroups(p) {
         </td>
       </tr>`;
     }
-    const gNew = rows.filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative && !_rowIsPastHistory(r)).reduce((s,r)=>s+(r.qty||0),0);
-    const gRev = rows.filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative && !_rowIsPastHistory(r)).reduce((s,r)=>s+(r.qty||0),0);
+    const gNew = rows.filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative && _rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
+    const gRev = rows.filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative && _rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
     const gOT  = rows.reduce((s,r)=>s+(r.ot||0),0);
     const gTot = gNew+gRev;
     const gc   = GRP[gi % GRP.length];
@@ -10054,8 +10057,8 @@ function renderDashboard() {
   const mData=months.map(mid=>{
     const m=D.months[mid]||{projects:[],projectsVN:[]};
     const pjs=[...(m.projects||[]),...(m.projectsVN||[])];
-    return {mid,label:monthLabel(mid),n:pjs.reduce((s,p)=>s+totalNew(p),0),
-      r:pjs.reduce((s,p)=>s+totalRev(p),0),ot:pjs.reduce((s,p)=>s+totalOT(p),0),
+    return {mid,label:monthLabel(mid),n:pjs.reduce((s,p)=>s+totalNew(p,mid),0),
+      r:pjs.reduce((s,p)=>s+totalRev(p,mid),0),ot:pjs.reduce((s,p)=>s+totalOT(p),0),
       pjCount:pjs.length,tN:m.targetNew||0,tR:m.targetRev||0};
   });
   // ── Aggregate separately: JP, VN, Combined ──
@@ -10068,9 +10071,10 @@ function renderDashboard() {
   }
   initAnn(staffAnn); initAnn(staffAnnJP); initAnn(staffAnnVN);
 
-  function accum(obj, rows, otLog, records) {
+  function accum(obj, rows, otLog, records, fm) {
     (rows||[]).forEach(r=>{
-      if(r.staff&&obj[r.staff]){
+      // Chỉ tính dòng thuộc ĐÚNG tháng sản xuất (loại dòng lịch sử tải lại + carryRef trùng)
+      if(r.staff&&obj[r.staff] && !r.tentative && _rowCountsIn(r, fm)){
         if(r.status==='new') obj[r.staff].n+=(r.qty||0); else obj[r.staff].r+=(r.qty||0);
         obj[r.staff].ot+=(r.ot||0);
         let hasRating=false;
@@ -10087,14 +10091,14 @@ function renderDashboard() {
     // JP projects
     (_m.projects||[]).forEach(p=>{
       const rows=(p.groups||[]).flatMap(g=>g.rows||[]);
-      accum(staffAnnJP, rows, p.otLog, p.records);
-      accum(staffAnn,   rows, p.otLog, p.records);
+      accum(staffAnnJP, rows, p.otLog, p.records, mid);
+      accum(staffAnn,   rows, p.otLog, p.records, mid);
     });
     // VN projects
     (_m.projectsVN||[]).forEach(p=>{
       const rows=(p.groups||[]).flatMap(g=>g.rows||[]);
-      accum(staffAnnVN, rows, p.otLog, p.records);
-      accum(staffAnn,   rows, p.otLog, p.records);
+      accum(staffAnnVN, rows, p.otLog, p.records, mid);
+      accum(staffAnn,   rows, p.otLog, p.records, mid);
     });
   });
 

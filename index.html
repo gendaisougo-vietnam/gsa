@@ -10535,21 +10535,13 @@ function renderDashboard() {
   const _prodPctD = _totTgtD>0?Math.round((totN+totR)/_totTgtD*100):0;
   const _prodColD = _prodPctD>=100?'#27ae60':_prodPctD>=80?'#f39c12':'#e74c3c';
   dc.innerHTML=(function(){ try{ return renderRevenueDashboard(); }catch(e){ console.warn('revDash',e); return ''; } })()+`
-  <!-- Tổng quan năm: gauge năng suất -->
-  <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:16px 20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
-    <div style="position:relative;width:132px;height:132px;flex-shrink:0">
-      ${_ringSvg(_prodPctD, _prodColD, 132)}
-      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-        <span data-count="${_prodPctD}" data-suffix="%" style="font-size:30px;font-weight:800;color:${_prodColD};line-height:1">${_prodPctD}%</span>
-        <span style="font-size:10px;color:#888;font-weight:600;margin-top:2px">Năng suất ${year}</span>
-      </div>
-    </div>
-    <div style="display:flex;gap:28px;flex-wrap:wrap;flex:1">
-      <div><div data-count="${totN+totR}" style="font-size:26px;font-weight:800;color:var(--navy)">${totN+totR}</div><div style="font-size:11px;color:#888">Tổng số mai</div></div>
-      <div><div data-count="${totN}" style="font-size:26px;font-weight:800;color:#375623">${totN}</div><div style="font-size:11px;color:#888">作成 Làm mới</div></div>
-      <div><div data-count="${totR}" style="font-size:26px;font-weight:800;color:#7F6000">${totR}</div><div style="font-size:11px;color:#888">修正 Sửa lại</div></div>
-      <div><div data-count="${Math.round(totOT)}" data-suffix="h" style="font-size:26px;font-weight:800;color:var(--orange)">${totOT.toFixed(0)}h</div><div style="font-size:11px;color:#888">OT ${year}</div></div>
-    </div>
+  <!-- Dải sản lượng gọn (số mai / OT năm) -->
+  <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:11px 18px;display:flex;align-items:center;gap:26px;flex-wrap:wrap">
+    <span style="font-size:12px;font-weight:700;color:var(--gray4)">📦 Sản lượng ${year}</span>
+    <div><span data-count="${totN+totR}" style="font-size:22px;font-weight:800;color:var(--navy)">${totN+totR}</span> <span style="font-size:10px;color:#888">tổng số mai</span></div>
+    <div><span data-count="${totN}" style="font-size:22px;font-weight:800;color:#375623">${totN}</span> <span style="font-size:10px;color:#888">作成 làm mới</span></div>
+    <div><span data-count="${totR}" style="font-size:22px;font-weight:800;color:#7F6000">${totR}</span> <span style="font-size:10px;color:#888">修正 sửa</span></div>
+    <div><span data-count="${Math.round(totOT)}" data-suffix="h" style="font-size:22px;font-weight:800;color:var(--orange)">${totOT.toFixed(0)}h</span> <span style="font-size:10px;color:#888">OT</span></div>
   </div></div>
   <!-- Realtime panels -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
@@ -10591,58 +10583,59 @@ function renderDashboard() {
     </div>
   </div>
 
-  <!-- Leaderboard -->
+  <!-- Đánh giá nhân sự — gộp 1 bảng -->
   ${leaderboard.length>0?`<div class="card" style="margin-bottom:12px">
-    <div class="card-hd"><span class="card-hd-title">🏆 Leaderboard tháng ${D.activeMonth.replace(/^\d{4}-/,'').replace(/^0/,'')}/${D.activeMonth.slice(0,4)}</span></div>
-    <div class="card-body" style="padding:0">
-      <table style="width:100%;border-collapse:collapse;font-size:11px">
+    <div class="card-hd"><span class="card-hd-title">👥 Đánh giá nhân sự — tháng ${D.activeMonth.replace(/^\d{4}-/,'').replace(/^0/,'')}/${D.activeMonth.slice(0,4)}</span></div>
+    <div class="card-body" style="padding:0;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap">
         <thead><tr style="background:var(--navy);color:#fff">
           <th style="padding:6px 10px;text-align:left;width:30px">#</th>
           <th style="padding:6px 10px;text-align:left">Nhân sự</th>
-          <th style="padding:6px 10px;text-align:center">Điểm</th>
-          <th style="padding:6px 10px;text-align:center">Đánh giá</th>
-          <th style="padding:6px 10px;text-align:center">Đúng hạn</th>
-          <th style="padding:6px 10px;text-align:center">Đi muộn</th>
-          <th style="padding:6px 10px;text-align:center">OT</th>
+          <th style="padding:6px 8px;text-align:center">作成</th>
+          <th style="padding:6px 8px;text-align:center">修正</th>
+          <th style="padding:6px 8px;text-align:center">Tổng</th>
+          <th style="padding:6px 8px;text-align:center">OT</th>
+          <th style="padding:6px 8px;text-align:center">Đúng hạn</th>
+          <th style="padding:6px 8px;text-align:center">Điểm</th>
+          <th style="padding:6px 10px;text-align:center">Xếp loại</th>
         </tr></thead>
         <tbody>${leaderboard.map((item,i)=>{
-          const {s,sc2}=item;
-          const sc=sc2.score;
+          const {s,sc2}=item; const sc=sc2.score;
+          const a=staffAnn[s]||{n:0,r:0,ot:0};
           const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
           const scoreColor=sc>=8?'#27ae60':sc>=6?'#f39c12':sc>=4?'#e67e22':'#e74c3c';
+          const grade=sc>=8?'🟢 Xuất sắc':sc>=7?'🟢 Tốt':sc>=6?'🟡 Khá':'🔴 Cần cải thiện';
           return `<tr style="border-bottom:1px solid var(--gray2);background:${i%2?'var(--gray1)':'#fff'}">
             <td style="padding:6px 10px;font-size:13px">${medal||i+1}</td>
             <td style="padding:6px 10px;font-weight:600;color:var(--navy)">${s}</td>
-            <td style="padding:6px 10px;text-align:center;font-size:15px;font-weight:900;color:${scoreColor}">${sc.toFixed(1)}</td>
-            <td style="padding:6px 10px;text-align:center">${sc2.avgRating>0?sc2.avgRating.toFixed(1):'-'}</td>
-            <td style="padding:6px 10px;text-align:center;color:${sc2.onTimeRate>=0.8?'#27ae60':'#e67e22'}">${sc2.totalUp>0?Math.round(sc2.onTimeRate*100)+'%':'-'}</td>
-            <td style="padding:6px 10px;text-align:center;color:${sc2.lateCount>0?'#e74c3c':'#27ae60'};font-weight:${sc2.lateCount>0?700:400}">${sc2.lateCount>0?sc2.lateCount+' lần':'✓'}</td>
-            <td style="padding:6px 10px;text-align:center;color:var(--orange)">${sc2.ot>0?sc2.ot.toFixed(1)+'h':'-'}</td>
+            <td style="padding:6px 8px;text-align:center;color:#375623;font-weight:700">${a.n}</td>
+            <td style="padding:6px 8px;text-align:center;color:#7F6000;font-weight:700">${a.r}</td>
+            <td style="padding:6px 8px;text-align:center;font-weight:700">${a.n+a.r}</td>
+            <td style="padding:6px 8px;text-align:center;color:var(--orange)">${a.ot>0?a.ot.toFixed(1)+'h':'-'}</td>
+            <td style="padding:6px 8px;text-align:center;color:${sc2.onTimeRate>=0.8?'#27ae60':'#e67e22'}">${sc2.totalUp>0?Math.round(sc2.onTimeRate*100)+'%':'-'}</td>
+            <td style="padding:6px 8px;text-align:center;font-size:14px;font-weight:900;color:${scoreColor}">${sc.toFixed(1)}</td>
+            <td style="padding:6px 10px;text-align:center;font-size:11px">${grade}</td>
           </tr>`;
         }).join('')}</tbody>
       </table>
     </div>
   </div>`:''}
 
-  <!-- Stat boxes -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
-    <div class="hero-box green" style="padding:12px"><div class="hero-num" style="font-size:28px">${totN}</div><div class="hero-lbl">Tổng 作成 (Làm mới)</div></div>
-    <div class="hero-box gold" style="padding:12px"><div class="hero-num" style="font-size:28px">${totR}</div><div class="hero-lbl">Tổng 修正 (Sửa lại)</div></div>
-    <div class="hero-box navy" style="padding:12px"><div class="hero-num" style="font-size:28px">${totN+totR}</div><div class="hero-lbl">Tổng phối cảnh</div></div>
-    <div class="hero-box orange" style="padding:12px"><div class="hero-num" style="font-size:28px">${totOT.toFixed(1)}h</div><div class="hero-lbl">Tổng OT</div></div>
-  </div>
+  <!-- 2 biểu đồ chính -->
   <div class="dash-grid c2" style="margin-bottom:12px">
     <div class="chart-box"><h4>Phối cảnh theo tháng</h4><canvas id="cMonthly" height="180"></canvas></div>
     <div class="chart-box"><h4>Năng suất nhân sự</h4><canvas id="cStaff" height="180"></canvas></div>
   </div>
-  <div class="dash-grid c3" style="margin-bottom:12px">
-    <div class="chart-box"><h4>Mới vs Sửa</h4><canvas id="cRatio" height="150"></canvas></div>
-    <div class="chart-box"><h4>OT nhân sự</h4><canvas id="cOT" height="150"></canvas></div>
-    <div class="chart-box"><h4>Thực tế vs Mục tiêu</h4><canvas id="cTarget" height="150"></canvas></div>
-  </div>
-  ${buildPerfTable(activeSJP, staffAnnJP, RATING_JP, 'Hiệu suất デザインスタジオ (Design Studio) — ' + year, '🇯🇵', 'jp')}
-  ${buildPerfTable(activeSVN, staffAnnVN, RATING_VN, 'Hiệu suất 設計室 (Design Department) — ' + year, '🇻🇳', 'vn')}
-  ${buildCombinedTable(activeS, staffAnn)}
+
+  <!-- Chuyên sâu: KPI 6 nhóm theo phòng (thu gọn) -->
+  <details style="margin-bottom:12px">
+    <summary style="cursor:pointer;padding:9px 14px;background:var(--navy);color:#fff;border-radius:8px;font-weight:600;font-size:12px;list-style:none">🔬 KPI 6 nhóm chi tiết theo phòng + tổng hợp năng lực — bấm để xem</summary>
+    <div style="margin-top:10px">
+      ${buildPerfTable(activeSJP, staffAnnJP, RATING_JP, 'Hiệu suất デザインスタジオ (Design Studio) — ' + year, '🇯🇵', 'jp')}
+      ${buildPerfTable(activeSVN, staffAnnVN, RATING_VN, 'Hiệu suất 設計室 (Design Department) — ' + year, '🇻🇳', 'vn')}
+      ${buildCombinedTable(activeS, staffAnn)}
+    </div>
+  </details>
   `;
   try { _runCountUps(dc); } catch(e){}
   setTimeout(()=>{
@@ -10654,13 +10647,6 @@ function renderDashboard() {
       {label:'Mới',data:activeS.map(s=>staffAnn[s].n),backgroundColor:'#70AD47',borderRadius:3},
       {label:'Sửa',data:activeS.map(s=>staffAnn[s].r),backgroundColor:'#FFC000',borderRadius:3}
     ]},options:{indexAxis:'y',plugins:{legend:{labels:{font:{size:11}}}},scales:{x:{grid:{color:'#f0f0f0'}},y:{grid:{display:false}}},responsive:true}});
-    new Chart(document.getElementById('cRatio'),{type:'doughnut',data:{labels:['Mới','Sửa'],datasets:[{data:[totN,totR],backgroundColor:['#70AD47','#FFC000'],borderWidth:2,borderColor:'#fff'}]},options:{plugins:{legend:{position:'bottom',labels:{font:{size:11}}}},responsive:true}});
-    const wOT=activeS.filter(s=>staffAnn[s].ot>0);
-    new Chart(document.getElementById('cOT'),{type:'bar',data:{labels:wOT.length?wOT:['Chưa có'],datasets:[{label:'OT(h)',data:wOT.map(s=>staffAnn[s].ot),backgroundColor:'#ED7D31',borderRadius:3}]},options:{plugins:{legend:{labels:{font:{size:11}}}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f0f0f0'}}},responsive:true}});
-    new Chart(document.getElementById('cTarget'),{type:'bar',data:{labels,datasets:[
-      {label:'Thực tế',data:mData.map(m=>m.n+m.r),backgroundColor:'#4472C4',borderRadius:3},
-      {label:'Mục tiêu',data:mData.map(m=>m.tN+m.tR),backgroundColor:'rgba(255,192,0,.3)',borderColor:'#FFC000',borderWidth:1,borderRadius:3}
-    ]},options:{plugins:{legend:{labels:{font:{size:11}}}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f0f0f0'}}},responsive:true}});
   },60);
 }
 

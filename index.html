@@ -1634,7 +1634,8 @@ async function sbLoadAll() {
   if ((photoRows||[]).length > 0) console.log('[Photos] sample row:', photoRows[0]);
   else console.warn('[Photos] photoRows EMPTY — kiểm tra RLS bảng project_photos');
   for (const m of (monthRows || [])) {
-    result.months[m.id] = { projects: [], projectsVN: [], targetNew: m.target_new, targetRev: m.target_rev, targetNewIntl: m.target_new_intl||0, targetRevIntl: m.target_rev_intl||0 };
+    result.months[m.id] = { projects: [], projectsVN: [], targetNew: m.target_new, targetRev: m.target_rev, targetNewIntl: m.target_new_intl||0, targetRevIntl: m.target_rev_intl||0,
+      revenueTarget: (m.revenue_target==null?0:m.revenue_target), jpRemit: (m.jp_remit==null?0:m.jp_remit), vnReceipt: (m.vn_receipt==null?0:m.vn_receipt), holdMoney: (m.hold_money==null?0:m.hold_money), realProfit: (m.real_profit==null?0:m.real_profit) };
   }
   for (const p of (projectRows || [])) {
     if (!result.months[p.month_id]) continue;
@@ -1726,6 +1727,9 @@ async function sbLoadAll() {
       client: p.client||'', buildingType: p.building_type||'',
       scope: p.scope||'', area: p.area||'',
       constructionStart: p.construction_start||'', constructionEnd: p.construction_end||'',
+      contractValue: (p.contract_value==null?'':p.contract_value), revenueType: p.revenue_type||'',
+      revenueMonth: p.revenue_month||'', contractStart: p.contract_start||'', contractDeadline: p.contract_deadline||'',
+      contractDurType: p.contract_dur_type||'days', contractDur: (p.contract_dur==null?'':p.contract_dur),
       groups, photos: (function(){ var s=photosByPj[p.id]||{}; var a=[]; Object.keys(s).forEach(function(k){ a[+k]=s[k]; }); return a; })(), otLog: [],
       tlTasks: (tlByProject[p.id] || []).map(t => ({
         id: t.id, lv: t.lv, name: t.name, start: t.start_date,
@@ -1905,6 +1909,13 @@ async function _sbSaveProject(p, monthId, section) {
     _pjRow.area              = p.area              || null;
     _pjRow.construction_start= p.constructionStart || null;
     _pjRow.construction_end  = p.constructionEnd   || null;
+    _pjRow.contract_value    = (p.contractValue===''||p.contractValue==null?null:p.contractValue);
+    _pjRow.revenue_type      = p.revenueType       || null;
+    _pjRow.revenue_month     = p.revenueMonth      || null;
+    _pjRow.contract_start    = p.contractStart     || null;
+    _pjRow.contract_deadline = p.contractDeadline  || null;
+    _pjRow.contract_dur_type = p.contractDurType   || null;
+    _pjRow.contract_dur      = (p.contractDur===''||p.contractDur==null?null:p.contractDur);
     _pjRow.studio_on         = (p.studioOn !== false);
     _pjRow.intl_on           = !!p.intlOn;
     const { error } = await _sb.from('projects').upsert(_pjRow, { onConflict: 'id' });
@@ -1924,7 +1935,10 @@ function savePjDetailField(pjId, field, val) {
   if (window._sbReady && foundMid) {
     const colMap = { area:'area', scope:'scope', buildingType:'building_type',
                      constructionStart:'construction_start', constructionEnd:'construction_end',
-                     client:'client' };
+                     client:'client',
+                     contractValue:'contract_value', revenueType:'revenue_type', revenueMonth:'revenue_month',
+                     contractStart:'contract_start', contractDeadline:'contract_deadline',
+                     contractDurType:'contract_dur_type', contractDur:'contract_dur' };
     const col = colMap[field];
     if (col) {
       if (typeof _needsApproval==='function' && _needsApproval()) {
@@ -3423,7 +3437,8 @@ async function _sbDumpMonthEntities(mid) {
 
   // 1. months
   try {
-    const { error } = await _sb.from('months').upsert({ id: mid, target_new: m.targetNew || 0, target_rev: m.targetRev || 0, target_new_intl: m.targetNewIntl || 0, target_rev_intl: m.targetRevIntl || 0 });
+    const { error } = await _sb.from('months').upsert({ id: mid, target_new: m.targetNew || 0, target_rev: m.targetRev || 0, target_new_intl: m.targetNewIntl || 0, target_rev_intl: m.targetRevIntl || 0,
+      revenue_target: m.revenueTarget||0, jp_remit: m.jpRemit||0, vn_receipt: m.vnReceipt||0, hold_money: m.holdMoney||0, real_profit: m.realProfit||0 });
     if (error) { _sbReport('_sbDumpMonthEntities (months)', error, {op:'upsert', table:'months'}); errors++; }
   } catch(e) { _sbReport('_sbDumpMonthEntities (months)', e, {op:'upsert', table:'months'}); errors++; }
 
@@ -3443,6 +3458,13 @@ async function _sbDumpMonthEntities(mid) {
       area:              p.area              || null,
       construction_start:p.constructionStart || null,
       construction_end:  p.constructionEnd   || null,
+      contract_value:    (p.contractValue===''||p.contractValue==null?null:p.contractValue),
+      revenue_type:      p.revenueType       || null,
+      revenue_month:     p.revenueMonth      || null,
+      contract_start:    p.contractStart     || null,
+      contract_deadline: p.contractDeadline  || null,
+      contract_dur_type: p.contractDurType   || null,
+      contract_dur:      (p.contractDur===''||p.contractDur==null?null:p.contractDur),
       studio_on:         (p.studioOn !== false),
       intl_on:           !!p.intlOn,
     };
@@ -3652,6 +3674,14 @@ async function doAddMonth(prevMid, newMid) {
         area:              p.area              || '',
         constructionStart: p.constructionStart || '',
         constructionEnd:   p.constructionEnd   || '',
+        // Hợp đồng & doanh số — carry sang tháng mới (dashboard sẽ chống trùng khi cộng doanh số)
+        contractValue:     (p.contractValue==null?'':p.contractValue),
+        revenueType:       p.revenueType       || '',
+        revenueMonth:      p.revenueMonth      || '',
+        contractStart:     p.contractStart     || '',
+        contractDeadline:  p.contractDeadline  || '',
+        contractDurType:   p.contractDurType   || 'days',
+        contractDur:       (p.contractDur==null?'':p.contractDur),
         studioOn:  (p.studioOn !== false),  // giữ cờ hiển thị phòng sang tháng mới
         intlOn:    !!p.intlOn,
         groups:    newGroups,
@@ -6493,6 +6523,26 @@ function renderVNInfoPanel(p) {
       <span style="font-size:9px;font-weight:500;color:#64748b;white-space:nowrap;flex-shrink:0">↗ Hoàn thành TK</span>
       <span style="font-size:10px;font-weight:600;color:#3b82f6;white-space:nowrap">${cd}</span>
     </div>
+    <div style="border-top:1px dashed #c7d2fe;margin:3px 0 4px"></div>
+    <div style="font-size:9px;font-weight:700;color:#0f766e;margin-bottom:3px">💰 HỢP ĐỒNG</div>
+    ${row('Giá trị (万円)', `<input type="number" class="vn-info-input" value="${x(p.contractValue||'')}" placeholder="0" style="font-size:10px;color:#0f766e;font-weight:700" onblur="savePjDetailField('${p.id}','contractValue',this.value)">`)}
+    ${row('Loại DS', `<select class="vn-info-input" style="font-size:10px;color:var(--navy)" onchange="savePjDetailField('${p.id}','revenueType',this.value)">
+        <option value=""${!p.revenueType?' selected':''}>— chọn —</option>
+        <option value="honsha"${p.revenueType==='honsha'?' selected':''}>本社下請 (thầu HQ)</option>
+        <option value="vn_solo"${p.revenueType==='vn_solo'?' selected':''}>ベトナム単独 (VN ký)</option>
+      </select>`)}
+    ${row('Ghi tháng', `<input type="month" class="vn-info-input" value="${x(p.revenueMonth||'')}" style="font-size:10px;color:var(--navy)" onblur="savePjDetailField('${p.id}','revenueMonth',this.value)">`)}
+    <div style="border-top:1px dashed #c7d2fe;margin:3px 0 4px"></div>
+    <div style="font-size:9px;font-weight:700;color:#b45309;margin-bottom:3px">⏱ TIẾN ĐỘ HĐ</div>
+    ${row('Bắt đầu', `<input type="date" class="vn-info-input" value="${x(p.contractStart||'')}" style="font-size:10px;color:var(--navy)" onblur="savePjDetailField('${p.id}','contractStart',this.value)">`)}
+    ${row('Bàn giao', `<input type="date" class="vn-info-input" value="${x(p.contractDeadline||'')}" style="font-size:10px;color:var(--navy)" onblur="savePjDetailField('${p.id}','contractDeadline',this.value)">`)}
+    ${row('Tổng TĐ', `<div style="display:flex;gap:3px">
+        <input type="number" class="vn-info-input" value="${x(p.contractDur||'')}" placeholder="0" style="font-size:10px;width:44px;color:#b45309;font-weight:700" onblur="savePjDetailField('${p.id}','contractDur',this.value)">
+        <select class="vn-info-input" style="font-size:10px;flex:1;color:var(--navy)" onchange="savePjDetailField('${p.id}','contractDurType',this.value)">
+          <option value="days"${(p.contractDurType||'days')==='days'?' selected':''}>ngày làm</option>
+          <option value="weeks"${p.contractDurType==='weeks'?' selected':''}>tuần (cả T7,CN)</option>
+        </select>
+      </div>`)}
   </div>`;
 }
 
@@ -9536,6 +9586,8 @@ function confirmEditPj(id) {
         name_vn: p.nameVN||'', name_jp: p.nameJP||'', office: p.office||'', contact: p.contact||'', main_staff: p.mainStaff||'', main_staff_intl: p.mainStaffIntl||'',
         client: p.client||null, building_type: p.buildingType||null, scope: p.scope||null, area: p.area||null,
         construction_start: p.constructionStart||null, construction_end: p.constructionEnd||null,
+        contract_value:(p.contractValue===''||p.contractValue==null?null:p.contractValue), revenue_type:p.revenueType||null, revenue_month:p.revenueMonth||null,
+        contract_start:p.contractStart||null, contract_deadline:p.contractDeadline||null, contract_dur_type:p.contractDurType||null, contract_dur:(p.contractDur===''||p.contractDur==null?null:p.contractDur),
         studio_on: (p.studioOn!==false), intl_on: (p.intlOn!==false) },
       { monthId: D.activeMonth });
   } else {

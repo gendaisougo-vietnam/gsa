@@ -4314,8 +4314,8 @@ function renderKouteiJP(pjs, win){
       const metaTxt = meta[i]!=null?meta[i]:'';
       let gNew=0, gRev=0, nmStyle='color:'+(bw?'#000':'#666')+';font-weight:500', nmText='';
       if(g){
-        gNew=(g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef&&!r.tentative).reduce((s,r)=>s+(r.qty||0),0);
-        gRev=(g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef&&!r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+        gNew=(g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
+        gRev=(g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
         const gDone=(g.rows||[]).length>0 && (g.rows||[]).every(r=>r.doneAt);
         const gTodayUp=(g.rows||[]).some(r=>r.dateTo===todayStr && !r.doneAt);
         const gPend=(g.rows||[]).some(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
@@ -4371,7 +4371,7 @@ function renderKouteiJP(pjs, win){
         html = html.replace('<tr>', '<tr>' + (pidx===0 ? _contactCell(cg.contact, _totalRows, cgi) : ''));
         body += html;
         var p = cg.pjs[pidx];
-        (p.groups||[]).forEach(function(g){ const isI=(g.dept||'studio')==='intl'; (g.rows||[]).forEach(function(r){ if(r.isCarryRef)return;
+        (p.groups||[]).forEach(function(g){ const isI=(g.dept||'studio')==='intl'; (g.rows||[]).forEach(function(r){ if(r.isCarryRef||r.tentative||!_rowCountsIn(r,D.activeMonth))return;
           if(isI){ if(r.status==='new')iNew+=(r.qty||0); else iRev+=(r.qty||0); }
           else   { if(r.status==='new')sNew+=(r.qty||0); else sRev+=(r.qty||0); } }); });
       });
@@ -4479,7 +4479,7 @@ function exportProjectHistoryPdf(name){
       (p.groups||[]).forEach(function(g){
         const dept=(g.dept||'studio');
         (g.rows||[]).forEach(function(r){
-          if(r.isCarryRef) return;
+          if(r.isCarryRef||r.tentative||!_rowCountsIn(r,mid)) return;
           if(!r.staff && !r.dateTo && !(r.qty>0)) return;
           rows.push({mid:mid,dept:dept,type:g.type||'',staff:r.staff||'',status:r.status||'',qty:r.qty||0,from:r.dateFrom||'',to:r.dateTo||'',done:r.doneAt||''});
           if(dept==='intl'){ if(r.status==='new')totI.n+=(r.qty||0); else totI.r+=(r.qty||0); }
@@ -4610,8 +4610,8 @@ function renderProjectTimeline(pjs) {
       const isFirstGrp = gi === 0;
       const isLastGrp = gi === allGrpRows.length - 1;
       const rowBorderB = isLastGrp ? PB : CB;
-      const grpNew = (g.rows||[]).filter(r=>r.status==='new').reduce((s,r)=>s+(r.qty||0),0);
-      const grpRev = (g.rows||[]).filter(r=>r.status==='rev').reduce((s,r)=>s+(r.qty||0),0);
+      const grpNew = (g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
+      const grpRev = (g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
       const grpAllDone = (g.rows||[]).some(r=>r.dateTo) && (g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt);
       const _compactGrp = !isVN && grpAllDone;   // hạng mục đã UP xong -> thu gọn (chỉ bảng JP)
       // Có lịch UP chưa done và deadline chưa qua
@@ -5439,7 +5439,7 @@ function renderMonthStaffCard(pjs) {
   D.settings.staffList.forEach(s=>sm[s]={n:0,r:0,ot:0});
   pjs.forEach(p=>{
     (p.groups||[]).flatMap(g=>g.rows||[]).forEach(r=>{
-      if(r.staff&&sm[r.staff]){
+      if(r.staff&&sm[r.staff]&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)){
         if(r.status==='new') sm[r.staff].n+=(r.qty||0);
         else sm[r.staff].r+=(r.qty||0);
         sm[r.staff].ot+=(r.ot||0);
@@ -5497,7 +5497,7 @@ function updateHeroForProject(p) {
   const sm = {};
   function _smGet(name){ if(!sm[name]) sm[name]={n:0,r:0,ot:0}; return sm[name]; }
   (p.groups||[]).filter(_groupInDept).flatMap(g => g.rows||[]).forEach(r => {
-    if(r.staff && !r.isCarryRef) {
+    if(r.staff && !r.isCarryRef && !r.tentative && _rowCountsIn(r,D.activeMonth)) {
       const e=_smGet(r.staff);
       if(r.status==='new') e.n += (r.qty||0); else e.r += (r.qty||0);
       e.ot += (r.ot||0);
@@ -6904,7 +6904,7 @@ function renderProjectDetail(ci, p) {
   const sm={};
   const _smG=function(n){ if(!sm[n]) sm[n]={n:0,r:0,ot:0}; return sm[n]; };
   (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).forEach(r=>{
-    if(r.staff&&!r.isCarryRef){ const e=_smG(r.staff); if(r.status==='new') e.n+=(r.qty||0); else e.r+=(r.qty||0); e.ot+=(r.ot||0); }
+    if(r.staff&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)){ const e=_smG(r.staff); if(r.status==='new') e.n+=(r.qty||0); else e.r+=(r.qty||0); e.ot+=(r.ot||0); }
   });
   (p.otLog||[]).forEach(e=>{if(e.staff)_smG(e.staff).ot+=(e.hours||0);});
   const activeS=Object.keys(sm).filter(s=>sm[s].n+sm[s].r+sm[s].ot>0);

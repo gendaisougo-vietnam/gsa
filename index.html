@@ -1637,7 +1637,7 @@ async function sbLoadAll() {
     result.months[m.id] = { projects: [], projectsVN: [], targetNew: m.target_new, targetRev: m.target_rev, targetNewIntl: m.target_new_intl||0, targetRevIntl: m.target_rev_intl||0,
       revenueTarget: (m.revenue_target==null?0:m.revenue_target), jpRemit: (m.jp_remit==null?0:m.jp_remit), vnReceipt: (m.vn_receipt==null?0:m.vn_receipt), holdMoney: (m.hold_money==null?0:m.hold_money), realProfit: (m.real_profit==null?0:m.real_profit),
       revTargetPers:(m.rev_target_pers==null?0:m.rev_target_pers), revTargetZumen:(m.rev_target_zumen==null?0:m.rev_target_zumen), revTargetVn:(m.rev_target_vn==null?0:m.rev_target_vn),
-      osakaZumenAmt:(m.osaka_zumen_amt==null?0:m.osaka_zumen_amt), osakaPersAmt:(m.osaka_pers_amt==null?0:m.osaka_pers_amt), tokyoZumenAmt:(m.tokyo_zumen_amt==null?0:m.tokyo_zumen_amt), tokyoPersAmt:(m.tokyo_pers_amt==null?0:m.tokyo_pers_amt), carryoverNote:(m.carryover_note||'') };
+      osakaZumenAmt:(m.osaka_zumen_amt==null?0:m.osaka_zumen_amt), osakaPersAmt:(m.osaka_pers_amt==null?0:m.osaka_pers_amt), tokyoZumenAmt:(m.tokyo_zumen_amt==null?0:m.tokyo_zumen_amt), tokyoPersAmt:(m.tokyo_pers_amt==null?0:m.tokyo_pers_amt), vnSoloAmt:(m.vn_solo_amt==null?0:m.vn_solo_amt), carryoverNote:(m.carryover_note||'') };
   }
   for (const p of (projectRows || [])) {
     if (!result.months[p.month_id]) continue;
@@ -3489,7 +3489,7 @@ async function _sbDumpMonthEntities(mid) {
     const { error } = await _sb.from('months').upsert({ id: mid, target_new: m.targetNew || 0, target_rev: m.targetRev || 0, target_new_intl: m.targetNewIntl || 0, target_rev_intl: m.targetRevIntl || 0,
       revenue_target: m.revenueTarget||0, jp_remit: m.jpRemit||0, vn_receipt: m.vnReceipt||0, hold_money: m.holdMoney||0, real_profit: m.realProfit||0,
       rev_target_pers: m.revTargetPers||0, rev_target_zumen: m.revTargetZumen||0, rev_target_vn: m.revTargetVn||0,
-      osaka_zumen_amt: m.osakaZumenAmt||0, osaka_pers_amt: m.osakaPersAmt||0, tokyo_zumen_amt: m.tokyoZumenAmt||0, tokyo_pers_amt: m.tokyoPersAmt||0, carryover_note: m.carryoverNote||'' });
+      osaka_zumen_amt: m.osakaZumenAmt||0, osaka_pers_amt: m.osakaPersAmt||0, tokyo_zumen_amt: m.tokyoZumenAmt||0, tokyo_pers_amt: m.tokyoPersAmt||0, vn_solo_amt: m.vnSoloAmt||0, carryover_note: m.carryoverNote||'' });
     if (error) { _sbReport('_sbDumpMonthEntities (months)', error, {op:'upsert', table:'months'}); errors++; }
   } catch(e) { _sbReport('_sbDumpMonthEntities (months)', e, {op:'upsert', table:'months'}); errors++; }
 
@@ -10128,16 +10128,20 @@ function _revModel(fy){
     var sm=_somaiNewByDept(mid);
     var pPrice=(mm.targetNew>0)?(tP/12/mm.targetNew):0;
     var zPrice=(mm.targetNewIntl>0)?(tZ/12/mm.targetNewIntl):0;
-    var persRev=sm.studio*pPrice, zumenRev=sm.intl*zPrice;
-    var manualHonsha=(+mm.osakaZumenAmt||0)+(+mm.osakaPersAmt||0)+(+mm.tokyoZumenAmt||0)+(+mm.tokyoPersAmt||0);
-    var honsha = manualHonsha>0 ? manualHonsha : (persRev+zumenRev);
-    var vnSolo=vnRev[mid]||0;
+    // Doanh thu việc Nhật: ưu tiên tiền điền tay theo Osaka/Tokyo (như PDF); nếu chưa nhập -> tính từ số mai 作成 × đơn giá.
+    var persMoney=(+mm.osakaPersAmt||0)+(+mm.tokyoPersAmt||0);
+    var zumenMoney=(+mm.osakaZumenAmt||0)+(+mm.tokyoZumenAmt||0);
+    var persRev = persMoney>0 ? persMoney : sm.studio*pPrice;
+    var zumenRev = zumenMoney>0 ? zumenMoney : sm.intl*zPrice;
+    var honsha = persRev+zumenRev;
+    // ベトナム単独: ưu tiên ô điền tay; nếu 0 -> Σ giá trị hợp đồng dự án VN theo tháng ghi nhận.
+    var vnSolo = (+mm.vnSoloAmt||0)>0 ? (+mm.vnSoloAmt||0) : (vnRev[mid]||0);
     var uriage=honsha+vnSolo;
     cum+=uriage; cumTgt+=monthTgt;
     return { mid:mid, persNew:sm.studio, zumenNew:sm.intl, persRev:persRev, zumenRev:zumenRev, honsha:honsha, vnSolo:vnSolo, uriage:uriage,
       cumSales:cum, cumTgt:cumTgt, monthTgt:monthTgt,
       jpRemit:+(mm.jpRemit||0), vnReceipt:+(mm.vnReceipt||0), hold:+(mm.holdMoney||0), profit:+(mm.realProfit||0),
-      osakaZ:+(mm.osakaZumenAmt||0), osakaP:+(mm.osakaPersAmt||0), tokyoZ:+(mm.tokyoZumenAmt||0), tokyoP:+(mm.tokyoPersAmt||0) };
+      osakaZ:+(mm.osakaZumenAmt||0), osakaP:+(mm.osakaPersAmt||0), tokyoZ:+(mm.tokyoZumenAmt||0), tokyoP:+(mm.tokyoPersAmt||0), vnSoloAmt:+(mm.vnSoloAmt||0) };
   });
   return { mids:mids, tP:tP, tZ:tZ, tV:tV, annualTgt:annualTgt, monthTgt:monthTgt, rows:rows };
 }
@@ -10148,7 +10152,7 @@ function _saveMonthFin(mid, field, val){
   mm[field]=(field==='carryoverNote')?val:(val===''?0:(+val||0));
   save();
   if(window._sbReady){
-    var col={jpRemit:'jp_remit',vnReceipt:'vn_receipt',holdMoney:'hold_money',realProfit:'real_profit',osakaZumenAmt:'osaka_zumen_amt',osakaPersAmt:'osaka_pers_amt',tokyoZumenAmt:'tokyo_zumen_amt',tokyoPersAmt:'tokyo_pers_amt',carryoverNote:'carryover_note'}[field];
+    var col={jpRemit:'jp_remit',vnReceipt:'vn_receipt',holdMoney:'hold_money',realProfit:'real_profit',osakaZumenAmt:'osaka_zumen_amt',osakaPersAmt:'osaka_pers_amt',tokyoZumenAmt:'tokyo_zumen_amt',tokyoPersAmt:'tokyo_pers_amt',vnSoloAmt:'vn_solo_amt',carryoverNote:'carryover_note'}[field];
     if(col){ var o={id:mid}; o[col]=mm[field]; _sb.from('months').upsert(o).then(function(r){ if(r&&r.error)_sbReport('saveMonthFin',r.error,{op:'upsert',table:'months'}); else toast('✓ Đã lưu'); }); }
   }
   try{ renderDashboard(); }catch(e){}
@@ -10207,9 +10211,9 @@ function renderRevenueDashboard(){
           +'<div style="display:flex;align-items:baseline;gap:6px;margin:4px 0"><div style="font-size:24px;font-weight:800;color:#4ade80">'+_fmM(curYearSales)+'</div><div style="font-size:12px;color:#8fa1bd">/ '+_fmM(M.annualTgt)+'万円</div></div>'
           +'<div style="height:6px;background:#24304a;border-radius:9px;overflow:hidden"><div style="width:'+Math.min(100,progRate)+'%;height:100%;background:linear-gradient(90deg,#38bdf8,#4ade80)"></div></div>'
           +'<div style="font-size:10px;margin-top:4px"><span style="color:#4ade80;font-weight:700">年間進捗率 '+progRate+'%</span> · 月間達成率 '+mRate+'%</div></div>'
-        +card('#4ade80','パース Phối cảnh (JP)','revTargetPers',M.tP,persActual,'từ 作成 số mai × đơn giá')
-        +card('#818cf8','図面 Bản vẽ Nhật (JP)','revTargetZumen',M.tZ,zumenActual,'từ 作成 số mai × đơn giá')
-        +card('#fbbf24','🇻🇳 Việc Việt Nam','revTargetVn',M.tV,vnActual,'từ giá trị hợp đồng dự án')
+        +card('#4ade80','パース Phối cảnh (JP)','revTargetPers',M.tP,persActual,'tiền パース Osaka/Tokyo (hoặc 作成×đơn giá)')
+        +card('#818cf8','図面 Bản vẽ Nhật (JP)','revTargetZumen',M.tZ,zumenActual,'tiền 図面 Osaka/Tokyo (hoặc 作成×đơn giá)')
+        +card('#fbbf24','🇻🇳 Việc Việt Nam','revTargetVn',M.tV,vnActual,'ô ベトナム単独 hoặc Σ hợp đồng')
       +'</div>'
       +'<div style="background:#182338;border:1px solid #2b3a58;border-radius:8px;padding:6px 11px;margin-bottom:12px;font-size:10px;color:#c8d6e5">💡 Chỉ tiêu năm chia đều 12 tháng. Việc Nhật: doanh thu = số mai 作成 × đơn giá (đơn giá = chỉ tiêu tiền tháng ÷ mục tiêu số mai). 修正 chỉ thống kê, không tính tiền. Việc VN: Σ giá trị hợp đồng theo tháng ghi nhận.</div>'
       +'<div style="background:#141d30;border:1px solid #24304a;border-radius:11px;padding:10px 12px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">売上 Doanh số thực tế vs Đường mục tiêu tích lũy <span style="color:#8fa1bd;font-weight:400;font-size:10px">(万円)</span></div>'+svg
@@ -10237,7 +10241,7 @@ function _jissekiTableHtml(M, editable){
   h+='<tr>'+cell('A2','center')+R.map(function(){return cell('');}).join('')+cell('')+'</tr>';
   h+='<tr>'+lab('パース（枚）',2)+R.map(function(r){return cell(r.persNew||'');}).join('')+cell(totP||'','right',true)+'</tr>';
   h+='<tr>'+lab('本社下請（万円）',2)+R.map(function(r){return cell(_fmM(r.honsha));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.honsha;},0)),'right',true)+'</tr>';
-  h+='<tr>'+lab('ベトナム単独（万円）',2)+R.map(function(r){return cell(_fmM(r.vnSolo));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.vnSolo;},0)),'right',true)+'</tr>';
+  h+='<tr>'+lab('ベトナム単独（万円）',2)+R.map(function(r){return cell(inp(r.mid,'vnSoloAmt',r.vnSoloAmt||(r.vnSolo>0?r.vnSolo:'')));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.vnSolo;},0)),'right',true)+'</tr>';
   h+='<tr>'+lab('日本送金（万円）',2)+R.map(function(r){return cell(inp(r.mid,'jpRemit',r.jpRemit));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.jpRemit;},0)),'right',true)+'</tr>';
   h+='<tr>'+lab('ベトナム入金（万円）',2)+R.map(function(r){return cell(inp(r.mid,'vnReceipt',r.vnReceipt));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.vnReceipt;},0)),'right',true)+'</tr>';
   h+='<tr>'+lab('⇒保留金（万円）',2)+R.map(function(r){return cell(inp(r.mid,'holdMoney',r.hold));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.hold;},0)),'right',true)+'</tr>';

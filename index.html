@@ -3071,9 +3071,9 @@ function _dbgCount(status){
       (g.rows||[]).forEach(function(r){
         if(r.status!==status) return;
         let why='';
-        if(r.isCarryRef) why='carryRef';
+        if(r.isCarryRef) why='carryRef (đã tính tháng gốc)';
         else if(r.tentative) why='dự kiến';
-        else if(!_rowCountsIn(r,fm)) why = r.doneAt ? ('UP tháng '+String(r.doneAt).slice(0,7)) : ('deadline '+String(r.dateTo).slice(0,7)+' < '+fm);
+        else if(!_rowCountsIn(r,fm)){ const cands=[_ymKey(r.doneAt),_ymKey(r.dateTo),_ymKey(r.dateFrom),_ymKey(r.originMonth)].filter(function(v){return v!=null;}); const mn=cands.length?Math.min.apply(null,cands):null; why='tạo tháng khác ('+(r.originMonth||(r.dateTo||r.doneAt||'').slice(0,7)||'?')+')'; }
         const counted = (why==='');
         if(counted) total+=(r.qty||0);
         rows.push({pj:(p.nameVN||p.nameJP||'—'), item:(g.type||'—'), staff:(r.staff||'—'), qty:(r.qty||0),
@@ -3159,15 +3159,20 @@ function getPjGlobal(id) {
   return null;
 }
 
-// Một dòng có được TÍNH số mai vào tháng `forMonth` không?
-//  • Đã UP (doneAt): CHỈ tính vào đúng tháng doneAt (sản xuất thật ở tháng đó).
-//  • Chưa UP: tính vào forMonth (kế hoạch tháng này), TRỪ dòng lịch sử tải lại (deadline ở tháng TRƯỚC forMonth).
-// -> Dự án tải từ lịch sử: các dòng đã UP ở quá khứ KHÔNG cộng nhầm vào tháng hiện tại.
+// NGUYÊN TẮC: số mai tính vào THÁNG TẠO MỚI (originMonth) của hạng mục — KHÔNG phải tháng hoàn thành.
+//  • Dòng có originMonth: chỉ tính vào ĐÚNG tháng đó (chống: carryover sang tháng sau tính lại,
+//    và công trình tải từ lịch sử tính nhầm vào tháng mới).
+//  • Dòng cũ không có originMonth: tính theo tháng dự án đang chứa (giữ nguyên như trước).
 function _rowCountsIn(r, forMonth){
   const fm=_ymKey(forMonth); if(fm==null) return true;
-  if(r.doneAt){ const dk=_ymKey(r.doneAt); return dk!=null ? dk===fm : true; }
-  const dt=_ymKey(r.dateTo);
-  if(dt!=null && dt<fm) return false;
+  let om=_ymKey(r.originMonth);
+  if(om!=null){
+    // Chống dữ liệu CŨ: công trình tải lịch sử trước đây bị gán originMonth = tháng tải về,
+    // nhưng ngày làm/UP thực tế ở tháng TRƯỚC. Lấy tháng SỚM NHẤT trong các mốc ngày làm cơ sở.
+    const cands=[_ymKey(r.doneAt),_ymKey(r.dateTo)].filter(function(v){return v!=null;});
+    if(cands.length){ const mn=Math.min.apply(null,cands); if(mn<om) om=mn; }
+    return om===fm;
+  }
   return true;
 }
 function totalNew(p, forMonth) {
@@ -9969,7 +9974,9 @@ async function cloneProjectFromHistory(srcPj, srcMonthId) {
       dateFrom: r.dateFrom || '', dateTo: r.dateTo || '', upTime: r.upTime || '',
       doneAt: r.doneAt || '', upScore: (r.upScore != null ? r.upScore : null),
       tentative: !!r.tentative, paperSize: r.paperSize || '',
-      originMonth: D.activeMonth, chainId: gid(),
+      // GIỮ THÁNG TẠO GỐC: số mai của dòng lịch sử KHÔNG tính vào tháng đang tải về.
+      // Ưu tiên originMonth cũ -> tháng UP (doneAt) -> tháng nguồn tải về.
+      originMonth: (r.originMonth || (r.doneAt ? String(r.doneAt).slice(0,7) : (srcMonthId || D.activeMonth))), chainId: gid(),
       rate0:r.rate0||0,rate1:r.rate1||0,rate2:r.rate2||0,rate3:r.rate3||0,rate4:r.rate4||0,rate5:r.rate5||0,
       rate6:r.rate6||0,rate7:r.rate7||0,rate8:r.rate8||0,rate9:r.rate9||0,rate10:r.rate10||0,
       rate11:r.rate11||0,rate12:r.rate12||0,rate13:r.rate13||0,rate14:r.rate14||0,rate15:r.rate15||0,

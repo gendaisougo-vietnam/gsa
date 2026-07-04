@@ -1635,7 +1635,9 @@ async function sbLoadAll() {
   else console.warn('[Photos] photoRows EMPTY — kiểm tra RLS bảng project_photos');
   for (const m of (monthRows || [])) {
     result.months[m.id] = { projects: [], projectsVN: [], targetNew: m.target_new, targetRev: m.target_rev, targetNewIntl: m.target_new_intl||0, targetRevIntl: m.target_rev_intl||0,
-      revenueTarget: (m.revenue_target==null?0:m.revenue_target), jpRemit: (m.jp_remit==null?0:m.jp_remit), vnReceipt: (m.vn_receipt==null?0:m.vn_receipt), holdMoney: (m.hold_money==null?0:m.hold_money), realProfit: (m.real_profit==null?0:m.real_profit) };
+      revenueTarget: (m.revenue_target==null?0:m.revenue_target), jpRemit: (m.jp_remit==null?0:m.jp_remit), vnReceipt: (m.vn_receipt==null?0:m.vn_receipt), holdMoney: (m.hold_money==null?0:m.hold_money), realProfit: (m.real_profit==null?0:m.real_profit),
+      revTargetPers:(m.rev_target_pers==null?0:m.rev_target_pers), revTargetZumen:(m.rev_target_zumen==null?0:m.rev_target_zumen), revTargetVn:(m.rev_target_vn==null?0:m.rev_target_vn),
+      osakaZumenAmt:(m.osaka_zumen_amt==null?0:m.osaka_zumen_amt), osakaPersAmt:(m.osaka_pers_amt==null?0:m.osaka_pers_amt), tokyoZumenAmt:(m.tokyo_zumen_amt==null?0:m.tokyo_zumen_amt), tokyoPersAmt:(m.tokyo_pers_amt==null?0:m.tokyo_pers_amt), carryoverNote:(m.carryover_note||'') };
   }
   for (const p of (projectRows || [])) {
     if (!result.months[p.month_id]) continue;
@@ -3485,7 +3487,9 @@ async function _sbDumpMonthEntities(mid) {
   // 1. months
   try {
     const { error } = await _sb.from('months').upsert({ id: mid, target_new: m.targetNew || 0, target_rev: m.targetRev || 0, target_new_intl: m.targetNewIntl || 0, target_rev_intl: m.targetRevIntl || 0,
-      revenue_target: m.revenueTarget||0, jp_remit: m.jpRemit||0, vn_receipt: m.vnReceipt||0, hold_money: m.holdMoney||0, real_profit: m.realProfit||0 });
+      revenue_target: m.revenueTarget||0, jp_remit: m.jpRemit||0, vn_receipt: m.vnReceipt||0, hold_money: m.holdMoney||0, real_profit: m.realProfit||0,
+      rev_target_pers: m.revTargetPers||0, rev_target_zumen: m.revTargetZumen||0, rev_target_vn: m.revTargetVn||0,
+      osaka_zumen_amt: m.osakaZumenAmt||0, osaka_pers_amt: m.osakaPersAmt||0, tokyo_zumen_amt: m.tokyoZumenAmt||0, tokyo_pers_amt: m.tokyoPersAmt||0, carryover_note: m.carryoverNote||'' });
     if (error) { _sbReport('_sbDumpMonthEntities (months)', error, {op:'upsert', table:'months'}); errors++; }
   } catch(e) { _sbReport('_sbDumpMonthEntities (months)', e, {op:'upsert', table:'months'}); errors++; }
 
@@ -10087,6 +10091,178 @@ async function deletePj(id) {
   _sbAuditLog('delete', 'projects', id, 'Xóa dự án: "' + (p.nameVN || p.nameJP || id) + '"');
 }
 
+/* ═══════════════════ GĐ3: DASHBOARD DOANH SỐ (第41期 実績) ═══════════════════ */
+// Năm tài chính: Tháng 5 → Tháng 4 năm sau.
+function _fyStartYear(mid){ var p=String(mid||D.activeMonth||'').split('-').map(Number); if(p.length<2)return new Date().getFullYear(); return p[1]>=5?p[0]:p[0]-1; }
+function _fyMonths(y){ var a=[]; for(var m=5;m<=12;m++)a.push(y+'-'+('0'+m).slice(-2)); for(var m2=1;m2<=4;m2++)a.push((y+1)+'-'+('0'+m2).slice(-2)); return a; }
+var _FY_LABELS=['5月','6月','7月','8月','9月','10月','11月','12月','1月','2月','3月','4月'];
+function _fmM(n){ n=+n||0; return n===0?'':(Math.round(n*10)/10).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1}); }
+function _fmPct(a,b){ if(!b) return '–'; return Math.round(a/b*100)+'%'; }
+
+// Số mai 作成 (làm mới) theo phòng trong 1 tháng: studio=パース(phối cảnh), intl=図面(bản vẽ Nhật)
+function _somaiNewByDept(mid){
+  var mm=D.months[mid]||{projects:[]}; var studio=0, intl=0;
+  (mm.projects||[]).forEach(function(p){ (p.groups||[]).forEach(function(g){ var dept=g.dept||'studio';
+    (g.rows||[]).forEach(function(r){ if(r.status==='new' && !r.isCarryRef && !r.tentative && _rowCountsIn(r,mid)){ if(dept==='intl') intl+=(r.qty||0); else studio+=(r.qty||0); } });
+  }); });
+  return {studio:studio, intl:intl};
+}
+// Doanh thu việc VN theo tháng ghi nhận (revenueMonth) — chống trùng dự án carryover theo tên
+function _vnRevByMonth(){
+  var out={}; var seen={};
+  Object.keys(D.months||{}).forEach(function(mid){ var mm=D.months[mid]||{};
+    (mm.projectsVN||[]).forEach(function(p){ if(p.revenueMonth && (+p.contractValue||0)>0){ var k=(p.nameVN||p.nameJP||p.id)+'|'+p.revenueMonth+'|'+p.contractValue; if(!seen[k]){ seen[k]=1; out[p.revenueMonth]=(out[p.revenueMonth]||0)+(+p.contractValue||0); } } });
+  });
+  return out;
+}
+// Mô hình doanh số 1 năm tài chính
+function _revModel(fy){
+  var mids=_fyMonths(fy);
+  var tP=0,tZ=0,tV=0;
+  mids.forEach(function(mid){ var mm=D.months[mid]; if(mm){ if(mm.revTargetPers)tP=+mm.revTargetPers; if(mm.revTargetZumen)tZ=+mm.revTargetZumen; if(mm.revTargetVn)tV=+mm.revTargetVn; } });
+  var annualTgt=tP+tZ+tV; var monthTgt=annualTgt/12;
+  var vnRev=_vnRevByMonth();
+  var cum=0, cumTgt=0;
+  var rows=mids.map(function(mid){
+    var mm=D.months[mid]||{};
+    var sm=_somaiNewByDept(mid);
+    var pPrice=(mm.targetNew>0)?(tP/12/mm.targetNew):0;
+    var zPrice=(mm.targetNewIntl>0)?(tZ/12/mm.targetNewIntl):0;
+    var persRev=sm.studio*pPrice, zumenRev=sm.intl*zPrice;
+    var manualHonsha=(+mm.osakaZumenAmt||0)+(+mm.osakaPersAmt||0)+(+mm.tokyoZumenAmt||0)+(+mm.tokyoPersAmt||0);
+    var honsha = manualHonsha>0 ? manualHonsha : (persRev+zumenRev);
+    var vnSolo=vnRev[mid]||0;
+    var uriage=honsha+vnSolo;
+    cum+=uriage; cumTgt+=monthTgt;
+    return { mid:mid, persNew:sm.studio, zumenNew:sm.intl, persRev:persRev, zumenRev:zumenRev, honsha:honsha, vnSolo:vnSolo, uriage:uriage,
+      cumSales:cum, cumTgt:cumTgt, monthTgt:monthTgt,
+      jpRemit:+(mm.jpRemit||0), vnReceipt:+(mm.vnReceipt||0), hold:+(mm.holdMoney||0), profit:+(mm.realProfit||0),
+      osakaZ:+(mm.osakaZumenAmt||0), osakaP:+(mm.osakaPersAmt||0), tokyoZ:+(mm.tokyoZumenAmt||0), tokyoP:+(mm.tokyoPersAmt||0) };
+  });
+  return { mids:mids, tP:tP, tZ:tZ, tV:tV, annualTgt:annualTgt, monthTgt:monthTgt, rows:rows };
+}
+
+// Lưu 1 ô tài chính THÁNG (điền tay) — mid = tháng của ô đó
+function _saveMonthFin(mid, field, val){
+  mid=mid||D.activeMonth; var mm=D.months[mid]; if(!mm){ mm=D.months[mid]={projects:[],projectsVN:[],targetNew:0,targetRev:0}; }
+  mm[field]=(field==='carryoverNote')?val:(val===''?0:(+val||0));
+  save();
+  if(window._sbReady){
+    var col={jpRemit:'jp_remit',vnReceipt:'vn_receipt',holdMoney:'hold_money',realProfit:'real_profit',osakaZumenAmt:'osaka_zumen_amt',osakaPersAmt:'osaka_pers_amt',tokyoZumenAmt:'tokyo_zumen_amt',tokyoPersAmt:'tokyo_pers_amt',carryoverNote:'carryover_note'}[field];
+    if(col){ var o={id:mid}; o[col]=mm[field]; _sb.from('months').upsert(o).then(function(r){ if(r&&r.error)_sbReport('saveMonthFin',r.error,{op:'upsert',table:'months'}); else toast('✓ Đã lưu'); }); }
+  }
+  try{ renderDashboard(); }catch(e){}
+}
+// Lưu chỉ tiêu doanh thu NĂM (ghi vào TẤT CẢ tháng cùng năm TC)
+function _saveAnnualTarget(field, val){
+  var v=(val===''?0:+val||0); var fy=_fyStartYear(D.activeMonth); var mids=_fyMonths(fy);
+  var col={revTargetPers:'rev_target_pers',revTargetZumen:'rev_target_zumen',revTargetVn:'rev_target_vn'}[field];
+  mids.forEach(function(mid){ if(!D.months[mid]) D.months[mid]={projects:[],projectsVN:[],targetNew:0,targetRev:0}; D.months[mid][field]=v; });
+  save();
+  if(window._sbReady && col){ mids.forEach(function(mid){ var o={id:mid}; o[col]=v; _sb.from('months').upsert(o).then(function(r){ if(r&&r.error)_sbReport('saveAnnualTarget',r.error,{op:'upsert',table:'months'}); }); }); toast('✓ Đã lưu chỉ tiêu năm'); }
+  try{ renderDashboard(); }catch(e){}
+}
+
+// ── Khối Dashboard doanh số (thẻ + chỉ tiêu phòng + biểu đồ tích lũy) ──
+function renderRevenueDashboard(){
+  var fy=_fyStartYear(D.activeMonth); var M=_revModel(fy);
+  var last=null; M.rows.forEach(function(r){ if(r.uriage>0||r.honsha>0||r.vnSolo>0) last=r; });
+  var curYearSales = M.rows.reduce(function(s,r){return s+r.uriage;},0);
+  var progRate = M.annualTgt>0 ? Math.round(curYearSales/M.annualTgt*100) : 0;
+  // tháng gần nhất có số liệu để tính 月間達成率
+  var mRate = last? Math.round(last.uriage/(M.monthTgt||1)*100) : 0;
+  var persActual = M.rows.reduce(function(s,r){return s+r.persRev;},0);
+  var zumenActual= M.rows.reduce(function(s,r){return s+r.zumenRev;},0);
+  var vnActual   = M.rows.reduce(function(s,r){return s+r.vnSolo;},0);
+  function tInput(field,val){ return '<input type="number" value="'+(val||'')+'" placeholder="0" style="width:78px;background:#eef2f8;color:#15213a;font-weight:700;border:1px solid #c3ccdb;border-radius:5px;padding:3px 6px;font-size:12px" onblur="_saveAnnualTarget(\''+field+'\',this.value)">'; }
+  function card(color,title,tgtField,tgt,actual,note){
+    var pct=tgt>0?Math.round(actual/tgt*100):0;
+    return '<div style="background:var(--table-bg,#141d30);border:1px solid #24304a;border-radius:11px;padding:12px">'
+      +'<div style="font-size:11px;font-weight:700;color:'+color+'">'+title+'</div>'
+      +'<div style="font-size:9px;color:#8fa1bd;margin:5px 0 2px">Chỉ tiêu năm (万円)</div>'
+      +tInput(tgtField,tgt)
+      +'<div style="font-size:9px;color:#8fa1bd;margin-top:6px">Thực đạt</div>'
+      +'<div style="font-size:15px;font-weight:800">'+_fmM(actual)+' <span style="font-size:10px;color:#8fa1bd">· '+pct+'%</span></div>'
+      +'<div style="font-size:8.5px;color:#8fa1bd">'+note+'</div></div>';
+  }
+  // biểu đồ tích lũy (SVG)
+  var maxY=Math.max(M.annualTgt||1, curYearSales)*1.02;
+  function yy(v){ return 118 - (v/maxY)*110; }
+  var tgtPts='', salPts='', cx=44, step=(660-44)/11;
+  M.rows.forEach(function(r,i){ var x=44+step*i; tgtPts+=(x)+','+yy(r.cumTgt)+' '; if(r.uriage>0||i===0||r.cumSales>0) salPts+=(x)+','+yy(r.cumSales)+' '; });
+  var svg='<svg viewBox="0 0 680 135" style="width:100%;height:135px">'
+    +'<line x1="44" y1="118" x2="670" y2="118" stroke="#2b3a58"/><line x1="44" y1="8" x2="44" y2="118" stroke="#2b3a58"/>'
+    +'<polyline fill="none" stroke="#f4c430" stroke-width="2" stroke-dasharray="4 3" points="'+tgtPts.trim()+'"/>'
+    +'<polyline fill="none" stroke="#38bdf8" stroke-width="2.5" points="'+salPts.trim()+'"/>';
+  M.rows.forEach(function(r,i){ if(i%1===0){ var x=44+step*i; svg+='<text x="'+x+'" y="131" fill="#8fa1bd" font-size="8" text-anchor="middle">'+_FY_LABELS[i]+'</text>'; } });
+  svg+='</svg>';
+
+  return '<div class="card" style="margin-bottom:14px">'
+    +'<div class="card-hd"><span class="card-hd-title">💴 Doanh số năm — 第'+((fy-1985))+'期 (TC T5/'+String(fy).slice(2)+'→T4/'+String(fy+1).slice(2)+')</span><span style="flex:1"></span>'
+      +'<button class="btn btn-sm" style="background:#1F3864;color:#fff;border:1px solid #b3c6e6" onclick="_exportJisseki()">🖨 Xuất PDF 実績</button></div>'
+    +'<div style="padding:12px 14px">'
+      +'<div style="display:grid;grid-template-columns:1.1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">'
+        +'<div style="background:#141d30;border:1px solid #2f9e57;border-radius:11px;padding:12px">'
+          +'<div style="font-size:10px;color:#8fa1bd;text-transform:uppercase">売上 Doanh số năm (tổng 3 phòng)</div>'
+          +'<div style="display:flex;align-items:baseline;gap:6px;margin:4px 0"><div style="font-size:24px;font-weight:800;color:#4ade80">'+_fmM(curYearSales)+'</div><div style="font-size:12px;color:#8fa1bd">/ '+_fmM(M.annualTgt)+'万円</div></div>'
+          +'<div style="height:6px;background:#24304a;border-radius:9px;overflow:hidden"><div style="width:'+Math.min(100,progRate)+'%;height:100%;background:linear-gradient(90deg,#38bdf8,#4ade80)"></div></div>'
+          +'<div style="font-size:10px;margin-top:4px"><span style="color:#4ade80;font-weight:700">年間進捗率 '+progRate+'%</span> · 月間達成率 '+mRate+'%</div></div>'
+        +card('#4ade80','パース Phối cảnh (JP)','revTargetPers',M.tP,persActual,'từ 作成 số mai × đơn giá')
+        +card('#818cf8','図面 Bản vẽ Nhật (JP)','revTargetZumen',M.tZ,zumenActual,'từ 作成 số mai × đơn giá')
+        +card('#fbbf24','🇻🇳 Việc Việt Nam','revTargetVn',M.tV,vnActual,'từ giá trị hợp đồng dự án')
+      +'</div>'
+      +'<div style="background:#182338;border:1px solid #2b3a58;border-radius:8px;padding:6px 11px;margin-bottom:12px;font-size:10px;color:#c8d6e5">💡 Chỉ tiêu năm chia đều 12 tháng. Việc Nhật: doanh thu = số mai 作成 × đơn giá (đơn giá = chỉ tiêu tiền tháng ÷ mục tiêu số mai). 修正 chỉ thống kê, không tính tiền. Việc VN: Σ giá trị hợp đồng theo tháng ghi nhận.</div>'
+      +'<div style="background:#141d30;border:1px solid #24304a;border-radius:11px;padding:10px 12px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">売上 Doanh số thực tế vs Đường mục tiêu tích lũy <span style="color:#8fa1bd;font-weight:400;font-size:10px">(万円)</span></div>'+svg
+        +'<div style="display:flex;gap:14px;font-size:10px;color:#8fa1bd"><span><span style="display:inline-block;width:12px;height:3px;background:#38bdf8;vertical-align:middle"></span> Thực tế</span><span><span style="display:inline-block;width:12px;height:2px;background:#f4c430;vertical-align:middle"></span> Mục tiêu tích lũy</span></div></div>'
+    +'</div></div>' + '<div class="card" style="margin-bottom:14px"><div class="card-hd"><span class="card-hd-title">📄 Bảng 実績 (điền tay ô tiền theo tháng)</span></div><div style="padding:10px 12px;overflow-x:auto">'+_jissekiTableHtml(M,true)+'</div></div>';
+}
+
+// Bảng 実績 đầy đủ. editable=true -> ô tiền điền tay (dashboard); false -> giấy trắng để in PDF.
+function _jissekiTableHtml(M, editable){
+  var bd2=editable?'#22304a':'#ccc'; var txtC=editable?'#e4e9f2':'#000';
+  function inp(mid,field,val){ if(!editable) return _fmM(val);
+    return '<input type="number" value="'+(val||'')+'" style="width:48px;background:#0e1729;color:#e4e9f2;border:1px solid #33415a;border-radius:3px;text-align:right;font-size:10px;padding:1px 2px" onblur="_saveMonthFin(\''+mid+'\',\''+field+'\',this.value)">'; }
+  function cell(inner,al,strong){ return '<td style="border:1px solid '+bd2+';padding:2px 4px;text-align:'+(al||'right')+';color:'+txtC+';'+(strong?'font-weight:700':'')+'">'+(inner==null?'':inner)+'</td>'; }
+  function lab(t,span){ return '<td colspan="'+(span||1)+'" style="border:1px solid '+bd2+';padding:2px 4px;text-align:left;color:'+txtC+';font-weight:600">'+t+'</td>'; }
+  var R=M.rows;
+  var h='<table style="border-collapse:collapse;width:100%;font-size:'+(editable?'10px':'9px')+';line-height:1.15;color:'+txtC+';white-space:nowrap">';
+  h+='<tr style="font-weight:700"><td colspan="2" style="border:1px solid '+bd2+';padding:2px 4px;text-align:center;color:'+txtC+'">月間目標額</td><td colspan="5" style="border:1px solid '+bd2+';padding:2px 4px;text-align:center;color:'+txtC+'">'+_fmM(M.monthTgt)+'万円</td><td colspan="3" style="border:1px solid '+bd2+';padding:2px 4px;text-align:center;color:'+txtC+'">年間目標額</td><td colspan="3" style="border:1px solid '+bd2+';padding:2px 4px;text-align:center;color:'+txtC+'">'+_fmM(M.annualTgt)+'万円</td></tr>';
+  h+='<tr style="font-weight:700"><td colspan="2" style="border:1px solid '+bd2+'"></td>'+_FY_LABELS.map(function(l){return '<td style="border:1px solid '+bd2+';padding:2px 3px;text-align:center;color:'+txtC+'">'+l+'</td>';}).join('')+cell('合計','center',true)+'</tr>';
+  h+='<tr>'+lab('',2)+R.map(function(r){return cell(_fmM(r.cumTgt));}).join('')+cell('')+'</tr>';
+  h+='<tr>'+lab('年間出来高',2)+R.map(function(r){return cell(r.cumSales>0?_fmPct(r.cumSales,M.annualTgt):'');}).join('')+cell(_fmPct(R.length?R[R.length-1].cumSales:0,M.annualTgt))+'</tr>';
+  h+='<tr>'+lab('年間進捗率',2)+R.map(function(r){return cell(r.cumSales>0?_fmPct(r.cumSales,r.cumTgt):'');}).join('')+cell('–')+'</tr>';
+  h+='<tr>'+lab('月間達成率',2)+R.map(function(r){return cell(r.uriage>0?_fmPct(r.uriage,M.monthTgt):'');}).join('')+cell('–')+'</tr>';
+  var totZ=R.reduce(function(s,r){return s+r.zumenNew;},0), totP=R.reduce(function(s,r){return s+r.persNew;},0);
+  h+='<tr><td rowspan="2" style="border:1px solid '+bd2+';padding:2px 4px;text-align:center;font-weight:600;color:'+txtC+'">図面（枚）</td>'+cell('A1','center')+R.map(function(r){return cell(r.zumenNew||'');}).join('')+cell(totZ||'','right',true)+'</tr>';
+  h+='<tr>'+cell('A2','center')+R.map(function(){return cell('');}).join('')+cell('')+'</tr>';
+  h+='<tr>'+lab('パース（枚）',2)+R.map(function(r){return cell(r.persNew||'');}).join('')+cell(totP||'','right',true)+'</tr>';
+  h+='<tr>'+lab('本社下請（万円）',2)+R.map(function(r){return cell(_fmM(r.honsha));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.honsha;},0)),'right',true)+'</tr>';
+  h+='<tr>'+lab('ベトナム単独（万円）',2)+R.map(function(r){return cell(_fmM(r.vnSolo));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.vnSolo;},0)),'right',true)+'</tr>';
+  h+='<tr>'+lab('日本送金（万円）',2)+R.map(function(r){return cell(inp(r.mid,'jpRemit',r.jpRemit));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.jpRemit;},0)),'right',true)+'</tr>';
+  h+='<tr>'+lab('ベトナム入金（万円）',2)+R.map(function(r){return cell(inp(r.mid,'vnReceipt',r.vnReceipt));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.vnReceipt;},0)),'right',true)+'</tr>';
+  h+='<tr>'+lab('⇒保留金（万円）',2)+R.map(function(r){return cell(inp(r.mid,'holdMoney',r.hold));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.hold;},0)),'right',true)+'</tr>';
+  h+='<tr>'+lab('実利益（万円）',2)+R.map(function(r){return cell(inp(r.mid,'realProfit',r.profit));}).join('')+cell(_fmM(R.reduce(function(s,r){return s+r.profit;},0)),'right',true)+'</tr>';
+  h+='</table>';
+  var c2='<table style="border-collapse:collapse;width:100%;font-size:'+(editable?'10px':'9px')+';line-height:1.15;margin-top:8px;color:'+txtC+';white-space:nowrap">';
+  c2+='<tr style="font-weight:700"><td colspan="2" style="border:1px solid '+bd2+'"></td>'+_FY_LABELS.map(function(l){return '<td style="border:1px solid '+bd2+';padding:2px 3px;text-align:center;color:'+txtC+'">'+l+'</td>';}).join('')+cell('合計','center',true)+'</tr>';
+  function regRows(reg,zf,pf){ var zTot=0,pTot=0;
+    var rz='<tr><td rowspan="3" style="border:1px solid '+bd2+';padding:2px 4px;text-align:center;font-weight:700;color:'+txtC+'">'+reg+'</td>'+cell('図面（万円）','left')+R.map(function(r){zTot+=r[zf];return cell(inp(r.mid,zf,r[zf]));}).join('')+cell(_fmM(zTot),'right',true)+'</tr>';
+    var rp='<tr>'+cell('パース（万円）','left')+R.map(function(r){pTot+=r[pf];return cell(inp(r.mid,pf,r[pf]));}).join('')+cell(_fmM(pTot),'right',true)+'</tr>';
+    var rt='<tr>'+cell('Total','left')+R.map(function(r){return cell(_fmM((r[zf]||0)+(r[pf]||0)));}).join('')+cell(_fmM(zTot+pTot),'right',true)+'</tr>';
+    return rz+rp+rt; }
+  c2+=regRows('大阪','osakaZ','osakaP')+regRows('東京','tokyoZ','tokyoP')+'</table>';
+  return h+'<div style="font-weight:700;font-size:'+(editable?'11px':'10px')+';margin:8px 0 3px;color:'+txtC+'">大阪・東京別　比較表</div>'+c2;
+}
+function _exportJisseki(){
+  var fy=_fyStartYear(D.activeMonth); var M=_revModel(fy);
+  var w=window.open('','_blank'); if(!w){ alert('Trình duyệt chặn popup. Hãy cho phép popup để xuất PDF.'); return; }
+  var body='<div style="text-align:center;font-weight:800;font-size:15px;letter-spacing:2px">第'+(fy-1985)+'期　ベトナム実績</div>'
+    +'<div style="text-align:right;font-size:9px;color:#333;margin:2px 0 8px">'+new Date().toLocaleDateString('ja-JP')+'作成 · 現代綜合設計ベトナム</div>'
+    +_jissekiTableHtml(M,false);
+  w.document.write('<html><head><meta charset="utf-8"><title>第'+(fy-1985)+'期 ベトナム実績</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:"Noto Sans JP",sans-serif;margin:0;padding:6px}</style></head><body>'+body+'<scr'+'ipt>window.onload=function(){setTimeout(function(){window.print();},350);}</scr'+'ipt></body></html>');
+  w.document.close();
+}
+
 /* DASHBOARD */
 function renderDashboard() {
   const year=document.getElementById('dashYear')?.value||new Date().getFullYear().toString();
@@ -10358,7 +10534,7 @@ function renderDashboard() {
   const _totTgtD = mData.reduce((s,m)=>s+(m.tN||0)+(m.tR||0),0);
   const _prodPctD = _totTgtD>0?Math.round((totN+totR)/_totTgtD*100):0;
   const _prodColD = _prodPctD>=100?'#27ae60':_prodPctD>=80?'#f39c12':'#e74c3c';
-  dc.innerHTML=`
+  dc.innerHTML=(function(){ try{ return renderRevenueDashboard(); }catch(e){ console.warn('revDash',e); return ''; } })()+`
   <!-- Tổng quan năm: gauge năng suất -->
   <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:16px 20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
     <div style="position:relative;width:132px;height:132px;flex-shrink:0">

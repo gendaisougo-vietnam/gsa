@@ -3061,6 +3061,37 @@ function _rowCountFor(p, status, deptFilter){
   if(deptFilter!=='intl') (p.records||[]).forEach(function(r){ if(r.status===status) s+=(r.qty||0); });
   return s;
 }
+// ── CHẨN ĐOÁN TẠM: liệt kê từng dòng đang được tính số mai của tháng đang xem ──
+function _dbgCount(status){
+  status=status||'new';
+  const fm=D.activeMonth; let total=0; const rows=[];
+  curProjects().forEach(function(p){
+    (p.groups||[]).forEach(function(g){
+      if(!_groupInDept(g)) return;
+      (g.rows||[]).forEach(function(r){
+        if(r.status!==status) return;
+        let why='';
+        if(r.isCarryRef) why='carryRef';
+        else if(r.tentative) why='dự kiến';
+        else if(!_rowCountsIn(r,fm)) why = r.doneAt ? ('UP tháng '+String(r.doneAt).slice(0,7)) : ('deadline '+String(r.dateTo).slice(0,7)+' < '+fm);
+        const counted = (why==='');
+        if(counted) total+=(r.qty||0);
+        rows.push({pj:(p.nameVN||p.nameJP||'—'), item:(g.type||'—'), staff:(r.staff||'—'), qty:(r.qty||0),
+          doneAt:(r.doneAt||'').slice(0,10)||'—', dateTo:(r.dateTo||'—'), origin:(r.originMonth||'—'), counted, why:why||'✓ TÍNH'});
+      });
+    });
+  });
+  rows.sort(function(a,b){ return (b.counted?1:0)-(a.counted?1:0); });
+  const th='padding:3px 6px;border-bottom:1px solid #2b3a58;font-size:10px;text-align:left;white-space:nowrap';
+  const td='padding:3px 6px;border-bottom:1px solid #22304a;font-size:10px;white-space:nowrap';
+  const body=rows.map(function(r){ return '<tr style="background:'+(r.counted?'#12341f':'#3a1f1f')+'"><td style="'+td+'">'+x(r.pj)+'</td><td style="'+td+'">'+x(r.item)+'</td><td style="'+td+'">'+x(r.staff)+'</td><td style="'+td+';text-align:right;font-weight:700">'+r.qty+'</td><td style="'+td+'">'+r.doneAt+'</td><td style="'+td+'">'+r.dateTo+'</td><td style="'+td+'">'+r.origin+'</td><td style="'+td+';color:'+(r.counted?'#4ade80':'#f87171')+';font-weight:700">'+x(r.why)+'</td></tr>'; }).join('');
+  showModal('<h3 style="margin-bottom:6px">🔍 Chẩn đoán số mai '+(status==='new'?'作成':'修正')+' — '+fm+'</h3>'
+    +'<div style="font-size:12px;margin-bottom:8px">Tổng đang tính: <b style="color:#4ade80;font-size:15px">'+total+'</b> · Dòng xanh = được tính, dòng đỏ = bị loại (lý do ở cột cuối).</div>'
+    +'<div style="max-height:60vh;overflow:auto"><table style="border-collapse:collapse;width:100%"><thead><tr>'
+    +'<th style="'+th+'">Dự án</th><th style="'+th+'">Hạng mục</th><th style="'+th+'">Người</th><th style="'+th+'">Mai</th><th style="'+th+'">UP ngày</th><th style="'+th+'">Deadline</th><th style="'+th+'">Origin</th><th style="'+th+'">Trạng thái tính</th>'
+    +'</tr></thead><tbody>'+body+'</tbody></table></div>'
+    +'<div class="modal-ft"><button class="btn" onclick="closeModal()">Đóng</button></div>');
+}
 function curProjects() {
   const m = curMonth();
   if (activeSection==='vn') return m.projectsVN||[];
@@ -4789,7 +4820,7 @@ function renderMonthOverview(ci) {
     <div class="hero-box green" style="padding:11px 14px">
       <div class="hero-lbl" style="margin-bottom:4px">作成 — Làm mới</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-        <div class="hero-num" id="heroSumNew" data-count="${sumNew}" style="font-size:32px">${sumNew}</div>
+        <div class="hero-num" id="heroSumNew" data-count="${sumNew}" style="font-size:32px;cursor:pointer" title="Bấm để xem chi tiết cách tính số mai (chẩn đoán)" onclick="_dbgCount('new')">${sumNew}</div>
         <div style="position:relative;width:42px;height:42px;flex-shrink:0">${_ringSvg(pctNew,'#ffffff',42,'rgba(255,255,255,.28)')}<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff">${pctNew}%</span></div>
       </div>
       <div class="progress-track" style="margin-top:6px"><div class="progress-fill green" id="prgNew" style="width:${pctNew}%"></div></div>

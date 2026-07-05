@@ -10550,88 +10550,10 @@ function renderDashboard() {
     <div><span data-count="${totR}" style="font-size:22px;font-weight:800;color:#7F6000">${totR}</span> <span style="font-size:10px;color:#888">修正 sửa</span></div>
     <div><span data-count="${Math.round(totOT)}" data-suffix="h" style="font-size:22px;font-weight:800;color:var(--orange)">${totOT.toFixed(0)}h</span> <span style="font-size:10px;color:#888">OT</span></div>
   </div></div>
-  <!-- Realtime panels -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
-    <!-- Hôm nay UP -->
-    <div class="card" style="border-top:3px solid #e74c3c">
-      <div class="card-hd"><span class="card-hd-title">🔴 Hôm nay UP (${todayStr2.slice(5).replace('-','/')})</span>
-        <span style="font-size:18px;font-weight:900;color:#e74c3c">${todayUps.length}</span></div>
-      <div class="card-body" style="padding:8px;max-height:160px;overflow-y:auto">
-        ${todayUps.length===0
-          ? '<div style="text-align:center;color:var(--gray4);font-size:11px;padding:12px">Không có hạng mục UP hôm nay</div>'
-          : todayUps.map(u=>`<div style="padding:4px 6px;margin-bottom:3px;border-radius:4px;background:#fff5f5;border-left:3px solid #e74c3c">
-              <div style="font-size:10px;font-weight:700;color:#e74c3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x(u.grp||'—')}</div>
-              <div style="font-size:9px;color:var(--gray4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x(u.pj)} · ${u.staff||'?'}</div>
-            </div>`).join('')}
-      </div>
-    </div>
-    <!-- Sắp UP trong 3 ngày -->
-    <div class="card" style="border-top:3px solid #e67e22">
-      <div class="card-hd"><span class="card-hd-title">⚡ Sắp UP (3 ngày tới)</span>
-        <span style="font-size:18px;font-weight:900;color:#e67e22">${soonUps.length}</span></div>
-      <div class="card-body" style="padding:8px;max-height:160px;overflow-y:auto">
-        ${soonUps.length===0
-          ? '<div style="text-align:center;color:var(--gray4);font-size:11px;padding:12px">Không có hạng mục sắp UP</div>'
-          : soonUps.map(u=>`<div style="padding:4px 6px;margin-bottom:3px;border-radius:4px;background:#fff8f2;border-left:3px solid #e67e22">
-              <div style="font-size:10px;font-weight:700;color:#e67e22;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x(u.grp||'—')}</div>
-              <div style="font-size:9px;color:var(--gray4)">${x(u.pj)} · ${u.staff||'?'} · ${u.date.slice(5).replace('-','/')}</div>
-            </div>`).join('')}
-      </div>
-    </div>
-    <!-- Ai đang rảnh -->
-    <div class="card" style="border-top:3px solid #27ae60">
-      <div class="card-hd"><span class="card-hd-title">✅ Nhân sự rảnh</span>
-        <span style="font-size:18px;font-weight:900;color:#27ae60">${freeStaff.length}</span></div>
-      <div class="card-body" style="padding:8px">
-        ${freeStaff.length===0
-          ? '<div style="text-align:center;color:var(--gray4);font-size:11px;padding:12px">Tất cả đang có lịch</div>'
-          : freeStaff.map(s=>`<div style="display:inline-block;padding:3px 8px;margin:2px;border-radius:99px;background:#e8fdf0;font-size:10px;font-weight:600;color:#27ae60">${s}</div>`).join('')}
-      </div>
-    </div>
-  </div>
-
-  <!-- Đánh giá nhân sự — gộp 1 bảng -->
-  ${leaderboard.length>0?`<div class="card" style="margin-bottom:12px">
-    <div class="card-hd"><span class="card-hd-title">👥 Đánh giá nhân sự — tháng ${D.activeMonth.replace(/^\d{4}-/,'').replace(/^0/,'')}/${D.activeMonth.slice(0,4)}</span></div>
-    <div class="card-body" style="padding:0;overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap">
-        <thead><tr style="background:var(--navy);color:#fff">
-          <th style="padding:6px 10px;text-align:left;width:30px">#</th>
-          <th style="padding:6px 10px;text-align:left">Nhân sự</th>
-          <th style="padding:6px 8px;text-align:center">作成</th>
-          <th style="padding:6px 8px;text-align:center">修正</th>
-          <th style="padding:6px 8px;text-align:center">Tổng</th>
-          <th style="padding:6px 8px;text-align:center">OT</th>
-          <th style="padding:6px 8px;text-align:center">Đúng hạn</th>
-          <th style="padding:6px 8px;text-align:center">Điểm</th>
-          <th style="padding:6px 10px;text-align:center">Xếp loại</th>
-        </tr></thead>
-        <tbody>${leaderboard.map((item,i)=>{
-          const {s,sc2}=item; const sc=sc2.score;
-          const a=staffAnn[s]||{n:0,r:0,ot:0};
-          const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
-          const scoreColor=sc>=8?'#27ae60':sc>=6?'#f39c12':sc>=4?'#e67e22':'#e74c3c';
-          const grade=sc>=8?'🟢 Xuất sắc':sc>=7?'🟢 Tốt':sc>=6?'🟡 Khá':'🔴 Cần cải thiện';
-          return `<tr style="border-bottom:1px solid var(--gray2);background:${i%2?'var(--gray1)':'#fff'}">
-            <td style="padding:6px 10px;font-size:13px">${medal||i+1}</td>
-            <td style="padding:6px 10px;font-weight:600;color:var(--navy)">${s}</td>
-            <td style="padding:6px 8px;text-align:center;color:#375623;font-weight:700">${a.n}</td>
-            <td style="padding:6px 8px;text-align:center;color:#7F6000;font-weight:700">${a.r}</td>
-            <td style="padding:6px 8px;text-align:center;font-weight:700">${a.n+a.r}</td>
-            <td style="padding:6px 8px;text-align:center;color:var(--orange)">${a.ot>0?a.ot.toFixed(1)+'h':'-'}</td>
-            <td style="padding:6px 8px;text-align:center;color:${sc2.onTimeRate>=0.8?'#27ae60':'#e67e22'}">${sc2.totalUp>0?Math.round(sc2.onTimeRate*100)+'%':'-'}</td>
-            <td style="padding:6px 8px;text-align:center;font-size:14px;font-weight:900;color:${scoreColor}">${sc.toFixed(1)}</td>
-            <td style="padding:6px 10px;text-align:center;font-size:11px">${grade}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>
-    </div>
-  </div>`:''}
-
-  <!-- 2 biểu đồ chính -->
-  <div class="dash-grid c2" style="margin-bottom:12px">
-    <div class="chart-box"><h4>Phối cảnh theo tháng</h4><canvas id="cMonthly" height="180"></canvas></div>
-    <div class="chart-box"><h4>Năng suất nhân sự</h4><canvas id="cStaff" height="180"></canvas></div>
+  <!-- Biểu đồ doanh thu 3 phòng theo tháng -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-hd"><span class="card-hd-title">💴 Doanh thu 3 phòng theo tháng — 第41期 (万円)</span></div>
+    <div class="card-body" style="padding:14px 16px 10px"><div style="height:240px"><canvas id="cRevMonth"></canvas></div></div>
   </div>
 
   <!-- Chuyên sâu: KPI 6 nhóm theo phòng (thu gọn) -->
@@ -10646,14 +10568,16 @@ function renderDashboard() {
   `;
   try { _runCountUps(dc); } catch(e){}
   setTimeout(()=>{
-    new Chart(document.getElementById('cMonthly'),{type:'bar',data:{labels,datasets:[
-      {label:'作成 Mới',data:mData.map(m=>m.n),backgroundColor:'#70AD47',borderRadius:3},
-      {label:'修正 Sửa',data:mData.map(m=>m.r),backgroundColor:'#FFC000',borderRadius:3}
-    ]},options:{plugins:{legend:{labels:{font:{size:11}}}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f0f0f0'}}},responsive:true}});
-    new Chart(document.getElementById('cStaff'),{type:'bar',data:{labels:activeS,datasets:[
-      {label:'Mới',data:activeS.map(s=>staffAnn[s].n),backgroundColor:'#70AD47',borderRadius:3},
-      {label:'Sửa',data:activeS.map(s=>staffAnn[s].r),backgroundColor:'#FFC000',borderRadius:3}
-    ]},options:{indexAxis:'y',plugins:{legend:{labels:{font:{size:11}}}},scales:{x:{grid:{color:'#f0f0f0'}},y:{grid:{display:false}}},responsive:true}});
+    try{
+      var _rm=_revModel(_fyStartYear(D.activeMonth));
+      var _r1=function(a){return Math.round((a||0)*10)/10;};
+      var _cv=document.getElementById('cRevMonth');
+      if(_cv) new Chart(_cv,{type:'bar',data:{labels:_FY_LABELS,datasets:[
+        {label:'パース Phối cảnh',data:_rm.rows.map(r=>_r1(r.persRev)),backgroundColor:'#70AD47',borderRadius:3},
+        {label:'図面 Bản vẽ Nhật',data:_rm.rows.map(r=>_r1(r.zumenRev)),backgroundColor:'#4472C4',borderRadius:3},
+        {label:'🇻🇳 Việc VN',data:_rm.rows.map(r=>_r1(r.vnSolo)),backgroundColor:'#FFC000',borderRadius:3}
+      ]},options:{plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+c.parsed.y+'万円';}}}},scales:{x:{grid:{display:false}},y:{grid:{color:'#f0f0f0'},title:{display:true,text:'万円'}}},responsive:true,maintainAspectRatio:false}});
+    }catch(e){ console.warn('cRevMonth',e); }
   },60);
 }
 

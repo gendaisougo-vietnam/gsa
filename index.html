@@ -3261,7 +3261,10 @@ function renderMonthStrip() {
   }
 }
 
-function switchMonth(mid) { D.activeMonth=mid; activePjId=null; save(); renderMonthStrip(); renderSidebar(); renderContent(); }
+function switchMonth(mid) { D.activeMonth=mid; activePjId=null; save(); renderMonthStrip(); renderSidebar(); renderContent();
+  // Nếu đang xem Dashboard thì vẽ lại (Leaderboard/panel UP/… theo tháng đổi theo)
+  try{ if(typeof activePage!=='undefined' && activePage==='dashboard' && typeof renderDashboard==='function') renderDashboard(); }catch(e){}
+}
 function addMonth() {
   const months = Object.keys(D.months).sort();
   const last = months[months.length - 1] || D.activeMonth;

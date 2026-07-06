@@ -1195,6 +1195,7 @@ table.detail-tl tr.staff-last > td {
     <div id="logoMenu" class="hdr-menu" style="display:none;position:absolute;top:calc(100% + 8px);left:0;min-width:220px;background:#fff;border-radius:10px;box-shadow:0 12px 36px rgba(0,0,0,.28);z-index:9999;padding:6px;text-align:left">
       <div style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;padding:5px 12px 3px">Hệ thống</div>
       <button id="navSettings" class="hdr-menu-item" onclick="showPage('settings')">⚙️&nbsp; Cài đặt</button>
+      <button id="navLibrary" class="hdr-menu-item" onclick="showPage('library')">📋&nbsp; Danh sách dự án</button>
       <button id="accountsBtn" class="hdr-menu-item" onclick="openAccountsPanel()" style="display:none">🔑&nbsp; Tài khoản &amp; phân quyền</button>
       <button id="menuReport" class="hdr-menu-item" onclick="openExportMenu()">📤&nbsp; Xuất báo cáo</button>
       <button id="menuTheme" class="hdr-menu-item" onclick="openThemePicker()">🎨&nbsp; Màu giao diện</button>
@@ -1219,7 +1220,6 @@ table.detail-tl tr.staff-last > td {
         <button id="navOrg" class="hdr-menu-item" onclick="showPage('org')">🌐&nbsp; Sơ đồ tổ chức</button>
       </div>
     </div>
-    <button class="nav-btn" id="navLibrary" onclick="showPage('library')">📚 Thư viện</button>
   </div>
   <div class="hdr-divider"></div>
   <div class="hdr-search">
@@ -3258,9 +3258,9 @@ function setSection(sec) {
   renderContent();
 }
 
-/* ================= THƯ VIỆN DỰ ÁN (kho koutei 6 năm + tra cứu + đối chiếu web) ================= */
+/* ================= DANH SÁCH DỰ ÁN (kho koutei 6 năm + tra cứu + đối chiếu web + sửa/xác nhận) ================= */
 var _LIB = { projects:[], items:{}, loaded:false, loading:false, err:'' };
-var _libState = { q:'', mode:'all', year:'', office:'', client:'', sel:null };
+var _libState = { q:'', mode:'all', year:'', office:'', client:'', sel:null, need:false, editing:false };
 
 async function _libFetch(){
   if(_LIB.loading) return; _LIB.loading=true;
@@ -3277,19 +3277,28 @@ async function _libFetch(){
   _LIB.loading = false;
 }
 function libReload(){ _LIB.loaded=false; _LIB.projects=[]; renderLibrary(); }
+function _libRecalcMissing(p){
+  var m=[];
+  if(!p.client) m.push('Chủ đầu tư');
+  if(!p.building_type) m.push('Loại công trình');
+  if(!p.kickoff) m.push('Ngày khởi công');
+  if(!p.completion) m.push('Ngày bàn giao');
+  p.missing=m.join(', ');
+}
 
 function _libMatch(p){
   var q=(_libState.q||'').trim().toLowerCase();
   if(_libState.year && String(p.year||'')!==_libState.year) return false;
   if(_libState.office && (p.office||'')!==_libState.office) return false;
   if(_libState.client && (p.client||'')!==_libState.client) return false;
+  if(_libState.need && !((p.missing||'').trim()) && p.reviewed) return false; // chỉ "cần rà"
+  if(_libState.need && p.reviewed && !((p.missing||'').trim())) return false;
   if(!q) return true;
   var m=_libState.mode;
   var inName=((p.name_jp||'')+' '+(p.web_name||'')).toLowerCase().indexOf(q)>=0;
   var inClient=(p.client||'').toLowerCase().indexOf(q)>=0;
   var staffAll=((p.main_staff||'')+' '+(p.note||'')).toLowerCase();
   var inStaff=staffAll.indexOf(q)>=0;
-  // tìm cả trong hạng mục
   var its=_LIB.items[p.id]||[];
   var inItem=its.some(function(r){ return ((r.item_name||'')+(r.staff||'')).toLowerCase().indexOf(q)>=0; });
   if(m==='name') return inName;
@@ -3299,18 +3308,66 @@ function _libMatch(p){
   return inName||inClient||inStaff||inItem;
 }
 
+function _libStyle(){ return '<style>'
+   +'.lib-wrap{display:flex;gap:16px;height:calc(100vh - 200px);min-height:460px}'
+   +'.lib-left{width:360px;flex:none;display:flex;flex-direction:column;background:#fff;border:1px solid #e6e9f0;border-radius:12px;overflow:hidden}'
+   +'.lib-right{flex:1;background:#fff;border:1px solid #e6e9f0;border-radius:12px;overflow:auto}'
+   +'.lib-chip{border:1px solid #d6dbe6;background:#fff;border-radius:16px;padding:4px 11px;font-size:12px;margin:2px 3px 2px 0;cursor:pointer;color:#516079}'
+   +'.lib-chip.on{background:var(--navy,#1f3a5f);color:#fff;border-color:var(--navy,#1f3a5f)}'
+   +'.lib-list{overflow:auto;flex:1}'
+   +'.lib-card{padding:10px 13px;border-bottom:1px solid #f0f2f7;cursor:pointer}'
+   +'.lib-card:hover{background:#f5f8ff}.lib-card.sel{background:#eaf1ff;box-shadow:inset 3px 0 0 var(--navy,#1f3a5f)}'
+   +'.lib-card-nm{font-size:13px;font-weight:600;color:#1f2d45;line-height:1.3}'
+   +'.lib-card-sub{font-size:11.5px;color:#5b6a86;margin-top:2px}'
+   +'.lib-card-meta{font-size:10.5px;color:#9aa4b6;margin-top:3px}'
+   +'.lib-b{font-size:10px;padding:1px 5px;border-radius:8px;margin-left:2px;vertical-align:middle}'
+   +'.lib-b-web{background:#e3f0ff;color:#1e5fbf}.lib-b-miss{background:#fdecea;color:#c0392b}.lib-b-ok{background:#e6f7ec;color:#1f8a4c}'
+   +'.lib-inp{width:100%;padding:9px 12px;border:1px solid #d6dbe6;border-radius:9px;font-size:13px;box-sizing:border-box;background:#fff;color:#1f2d45}'
+   +'.lib-sel{padding:6px 8px;border:1px solid #d6dbe6;border-radius:8px;font-size:12px;background:#fff;color:#1f2d45;margin-right:6px;margin-top:6px}'
+   +'.lib-d{padding:20px 24px}'
+   +'.lib-d h2{font-size:19px;color:#1f2d45;margin:0 0 3px}'
+   +'.lib-row{display:flex;gap:8px;padding:7px 0;border-bottom:1px dashed #eef0f5;font-size:13px;align-items:center}'
+   +'.lib-row .k{width:130px;flex:none;color:#8592a8;font-size:12px}'
+   +'.lib-row .v{color:#20304d;font-weight:500;flex:1}'
+   +'.lib-ei{padding:6px 9px;border:1px solid #c4cde0;border-radius:7px;font-size:13px;width:100%;box-sizing:border-box;background:#fff;color:#1f2d45}'
+   +'.lib-src{background:#f0f9f2;color:#31804f}.lib-src2{background:#eef4ff;color:#345bbf}'
+   +'.lib-tag{font-size:10.5px;padding:1px 7px;border-radius:8px;margin-left:6px}'
+   +'.lib-btn{display:inline-block;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;margin:4px 6px 4px 0;cursor:pointer;border:none}'
+   +'.lib-btn-web{background:#1e5fbf;color:#fff}.lib-btn-s{background:#eef1f7;color:#37507a}.lib-btn-edit{background:#fff3d6;color:#8a5a00}.lib-btn-save{background:#1f8a4c;color:#fff}.lib-btn-ok{background:#0d9488;color:#fff}.lib-btn-pdf{background:#334155;color:#fff}'
+   +'.lib-warn{background:#fff7e6;border:1px solid #ffd98a;border-radius:10px;padding:12px 14px;margin:12px 0;color:#8a5a00;font-size:12.5px;line-height:1.55}'
+   +'.lib-warn.red{background:#fdecea;border-color:#f5b7b1;color:#a5372b}'
+   +'.lib-ok{background:#e9f9ef;border:1px solid #b6e6c8;border-radius:10px;padding:9px 13px;margin:10px 0;color:#1f7a45;font-size:12.5px}'
+   +'.lib-itemtbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}'
+   +'.lib-itemtbl th{background:#f4f6fb;color:#5b6a86;text-align:left;padding:5px 8px;font-weight:600;font-size:11px}'
+   +'.lib-itemtbl td{padding:5px 8px;border-bottom:1px solid #f2f4f8;color:#2a3a56}'
+   +'.lib-files{font-size:12px;color:#3a4a66;line-height:1.7}'
+   /* ===== DARK ===== */
+   +'body.night .lib-left,body.night .lib-right{background:#141d30!important;border-color:#28374f!important}'
+   +'body.night .lib-card{border-bottom-color:#22304a!important}'
+   +'body.night .lib-card:hover{background:#1b2740!important}body.night .lib-card.sel{background:#20304e!important}'
+   +'body.night .lib-card-nm{color:#e7edf7!important}body.night .lib-card-sub{color:#a7b4cc!important}body.night .lib-card-meta{color:#7f8da3!important}'
+   +'body.night .lib-d h2{color:#eef2f9!important}'
+   +'body.night .lib-row{border-bottom-color:#22304a!important}body.night .lib-row .k{color:#8595b0!important}body.night .lib-row .v{color:#dbe3f0!important}'
+   +'body.night .lib-inp,body.night .lib-sel,body.night .lib-ei{background:#0f1a2e!important;color:#e4e9f2!important;border-color:#31405c!important}'
+   +'body.night .lib-chip{background:#0f1a2e!important;color:#a7b4cc!important;border-color:#31405c!important}body.night .lib-chip.on{background:#3557a0!important;color:#fff!important}'
+   +'body.night .lib-itemtbl th{background:#1b2740!important;color:#a7b4cc!important}body.night .lib-itemtbl td{color:#cdd8ea!important;border-bottom-color:#22304a!important}'
+   +'body.night .lib-files{color:#b3c0d8!important}'
+   +'body.night .lib-warn{background:#3a2f16!important;border-color:#7a5c1e!important;color:#f0d79a!important}'
+   +'body.night .lib-warn.red{background:#3a1f1d!important;border-color:#7a3b34!important;color:#f0a99f!important}'
+   +'body.night .lib-ok{background:#12301f!important;border-color:#2c6b45!important;color:#8fe0ab!important}'
+   +'</style>'; }
+
 function renderLibrary(){
   var root=document.getElementById('libraryRoot'); if(!root) return;
   if(!_LIB.loaded){
-    root.innerHTML='<div style="padding:48px;text-align:center;color:#8a94a6;font-size:14px">📚 Đang tải thư viện dự án…</div>';
+    root.innerHTML='<div style="padding:48px;text-align:center;color:#8a94a6;font-size:14px">📋 Đang tải danh sách dự án…</div>';
     _libFetch().then(function(){ if(activePage==='library') renderLibrary(); });
     return;
   }
   if(!_LIB.projects.length){
     root.innerHTML='<div style="max-width:680px;margin:40px auto;padding:26px;background:#fff8e1;border:1px solid #ffe08a;border-radius:12px;color:#8a6d3b;line-height:1.6">'
-      +'<div style="font-size:16px;font-weight:700;margin-bottom:8px">📚 Thư viện chưa có dữ liệu</div>'
-      +'Cần chạy 2 file SQL trên Supabase (project Studio Design) theo thứ tự:<br>'
-      +'<b>1) GD_thu_vien_du_an.sql</b> (tạo bảng) → <b>2) GD_nap_thu_vien.sql</b> (nạp 229 dự án).<br>'
+      +'<div style="font-size:16px;font-weight:700;margin-bottom:8px">📋 Danh sách dự án chưa có dữ liệu</div>'
+      +'Cần chạy SQL trên Supabase (đúng project Studio Design): <b>GD_thu_vien_du_an.sql</b> rồi <b>GD_nap_thu_vien_1..8.sql</b>.<br>'
       +'Xong bấm <button class="btn btn-sm" onclick="libReload()" style="margin-top:8px">🔄 Tải lại</button>'
       +(_LIB.err?('<div style="margin-top:10px;color:#b94a48;font-size:12px">Chi tiết: '+_esc(_LIB.err)+'</div>'):'')
       +'</div>';
@@ -3321,13 +3378,14 @@ function renderLibrary(){
   var offices=[...new Set(P.map(function(p){return p.office||''}).filter(Boolean))];
   var clients=[...new Set(P.map(function(p){return p.client||''}).filter(Boolean))].sort();
   var withWeb=P.filter(function(p){return p.web_url}).length;
-  var noClient=P.filter(function(p){return !p.client}).length;
+  var needCnt=P.filter(function(p){return (p.missing||'').trim() || !p.reviewed;}).length;
+  var okCnt=P.filter(function(p){return p.reviewed;}).length;
   var results=P.filter(_libMatch);
-  // sort results by last_seen desc
   results.sort(function(a,b){return (b.last_seen||'').localeCompare(a.last_seen||'');});
 
-  var modeChips=[['all','Tất cả'],['name','Tên dự án'],['client','Chủ đầu tư'],['staff','Nhân sự'],['item','Hạng mục']]
+  var modeChips=[['all','Tất cả'],['name','Tên dự án'],['client','Chủ đầu tư'],['staff','Nhân sự (担当)'],['item','Hạng mục']]
     .map(function(m){return '<button onclick="_libSet(\'mode\',\''+m[0]+'\')" class="lib-chip'+(_libState.mode===m[0]?' on':'')+'">'+m[1]+'</button>';}).join('');
+  modeChips+=' &nbsp;<button onclick="_libToggleNeed()" class="lib-chip'+(_libState.need?' on':'')+'" style="border-color:#e0a800;color:'+(_libState.need?'#fff':'#a9752a')+'">⚠ Chỉ dự án cần rà ('+needCnt+')</button>';
   var yearOpts='<option value="">— Mọi năm —</option>'+years.map(function(y){return '<option value="'+y+'"'+(_libState.year===y?' selected':'')+'>'+y+'</option>';}).join('');
   var offOpts='<option value="">— Mọi phòng/VP —</option>'+offices.map(function(o){return '<option value="'+_esc(o)+'"'+(_libState.office===o?' selected':'')+'>'+_esc(o)+'</option>';}).join('');
   var cliOpts='<option value="">— Mọi CĐT ('+clients.length+') —</option>'+clients.map(function(c){return '<option value="'+_esc(c)+'"'+(_libState.client===c?' selected':'')+'>'+_esc(c)+'</option>';}).join('');
@@ -3335,58 +3393,26 @@ function renderLibrary(){
   var listHtml=results.slice(0,400).map(function(p){
     var sel=_libState.sel===p.id;
     var miss=(p.missing||'').trim();
-    var badge=p.web_url?'<span class="lib-b lib-b-web" title="Đã hoàn công — có trên web">🔗 web</span>':'';
-    var mbadge=miss?'<span class="lib-b lib-b-miss" title="Thiếu: '+_esc(miss)+'">⚠ thiếu</span>':'';
+    var webI=p.web_url?'<span class="lib-b lib-b-web" title="Có trên web công ty">🌐 web</span>':'';
+    var st = p.reviewed ? '<span class="lib-b lib-b-ok" title="Đã xác nhận rà soát">✅ đã rà</span>'
+           : (miss?'<span class="lib-b lib-b-miss" title="Thiếu: '+_esc(miss)+'">⚠ thiếu</span>':'<span class="lib-b" style="background:#eef1f7;color:#8592a8">chưa rà</span>');
     return '<div class="lib-card'+(sel?' sel':'')+'" onclick="_libSel(\''+p.id+'\')">'
       +'<div class="lib-card-nm">'+_esc(p.name_jp||'(không tên)')+'</div>'
       +'<div class="lib-card-sub">'+_esc(p.client||'— chưa có CĐT —')+(p.building_type?(' · '+_esc(p.building_type)):'')+'</div>'
-      +'<div class="lib-card-meta">'+_esc(p.main_staff||'')+(p.last_seen?(' · '+_esc(p.last_seen)):'')+' '+badge+' '+mbadge+'</div>'
+      +'<div class="lib-card-meta">'+_esc(p.main_staff||'')+(p.last_seen?(' · '+_esc(p.last_seen)):'')+' '+webI+' '+st+'</div>'
       +'</div>';
   }).join('') || '<div style="padding:24px;color:#9aa4b2;text-align:center">Không có dự án khớp.</div>';
 
   var detail=_libState.sel?_libDetail(P.find(function(p){return p.id===_libState.sel;})):
-    '<div style="padding:60px 24px;text-align:center;color:#9aa4b2">← Chọn 1 dự án bên trái để xem chi tiết, link web, file gốc.</div>';
+    '<div style="padding:60px 24px;text-align:center;color:#9aa4b2">← Chọn 1 dự án bên trái để xem chi tiết, sửa thông tin, link web, file gốc.</div>';
 
-  root.innerHTML=''
-   +'<style>'
-   +'.lib-wrap{display:flex;gap:16px;height:calc(100vh - 190px);min-height:460px}'
-   +'.lib-left{width:360px;flex:none;display:flex;flex-direction:column;background:#fff;border:1px solid #e6e9f0;border-radius:12px;overflow:hidden}'
-   +'.lib-right{flex:1;background:#fff;border:1px solid #e6e9f0;border-radius:12px;overflow:auto}'
-   +'.lib-tools{padding:12px;border-bottom:1px solid #eef0f5;background:#fafbfe}'
-   +'.lib-chip{border:1px solid #d6dbe6;background:#fff;border-radius:16px;padding:4px 11px;font-size:12px;margin:2px 3px 2px 0;cursor:pointer;color:#516079}'
-   +'.lib-chip.on{background:var(--navy,#1f3a5f);color:#fff;border-color:var(--navy,#1f3a5f)}'
-   +'.lib-list{overflow:auto;flex:1}'
-   +'.lib-card{padding:10px 13px;border-bottom:1px solid #f0f2f7;cursor:pointer}'
-   +'.lib-card:hover{background:#f5f8ff}.lib-card.sel{background:#eaf1ff;box-shadow:inset 3px 0 0 var(--navy,#1f3a5f)}'
-   +'.lib-card-nm{font-size:13px;font-weight:600;color:#1f2d45;line-height:1.3}'
-   +'.lib-card-sub{font-size:11.5px;color:#5b6a86;margin-top:2px}'
-   +'.lib-card-meta{font-size:10.5px;color:#9aa4b6;margin-top:3px}'
-   +'.lib-b{font-size:10px;padding:1px 5px;border-radius:8px;margin-left:2px;vertical-align:middle}'
-   +'.lib-b-web{background:#e3f0ff;color:#1e5fbf}.lib-b-miss{background:#fdecea;color:#c0392b}'
-   +'.lib-inp{width:100%;padding:9px 12px;border:1px solid #d6dbe6;border-radius:9px;font-size:13px;box-sizing:border-box}'
-   +'.lib-sel{padding:6px 8px;border:1px solid #d6dbe6;border-radius:8px;font-size:12px;background:#fff;margin-right:6px;margin-top:6px}'
-   +'.lib-d{padding:20px 24px}'
-   +'.lib-d h2{font-size:19px;color:#1f2d45;margin:0 0 3px}'
-   +'.lib-row{display:flex;gap:8px;padding:7px 0;border-bottom:1px dashed #eef0f5;font-size:13px}'
-   +'.lib-row .k{width:130px;flex:none;color:#8592a8;font-size:12px}'
-   +'.lib-row .v{color:#20304d;font-weight:500}'
-   +'.lib-src{background:#f0f9f2;color:#31804f}.lib-src2{background:#eef4ff;color:#345bbf}.lib-src3{background:#fff4e0;color:#a9752a}'
-   +'.lib-tag{font-size:10.5px;padding:1px 7px;border-radius:8px;margin-left:6px}'
-   +'.lib-btn{display:inline-block;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;margin:4px 6px 4px 0;cursor:pointer;border:none}'
-   +'.lib-btn-web{background:#1e5fbf;color:#fff}.lib-btn-s{background:#eef1f7;color:#37507a}'
-   +'.lib-warn{background:#fff7e6;border:1px solid #ffd98a;border-radius:10px;padding:12px 14px;margin:12px 0;color:#8a5a00;font-size:12.5px;line-height:1.55}'
-   +'.lib-warn.red{background:#fdecea;border-color:#f5b7b1;color:#a5372b}'
-   +'.lib-itemtbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}'
-   +'.lib-itemtbl th{background:#f4f6fb;color:#5b6a86;text-align:left;padding:5px 8px;font-weight:600;font-size:11px}'
-   +'.lib-itemtbl td{padding:5px 8px;border-bottom:1px solid #f2f4f8;color:#2a3a56}'
-   +'.lib-files{font-size:12px;color:#3a4a66;line-height:1.7}'
-   +'</style>'
+  root.innerHTML=_libStyle()
    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">'
-   +'<div><h2 style="font-size:17px;font-weight:700;color:var(--navy,#1f3a5f);margin:0">📚 Thư viện dự án</h2>'
-   +'<div style="font-size:12px;color:#8592a8;margin-top:2px">'+P.length+' dự án · '+withWeb+' có link web · '+noClient+' thiếu CĐT · nguồn: koutei 2021–2026</div></div>'
+   +'<div><h2 style="font-size:17px;font-weight:700;color:var(--navy,#1f3a5f);margin:0">📋 Danh sách dự án</h2>'
+   +'<div style="font-size:12px;color:#8592a8;margin-top:2px">'+P.length+' dự án · '+withWeb+' có link web · '+okCnt+' đã rà · '+needCnt+' cần rà · nguồn: koutei 2021–2026</div></div>'
    +'<button class="btn btn-sm" onclick="libReload()">🔄 Tải lại</button></div>'
-   +'<div class="lib-tools" style="border:1px solid #e6e9f0;border-radius:12px;margin-bottom:12px">'
-   +'<input class="lib-inp" placeholder="🔍 Gõ tên dự án / chủ đầu tư / nhân sự / hạng mục…" value="'+_esc(_libState.q)+'" oninput="_libSet(\'q\',this.value)">'
+   +'<div style="padding:12px;border:1px solid #e6e9f0;border-radius:12px;margin-bottom:12px">'
+   +'<input class="lib-inp" placeholder="🔍 Gõ tên dự án / CĐT / nhân sự (担当) / hạng mục…" value="'+_esc(_libState.q)+'" oninput="_libSet(\'q\',this.value)">'
    +'<div style="margin-top:8px">'+modeChips+'</div>'
    +'<div><select class="lib-sel" onchange="_libSet(\'year\',this.value)">'+yearOpts+'</select>'
    +'<select class="lib-sel" onchange="_libSet(\'office\',this.value)">'+offOpts+'</select>'
@@ -3398,58 +3424,128 @@ function renderLibrary(){
 }
 
 function _libSet(k,v){ _libState[k]=v; if(k!=='q'){ renderLibrary(); }
-  else { // debounce nhẹ cho ô tìm
-    clearTimeout(window._libQto); window._libQto=setTimeout(function(){ if(activePage==='library') renderLibrary(); },180);
-  }
+  else { clearTimeout(window._libQto); window._libQto=setTimeout(function(){ if(activePage==='library') renderLibrary(); },180); }
 }
-function _libSel(id){ _libState.sel=id; renderLibrary(); }
+function _libToggleNeed(){ _libState.need=!_libState.need; renderLibrary(); }
+function _libSel(id){ _libState.sel=id; _libState.editing=false; renderLibrary(); }
+function _libEdit(on){ _libState.editing=on; renderLibrary(); }
+function _libV(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
+
+async function _libSave(id, alsoConfirm){
+  var p=_LIB.projects.find(function(x){return x.id===id;}); if(!p) return;
+  var patch={ client:_libV('le-client'), client_src:(_libV('le-client')&&!p.client)?'sửa tay':(p.client_src||''),
+    building_type:_libV('le-btype'), address:_libV('le-address'), office:_libV('le-office'),
+    main_staff:_libV('le-staff'), kickoff:_libV('le-kickoff'), completion:_libV('le-completion') };
+  Object.assign(p, patch);
+  _libRecalcMissing(p); patch.missing=p.missing;
+  if(alsoConfirm){ p.reviewed=true; p.reviewed_by=(document.getElementById('whoami')&&document.getElementById('whoami').textContent)||'admin'; p.reviewed_at=new Date().toISOString().slice(0,10); patch.reviewed=true; patch.reviewed_by=p.reviewed_by; patch.reviewed_at=p.reviewed_at; }
+  _libState.editing=false; renderLibrary();
+  try{ var r=await _sb.from('lib_projects').update(patch).eq('id', id);
+    if(r && r.error) alert('Lưu Supabase lỗi: '+r.error.message+'\n(Đã lưu tạm trên máy, thử lại sau.)');
+  }catch(e){ alert('Lưu lỗi: '+(e.message||e)); }
+}
+async function _libConfirm(id){
+  var p=_LIB.projects.find(function(x){return x.id===id;}); if(!p) return;
+  p.reviewed=true; p.reviewed_by=(document.getElementById('whoami')&&document.getElementById('whoami').textContent)||'admin'; p.reviewed_at=new Date().toISOString().slice(0,10);
+  renderLibrary();
+  try{ await _sb.from('lib_projects').update({reviewed:true,reviewed_by:p.reviewed_by,reviewed_at:p.reviewed_at}).eq('id', id); }catch(e){}
+}
 
 function _libDetail(p){
   if(!p) return '';
   var its=(_LIB.items[p.id]||[]).slice().sort(function(a,b){return (b.qty||0)-(a.qty||0);});
-  var srcSrc={'':'','trực tiếp':''};
-  var csTag = p.client ? (p.client_src? '<span class="lib-tag lib-src'+(p.client_src.indexOf('thương')>=0?'2':(p.client_src.indexOf('web')>=0?'2':''))+'">'+_esc(p.client_src)+'</span>':'<span class="lib-tag lib-src">từ koutei</span>') : '';
   var files=(p.src_files||'').split('|').filter(Boolean);
   var web = p.web_url
-    ? '<a class="lib-btn lib-btn-web" href="'+_esc(p.web_url)+'" target="_blank" rel="noopener">🔗 Xem bản chính thức trên web'+(p.web_name?(' — '+_esc(p.web_name)):'')+'</a>'
+    ? '<a class="lib-btn lib-btn-web" href="'+_esc(p.web_url)+'" target="_blank" rel="noopener">🌐 Xem bản chính thức trên web'+(p.web_name?(' — '+_esc(p.web_name)):'')+'</a>'
     : '';
-  var search = p.web_search ? '<a class="lib-btn lib-btn-s" href="'+_esc(p.web_search)+'" target="_blank" rel="noopener">🔎 Tìm dự án này trên web công ty</a>' : '';
+  var search = p.web_search ? '<a class="lib-btn lib-btn-s" href="'+_esc(p.web_search)+'" target="_blank" rel="noopener">🔎 Tìm trên web công ty</a>' : '';
+  var pdf='<button class="lib-btn lib-btn-pdf" onclick="_libPdf(\''+p.id+'\')">🖨 Xuất PDF</button>';
   var miss=(p.missing||'').trim();
-  var warn='';
-  if(miss){
-    var onweb=!!p.web_url;
-    warn='<div class="lib-warn'+(onweb?'':' red')+'">'
-      +'<b>⚠ Thiếu dữ liệu:</b> '+_esc(miss)+'<br>'
-      +'<b>Lý do &amp; cách kiểm:</b> '+_esc(p.missing_reason||'')+'</div>';
+
+  // ---- CHẾ ĐỘ SỬA ----
+  if(_libState.editing){
+    var er=function(lb,id,val){ return '<div class="lib-row"><div class="k">'+lb+'</div><div class="v"><input class="lib-ei" id="'+id+'" value="'+_esc(val||'')+'"></div></div>'; };
+    return '<div class="lib-d">'
+      +'<h2>✏️ Sửa: '+_esc(p.name_jp||'')+'</h2>'
+      +'<div style="font-size:12px;color:#8592a8;margin-bottom:10px">Điền/chỉnh thông tin còn thiếu rồi bấm <b>Lưu</b> hoặc <b>Lưu & Xác nhận đã rà</b>.</div>'
+      +er('Chủ đầu tư','le-client',p.client)
+      +er('Loại công trình','le-btype',p.building_type)
+      +er('Địa chỉ','le-address',p.address)
+      +er('Phòng / VP','le-office',p.office)
+      +er('Người phụ trách (担当)','le-staff',p.main_staff)
+      +er('Khởi công (着工)','le-kickoff',p.kickoff)
+      +er('Bàn giao (引渡)','le-completion',p.completion)
+      +'<div style="margin-top:14px">'
+      +'<button class="lib-btn lib-btn-save" onclick="_libSave(\''+p.id+'\',false)">💾 Lưu</button>'
+      +'<button class="lib-btn lib-btn-ok" onclick="_libSave(\''+p.id+'\',true)">✅ Lưu &amp; Xác nhận đã rà</button>'
+      +'<button class="lib-btn lib-btn-s" onclick="_libEdit(false)">Hủy</button>'
+      +'</div></div>';
   }
-  var row=function(k,v){ return v?('<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>'):''; };
+
+  var csTag = p.client ? (p.client_src? '<span class="lib-tag lib-src'+(/thương|web|tên|sửa/.test(p.client_src)?'2':'')+'">'+_esc(p.client_src)+'</span>':'<span class="lib-tag lib-src">từ koutei</span>') : '';
+  var warn='';
+  if(p.reviewed){
+    warn='<div class="lib-ok">✅ Đã xác nhận rà soát'+(p.reviewed_by?(' bởi '+_esc(p.reviewed_by)):'')+(p.reviewed_at?(' · '+_esc(p.reviewed_at)):'')+(miss?(' <span style="color:#a9752a">(vẫn còn thiếu: '+_esc(miss)+')</span>'):'')+'</div>';
+  } else if(miss){
+    var onweb=!!p.web_url;
+    warn='<div class="lib-warn'+(onweb?'':' red')+'"><b>⚠ Thiếu dữ liệu:</b> '+_esc(miss)+'<br>'
+      +'<b>Lý do &amp; cách kiểm:</b> '+_esc(p.missing_reason||'')+'<br>'
+      +'<span style="opacity:.85">Bấm <b>✏️ Sửa</b> để điền, rồi <b>Xác nhận</b>.</span></div>';
+  }
+  var row=function(k,v){ return '<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+(v||'<span style="color:#c0392b">— trống —</span>')+'</div></div>'; };
   var itemRows=its.length? its.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join('')
-    : '<tr><td colspan="3" style="color:#9aa4b6">Chưa bóc được hạng mục cho dự án này.</td></tr>';
+    : '<tr><td colspan="3" style="color:#9aa4b6">Chưa bóc được hạng mục.</td></tr>';
   var filesHtml = files.length
     ? '<div class="lib-files">📄 File gốc mới nhất: <b>'+_esc(p.src_last||'')+'</b>'
-      + (files.length>1?(' <span style="color:#8592a8">('+files.length+' file — bấm để xem hết)</span>'):'')
       + '<details style="margin-top:4px"><summary style="cursor:pointer;color:#345bbf;font-size:12px">Xem tất cả '+files.length+' file koutei nguồn</summary>'
       + '<div style="margin-top:6px;color:#48577a;font-size:11.5px;line-height:1.9">'+files.map(function(f){return '📂 工程/'+_esc(f);}).join('<br>')+'</div></details>'
       + '<div style="color:#8592a8;font-size:11px;margin-top:4px">→ Mở file này trong máy (thư mục <b>工程</b>) để đối chiếu bản gốc.</div></div>'
     : '<div style="color:#9aa4b6;font-size:12px">Không rõ file nguồn.</div>';
 
   return '<div class="lib-d">'
-    +'<h2>'+_esc(p.name_jp||'(không tên)')+'</h2>'
-    +(p.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:8px">Tên hoàn công: '+_esc(p.web_name)+'</div>'):'<div style="margin-bottom:8px"></div>')
-    +'<div>'+web+search+'</div>'
+    +'<h2>'+(p.web_url?'🌐 ':'')+_esc(p.name_jp||'(không tên)')+'</h2>'
+    +(p.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:8px">Tên hoàn công: '+_esc(p.web_name)+'</div>'):'<div style="margin-bottom:6px"></div>')
+    +'<div>'+web+search+pdf+'<button class="lib-btn lib-btn-edit" onclick="_libEdit(true)">✏️ Sửa</button>'
+    +(p.reviewed?'':'<button class="lib-btn lib-btn-ok" onclick="_libConfirm(\''+p.id+'\')">✅ Xác nhận đã rà</button>')+'</div>'
     +warn
-    +row('Chủ đầu tư', p.client?(_esc(p.client)+csTag):'<span style="color:#c0392b">— chưa xác định —</span>')
-    +row('Loại công trình', p.building_type?_esc(p.building_type):'')
-    +row('Địa chỉ', p.address?_esc(p.address):'')
-    +row('Phòng / VP', p.office?_esc(p.office):'')
-    +row('Người phụ trách', p.main_staff?_esc(p.main_staff):'')
-    +row('Khởi công (着工)', p.kickoff?_esc(p.kickoff):'')
-    +row('Bàn giao (引渡)', p.completion?_esc(p.completion):'')
-    +row('Theo dõi', (p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' · '+p.weeks+' tuần'):''))
+    +row('Chủ đầu tư', p.client?(_esc(p.client)+csTag):'')
+    +row('Loại công trình', _esc(p.building_type||''))
+    +row('Địa chỉ', _esc(p.address||''))
+    +row('Phòng / VP', _esc(p.office||''))
+    +row('Người phụ trách (担当)', _esc(p.main_staff||''))
+    +row('Khởi công (着工)', _esc(p.kickoff||''))
+    +row('Bàn giao (引渡)', _esc(p.completion||''))
+    +'<div class="lib-row"><div class="k">Theo dõi</div><div class="v">'+(p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' · '+p.weeks+' tuần'):'')+'</div></div>'
     +'<div style="margin-top:16px"><div style="font-weight:700;color:#1f2d45;font-size:13px;margin-bottom:2px">🗂 Hạng mục ('+its.length+')</div>'
     +'<table class="lib-itemtbl"><tr><th>Hạng mục</th><th>NV</th><th style="text-align:center">Lần</th></tr>'+itemRows+'</table></div>'
     +'<div style="margin-top:16px"><div style="font-weight:700;color:#1f2d45;font-size:13px;margin-bottom:4px">📎 Đối chiếu bản gốc</div>'+filesHtml+'</div>'
     +'</div>';
+}
+
+// ---- Xuất PDF 1 dự án (dùng chung overlay in với koutei) ----
+function _libPdf(id){
+  var p=_LIB.projects.find(function(x){return x.id===id;}); if(!p) return;
+  var its=(_LIB.items[p.id]||[]).slice().sort(function(a,b){return (b.qty||0)-(a.qty||0);});
+  var TD='border:1px solid #000;padding:3px 6px;font-size:11px';
+  var TH='border:1px solid #000;padding:4px 6px;font-size:11px;font-weight:800;background:#eee;text-align:center';
+  var info='<div style="font-size:12px;margin:6px 0 12px;line-height:1.8">'
+    +'<b style="font-size:16px">'+_esc(p.name_jp||'')+'</b>'+(p.web_name?' <span style="color:#666">（'+_esc(p.web_name)+'）</span>':'')+'<br>'
+    +'施主 CĐT: <b>'+_esc(p.client||'—')+'</b> ｜ 仕様: '+_esc(p.building_type||'—')+' ｜ 担当: '+_esc(p.main_staff||'—')+'<br>'
+    +(p.address?('所在地: '+_esc(p.address)+'<br>'):'')
+    +'着工: '+_esc(p.kickoff||'—')+' ｜ 引渡: '+_esc(p.completion||'—')+' ｜ VP: '+_esc(p.office||'—')+'<br>'
+    +'期間 theo dõi: '+(p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' ('+p.weeks+' tuần)'):'')
+    +(p.web_url?('<br>Web: '+_esc(p.web_url)):'')
+    +'</div>';
+  var body=its.map(function(r){return '<tr><td style="'+TD+'">'+_esc(r.item_name||'')+'</td><td style="'+TD+'">'+_esc(r.staff||'')+'</td><td style="'+TD+';text-align:center">'+(r.qty||'')+'</td></tr>';}).join('')
+    || '<tr><td colspan="3" style="'+TD+'">—</td></tr>';
+  var nowD=new Date(); var rw=nowD.getFullYear()-2018; var dateStr='令和'+rw+'年'+String(nowD.getMonth()+1).padStart(2,'0')+'月'+String(nowD.getDate()).padStart(2,'0')+'日';
+  var html='<div class="kj-page"><div class="kj-print-head">プロジェクト情報 — Hồ sơ dự án</div>'+info
+    +'<table style="border-collapse:collapse;width:100%"><thead><tr><th style="'+TH+'">項目 Hạng mục</th><th style="'+TH+'">担当 NV</th><th style="'+TH+'">回数 Số lần</th></tr></thead><tbody>'+body+'</tbody></table>'
+    +'<div class="kj-print-foot"><div class="ft-l">特記事項</div><div class="ft-r"><div>作製</div><div style="font-weight:800">現代綜合設計ベトナム</div><div>'+dateStr+'</div></div></div></div>';
+  var ov=document.getElementById('kjPrintOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='kjPrintOverlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; document.body.classList.add('kj-printing');
+  setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; },400); },150);
 }
 
 /* MONTH STRIP */
@@ -4670,12 +4766,19 @@ function exportKouteiPdf(){
   setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; }, 400); }, 150);
 }
 
-// ===== Tra lịch sử dự án -> PDF (toàn bộ hạng mục mọi tháng, cả phối cảnh + bản vẽ) =====
+// ===== Tra lịch sử dự án — mở Danh sách dự án (thư viện koutei 6 năm: tra theo CĐT/tên/担当/hạng mục + PDF) =====
 function openProjectHistoryLookup(){
+  // Mở kho Danh sách dự án (thư viện) — nơi tra cứu chuyên nghiệp + xuất PDF.
+  // Gợi ý chế độ tra theo phòng đang xem.
+  try{ _libState.mode='all'; _libState.q=''; _libState.sel=null; _libState.need=false; }catch(e){}
+  showPage('library');
+}
+// (giữ lại) Xuất PDF lịch sử từ dữ liệu SỐNG các tháng hiện tại — dùng khi cần lịch sử số mai theo tháng
+function openProjectHistoryLookupLive(){
   const names=new Set();
   Object.values(D.months||{}).forEach(function(m){ [].concat(m.projects||[],m.projectsVN||[]).forEach(function(p){ var nm=p.nameJP||p.nameVN; if(nm) names.add(nm); }); });
   const opts=[...names].sort().map(function(n){ return '<option value="'+x(n)+'">'; }).join('');
-  showModal('<h3>📜 Tra lịch sử dự án</h3>'
+  showModal('<h3>📜 Lịch sử số mai theo tháng (dữ liệu sống)</h3>'
     +'<p style="font-size:11px;color:#888;margin-bottom:8px">Chọn/gõ tên dự án → xuất PDF toàn bộ hạng mục đã làm qua các tháng (cả phối cảnh + bản vẽ), kèm người làm, số mai, ngày.</p>'
     +'<input id="phl-name" list="phl-list" placeholder="Tên dự án (JP/VN)…" style="width:100%;padding:8px;font-size:13px;box-sizing:border-box">'
     +'<datalist id="phl-list">'+opts+'</datalist>'

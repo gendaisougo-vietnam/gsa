@@ -1219,6 +1219,7 @@ table.detail-tl tr.staff-last > td {
         <button id="navOrg" class="hdr-menu-item" onclick="showPage('org')">🌐&nbsp; Sơ đồ tổ chức</button>
       </div>
     </div>
+    <button class="nav-btn" id="navLibrary" onclick="showPage('library')">📚 Thư viện</button>
   </div>
   <div class="hdr-divider"></div>
   <div class="hdr-search">
@@ -1271,6 +1272,11 @@ table.detail-tl tr.staff-last > td {
   <div class="content">
     <div class="content-inner" id="contentInner"></div>
   </div>
+</div>
+
+<!-- PAGE LIBRARY (Thư viện dự án) -->
+<div id="pageLibrary" style="display:none">
+  <div id="libraryRoot"></div>
 </div>
 
 <!-- PAGE DASHBOARD -->
@@ -3213,7 +3219,7 @@ function showPage(pg) {
   }
 
   activePage=pg;
-  ['main','dashboard','staff','settings','org'].forEach(p=>{
+  ['main','dashboard','staff','settings','org','library'].forEach(p=>{
     const el=document.getElementById('page'+p.charAt(0).toUpperCase()+p.slice(1));
     if(el) el.style.display = p===pg?(p==='main'?'flex':'block'):'none';
     const btn=document.getElementById('nav'+p.charAt(0).toUpperCase()+p.slice(1));
@@ -3230,10 +3236,12 @@ function showPage(pg) {
     btnJP.classList.toggle('active', activeSection==='jp');
     const btnIntl=document.getElementById('navMainIntl'); if(btnIntl) btnIntl.classList.toggle('active', activeSection==='intl');
   }
+  var _nl=document.getElementById('navLibrary'); if(_nl) _nl.classList.toggle('active', pg==='library');
   if(pg==='dashboard') renderDashboard();
   else if(pg==='staff') renderStaffPage();
   else if(pg==='settings') renderSettings();
   else if(pg==='org') renderOrgChart();
+  else if(pg==='library') renderLibrary();
   else if(pg==='main') { activePjId=null; renderContent(); }
 }
 
@@ -3248,6 +3256,200 @@ function setSection(sec) {
   const btnIntl=document.getElementById('navMainIntl'); if(btnIntl) btnIntl.classList.toggle('active', sec==='intl');
   renderSidebar();
   renderContent();
+}
+
+/* ================= THƯ VIỆN DỰ ÁN (kho koutei 6 năm + tra cứu + đối chiếu web) ================= */
+var _LIB = { projects:[], items:{}, loaded:false, loading:false, err:'' };
+var _libState = { q:'', mode:'all', year:'', office:'', client:'', sel:null };
+
+async function _libFetch(){
+  if(_LIB.loading) return; _LIB.loading=true;
+  try{
+    const [pr,it] = await Promise.all([
+      _sb.from('lib_projects').select('*'),
+      _sb.from('lib_items').select('*')
+    ]);
+    _LIB.projects = (pr && pr.data) ? pr.data : [];
+    _LIB.items = {};
+    ((it && it.data)?it.data:[]).forEach(function(r){ (_LIB.items[r.project_id]=_LIB.items[r.project_id]||[]).push(r); });
+    _LIB.loaded = true; _LIB.err = (pr&&pr.error)?pr.error.message:'';
+  }catch(e){ _LIB.err = e.message||String(e); }
+  _LIB.loading = false;
+}
+function libReload(){ _LIB.loaded=false; _LIB.projects=[]; renderLibrary(); }
+
+function _libMatch(p){
+  var q=(_libState.q||'').trim().toLowerCase();
+  if(_libState.year && String(p.year||'')!==_libState.year) return false;
+  if(_libState.office && (p.office||'')!==_libState.office) return false;
+  if(_libState.client && (p.client||'')!==_libState.client) return false;
+  if(!q) return true;
+  var m=_libState.mode;
+  var inName=((p.name_jp||'')+' '+(p.web_name||'')).toLowerCase().indexOf(q)>=0;
+  var inClient=(p.client||'').toLowerCase().indexOf(q)>=0;
+  var staffAll=((p.main_staff||'')+' '+(p.note||'')).toLowerCase();
+  var inStaff=staffAll.indexOf(q)>=0;
+  // tìm cả trong hạng mục
+  var its=_LIB.items[p.id]||[];
+  var inItem=its.some(function(r){ return ((r.item_name||'')+(r.staff||'')).toLowerCase().indexOf(q)>=0; });
+  if(m==='name') return inName;
+  if(m==='client') return inClient;
+  if(m==='staff') return inStaff || its.some(function(r){return (r.staff||'').toLowerCase().indexOf(q)>=0;});
+  if(m==='item') return inItem;
+  return inName||inClient||inStaff||inItem;
+}
+
+function renderLibrary(){
+  var root=document.getElementById('libraryRoot'); if(!root) return;
+  if(!_LIB.loaded){
+    root.innerHTML='<div style="padding:48px;text-align:center;color:#8a94a6;font-size:14px">📚 Đang tải thư viện dự án…</div>';
+    _libFetch().then(function(){ if(activePage==='library') renderLibrary(); });
+    return;
+  }
+  if(!_LIB.projects.length){
+    root.innerHTML='<div style="max-width:680px;margin:40px auto;padding:26px;background:#fff8e1;border:1px solid #ffe08a;border-radius:12px;color:#8a6d3b;line-height:1.6">'
+      +'<div style="font-size:16px;font-weight:700;margin-bottom:8px">📚 Thư viện chưa có dữ liệu</div>'
+      +'Cần chạy 2 file SQL trên Supabase (project Studio Design) theo thứ tự:<br>'
+      +'<b>1) GD_thu_vien_du_an.sql</b> (tạo bảng) → <b>2) GD_nap_thu_vien.sql</b> (nạp 229 dự án).<br>'
+      +'Xong bấm <button class="btn btn-sm" onclick="libReload()" style="margin-top:8px">🔄 Tải lại</button>'
+      +(_LIB.err?('<div style="margin-top:10px;color:#b94a48;font-size:12px">Chi tiết: '+_esc(_LIB.err)+'</div>'):'')
+      +'</div>';
+    return;
+  }
+  var P=_LIB.projects;
+  var years=[...new Set(P.map(function(p){return String(p.year||'')}).filter(Boolean))].sort().reverse();
+  var offices=[...new Set(P.map(function(p){return p.office||''}).filter(Boolean))];
+  var clients=[...new Set(P.map(function(p){return p.client||''}).filter(Boolean))].sort();
+  var withWeb=P.filter(function(p){return p.web_url}).length;
+  var noClient=P.filter(function(p){return !p.client}).length;
+  var results=P.filter(_libMatch);
+  // sort results by last_seen desc
+  results.sort(function(a,b){return (b.last_seen||'').localeCompare(a.last_seen||'');});
+
+  var modeChips=[['all','Tất cả'],['name','Tên dự án'],['client','Chủ đầu tư'],['staff','Nhân sự'],['item','Hạng mục']]
+    .map(function(m){return '<button onclick="_libSet(\'mode\',\''+m[0]+'\')" class="lib-chip'+(_libState.mode===m[0]?' on':'')+'">'+m[1]+'</button>';}).join('');
+  var yearOpts='<option value="">— Mọi năm —</option>'+years.map(function(y){return '<option value="'+y+'"'+(_libState.year===y?' selected':'')+'>'+y+'</option>';}).join('');
+  var offOpts='<option value="">— Mọi phòng/VP —</option>'+offices.map(function(o){return '<option value="'+_esc(o)+'"'+(_libState.office===o?' selected':'')+'>'+_esc(o)+'</option>';}).join('');
+  var cliOpts='<option value="">— Mọi CĐT ('+clients.length+') —</option>'+clients.map(function(c){return '<option value="'+_esc(c)+'"'+(_libState.client===c?' selected':'')+'>'+_esc(c)+'</option>';}).join('');
+
+  var listHtml=results.slice(0,400).map(function(p){
+    var sel=_libState.sel===p.id;
+    var miss=(p.missing||'').trim();
+    var badge=p.web_url?'<span class="lib-b lib-b-web" title="Đã hoàn công — có trên web">🔗 web</span>':'';
+    var mbadge=miss?'<span class="lib-b lib-b-miss" title="Thiếu: '+_esc(miss)+'">⚠ thiếu</span>':'';
+    return '<div class="lib-card'+(sel?' sel':'')+'" onclick="_libSel(\''+p.id+'\')">'
+      +'<div class="lib-card-nm">'+_esc(p.name_jp||'(không tên)')+'</div>'
+      +'<div class="lib-card-sub">'+_esc(p.client||'— chưa có CĐT —')+(p.building_type?(' · '+_esc(p.building_type)):'')+'</div>'
+      +'<div class="lib-card-meta">'+_esc(p.main_staff||'')+(p.last_seen?(' · '+_esc(p.last_seen)):'')+' '+badge+' '+mbadge+'</div>'
+      +'</div>';
+  }).join('') || '<div style="padding:24px;color:#9aa4b2;text-align:center">Không có dự án khớp.</div>';
+
+  var detail=_libState.sel?_libDetail(P.find(function(p){return p.id===_libState.sel;})):
+    '<div style="padding:60px 24px;text-align:center;color:#9aa4b2">← Chọn 1 dự án bên trái để xem chi tiết, link web, file gốc.</div>';
+
+  root.innerHTML=''
+   +'<style>'
+   +'.lib-wrap{display:flex;gap:16px;height:calc(100vh - 190px);min-height:460px}'
+   +'.lib-left{width:360px;flex:none;display:flex;flex-direction:column;background:#fff;border:1px solid #e6e9f0;border-radius:12px;overflow:hidden}'
+   +'.lib-right{flex:1;background:#fff;border:1px solid #e6e9f0;border-radius:12px;overflow:auto}'
+   +'.lib-tools{padding:12px;border-bottom:1px solid #eef0f5;background:#fafbfe}'
+   +'.lib-chip{border:1px solid #d6dbe6;background:#fff;border-radius:16px;padding:4px 11px;font-size:12px;margin:2px 3px 2px 0;cursor:pointer;color:#516079}'
+   +'.lib-chip.on{background:var(--navy,#1f3a5f);color:#fff;border-color:var(--navy,#1f3a5f)}'
+   +'.lib-list{overflow:auto;flex:1}'
+   +'.lib-card{padding:10px 13px;border-bottom:1px solid #f0f2f7;cursor:pointer}'
+   +'.lib-card:hover{background:#f5f8ff}.lib-card.sel{background:#eaf1ff;box-shadow:inset 3px 0 0 var(--navy,#1f3a5f)}'
+   +'.lib-card-nm{font-size:13px;font-weight:600;color:#1f2d45;line-height:1.3}'
+   +'.lib-card-sub{font-size:11.5px;color:#5b6a86;margin-top:2px}'
+   +'.lib-card-meta{font-size:10.5px;color:#9aa4b6;margin-top:3px}'
+   +'.lib-b{font-size:10px;padding:1px 5px;border-radius:8px;margin-left:2px;vertical-align:middle}'
+   +'.lib-b-web{background:#e3f0ff;color:#1e5fbf}.lib-b-miss{background:#fdecea;color:#c0392b}'
+   +'.lib-inp{width:100%;padding:9px 12px;border:1px solid #d6dbe6;border-radius:9px;font-size:13px;box-sizing:border-box}'
+   +'.lib-sel{padding:6px 8px;border:1px solid #d6dbe6;border-radius:8px;font-size:12px;background:#fff;margin-right:6px;margin-top:6px}'
+   +'.lib-d{padding:20px 24px}'
+   +'.lib-d h2{font-size:19px;color:#1f2d45;margin:0 0 3px}'
+   +'.lib-row{display:flex;gap:8px;padding:7px 0;border-bottom:1px dashed #eef0f5;font-size:13px}'
+   +'.lib-row .k{width:130px;flex:none;color:#8592a8;font-size:12px}'
+   +'.lib-row .v{color:#20304d;font-weight:500}'
+   +'.lib-src{background:#f0f9f2;color:#31804f}.lib-src2{background:#eef4ff;color:#345bbf}.lib-src3{background:#fff4e0;color:#a9752a}'
+   +'.lib-tag{font-size:10.5px;padding:1px 7px;border-radius:8px;margin-left:6px}'
+   +'.lib-btn{display:inline-block;padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;margin:4px 6px 4px 0;cursor:pointer;border:none}'
+   +'.lib-btn-web{background:#1e5fbf;color:#fff}.lib-btn-s{background:#eef1f7;color:#37507a}'
+   +'.lib-warn{background:#fff7e6;border:1px solid #ffd98a;border-radius:10px;padding:12px 14px;margin:12px 0;color:#8a5a00;font-size:12.5px;line-height:1.55}'
+   +'.lib-warn.red{background:#fdecea;border-color:#f5b7b1;color:#a5372b}'
+   +'.lib-itemtbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}'
+   +'.lib-itemtbl th{background:#f4f6fb;color:#5b6a86;text-align:left;padding:5px 8px;font-weight:600;font-size:11px}'
+   +'.lib-itemtbl td{padding:5px 8px;border-bottom:1px solid #f2f4f8;color:#2a3a56}'
+   +'.lib-files{font-size:12px;color:#3a4a66;line-height:1.7}'
+   +'</style>'
+   +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">'
+   +'<div><h2 style="font-size:17px;font-weight:700;color:var(--navy,#1f3a5f);margin:0">📚 Thư viện dự án</h2>'
+   +'<div style="font-size:12px;color:#8592a8;margin-top:2px">'+P.length+' dự án · '+withWeb+' có link web · '+noClient+' thiếu CĐT · nguồn: koutei 2021–2026</div></div>'
+   +'<button class="btn btn-sm" onclick="libReload()">🔄 Tải lại</button></div>'
+   +'<div class="lib-tools" style="border:1px solid #e6e9f0;border-radius:12px;margin-bottom:12px">'
+   +'<input class="lib-inp" placeholder="🔍 Gõ tên dự án / chủ đầu tư / nhân sự / hạng mục…" value="'+_esc(_libState.q)+'" oninput="_libSet(\'q\',this.value)">'
+   +'<div style="margin-top:8px">'+modeChips+'</div>'
+   +'<div><select class="lib-sel" onchange="_libSet(\'year\',this.value)">'+yearOpts+'</select>'
+   +'<select class="lib-sel" onchange="_libSet(\'office\',this.value)">'+offOpts+'</select>'
+   +'<select class="lib-sel" onchange="_libSet(\'client\',this.value)">'+cliOpts+'</select>'
+   +'<span style="font-size:12px;color:#8592a8;margin-left:6px">'+results.length+' kết quả</span></div>'
+   +'</div>'
+   +'<div class="lib-wrap"><div class="lib-left"><div class="lib-list">'+listHtml+'</div></div>'
+   +'<div class="lib-right">'+detail+'</div></div>';
+}
+
+function _libSet(k,v){ _libState[k]=v; if(k!=='q'){ renderLibrary(); }
+  else { // debounce nhẹ cho ô tìm
+    clearTimeout(window._libQto); window._libQto=setTimeout(function(){ if(activePage==='library') renderLibrary(); },180);
+  }
+}
+function _libSel(id){ _libState.sel=id; renderLibrary(); }
+
+function _libDetail(p){
+  if(!p) return '';
+  var its=(_LIB.items[p.id]||[]).slice().sort(function(a,b){return (b.qty||0)-(a.qty||0);});
+  var srcSrc={'':'','trực tiếp':''};
+  var csTag = p.client ? (p.client_src? '<span class="lib-tag lib-src'+(p.client_src.indexOf('thương')>=0?'2':(p.client_src.indexOf('web')>=0?'2':''))+'">'+_esc(p.client_src)+'</span>':'<span class="lib-tag lib-src">từ koutei</span>') : '';
+  var files=(p.src_files||'').split('|').filter(Boolean);
+  var web = p.web_url
+    ? '<a class="lib-btn lib-btn-web" href="'+_esc(p.web_url)+'" target="_blank" rel="noopener">🔗 Xem bản chính thức trên web'+(p.web_name?(' — '+_esc(p.web_name)):'')+'</a>'
+    : '';
+  var search = p.web_search ? '<a class="lib-btn lib-btn-s" href="'+_esc(p.web_search)+'" target="_blank" rel="noopener">🔎 Tìm dự án này trên web công ty</a>' : '';
+  var miss=(p.missing||'').trim();
+  var warn='';
+  if(miss){
+    var onweb=!!p.web_url;
+    warn='<div class="lib-warn'+(onweb?'':' red')+'">'
+      +'<b>⚠ Thiếu dữ liệu:</b> '+_esc(miss)+'<br>'
+      +'<b>Lý do &amp; cách kiểm:</b> '+_esc(p.missing_reason||'')+'</div>';
+  }
+  var row=function(k,v){ return v?('<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>'):''; };
+  var itemRows=its.length? its.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join('')
+    : '<tr><td colspan="3" style="color:#9aa4b6">Chưa bóc được hạng mục cho dự án này.</td></tr>';
+  var filesHtml = files.length
+    ? '<div class="lib-files">📄 File gốc mới nhất: <b>'+_esc(p.src_last||'')+'</b>'
+      + (files.length>1?(' <span style="color:#8592a8">('+files.length+' file — bấm để xem hết)</span>'):'')
+      + '<details style="margin-top:4px"><summary style="cursor:pointer;color:#345bbf;font-size:12px">Xem tất cả '+files.length+' file koutei nguồn</summary>'
+      + '<div style="margin-top:6px;color:#48577a;font-size:11.5px;line-height:1.9">'+files.map(function(f){return '📂 工程/'+_esc(f);}).join('<br>')+'</div></details>'
+      + '<div style="color:#8592a8;font-size:11px;margin-top:4px">→ Mở file này trong máy (thư mục <b>工程</b>) để đối chiếu bản gốc.</div></div>'
+    : '<div style="color:#9aa4b6;font-size:12px">Không rõ file nguồn.</div>';
+
+  return '<div class="lib-d">'
+    +'<h2>'+_esc(p.name_jp||'(không tên)')+'</h2>'
+    +(p.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:8px">Tên hoàn công: '+_esc(p.web_name)+'</div>'):'<div style="margin-bottom:8px"></div>')
+    +'<div>'+web+search+'</div>'
+    +warn
+    +row('Chủ đầu tư', p.client?(_esc(p.client)+csTag):'<span style="color:#c0392b">— chưa xác định —</span>')
+    +row('Loại công trình', p.building_type?_esc(p.building_type):'')
+    +row('Địa chỉ', p.address?_esc(p.address):'')
+    +row('Phòng / VP', p.office?_esc(p.office):'')
+    +row('Người phụ trách', p.main_staff?_esc(p.main_staff):'')
+    +row('Khởi công (着工)', p.kickoff?_esc(p.kickoff):'')
+    +row('Bàn giao (引渡)', p.completion?_esc(p.completion):'')
+    +row('Theo dõi', (p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' · '+p.weeks+' tuần'):''))
+    +'<div style="margin-top:16px"><div style="font-weight:700;color:#1f2d45;font-size:13px;margin-bottom:2px">🗂 Hạng mục ('+its.length+')</div>'
+    +'<table class="lib-itemtbl"><tr><th>Hạng mục</th><th>NV</th><th style="text-align:center">Lần</th></tr>'+itemRows+'</table></div>'
+    +'<div style="margin-top:16px"><div style="font-weight:700;color:#1f2d45;font-size:13px;margin-bottom:4px">📎 Đối chiếu bản gốc</div>'+filesHtml+'</div>'
+    +'</div>';
 }
 
 /* MONTH STRIP */
@@ -6598,7 +6800,7 @@ function renderVNInfoPanel(p) {
     </div>
     <div style="border-top:1px dashed #c7d2fe;margin:3px 0 4px"></div>
     <div style="font-size:9px;font-weight:700;color:#0f766e;margin-bottom:3px">💰 HỢP ĐỒNG</div>
-    ${row('Giá trị (万円)', `<input type="number" class="vn-info-input" value="${x(p.contractValue||'')}" placeholder="0" style="font-size:10px;color:#0f766e;font-weight:700" onblur="savePjDetailField('${p.id}','contractValue',this.value)">`)}
+    ${row('Giá trị (VNĐ)', `<input type="number" class="vn-info-input" value="${x(p.contractValue||'')}" placeholder="0" style="font-size:10px;color:#0f766e;font-weight:700" onblur="savePjDetailField('${p.id}','contractValue',this.value)">`)}
     ${row('Loại DS', `<select class="vn-info-input" style="font-size:10px;color:var(--navy)" onchange="savePjDetailField('${p.id}','revenueType',this.value)">
         <option value=""${!p.revenueType?' selected':''}>— chọn —</option>
         <option value="honsha"${p.revenueType==='honsha'?' selected':''}>本社下請 (thầu HQ)</option>
@@ -9593,8 +9795,8 @@ function openEditProject(id) {
     </div>
     <div style="font-size:11px;font-weight:700;color:#0f766e;margin:12px 0 8px;padding:4px 8px;background:#ecfdf5;border-radius:4px">💰 Nhóm 2b — Hợp đồng & Tiến độ hợp đồng <span style="font-size:9px;color:#94a3b8">(link Dashboard doanh số)</span></div>
     <div class="info-grid c2" style="gap:10px">
-      <div class="field"><label>Giá trị hợp đồng (万円)</label>
-        <input id="ep-contractValue" type="number" value="${x(p.contractValue||'')}" placeholder="0"></div>
+      <div class="field"><label>Giá trị hợp đồng (VNĐ)</label>
+        <input id="ep-contractValue" type="number" value="${x(p.contractValue||'')}" placeholder="vd 2000000000"></div>
       <div class="field"><label>Loại doanh số</label>
         <select id="ep-revenueType">
           <option value=""${!p.revenueType?' selected':''}>— chọn —</option>
@@ -10194,11 +10396,14 @@ function _somaiNewByDept(mid){
   }); });
   return {studio:studio, intl:intl};
 }
-// Doanh thu việc VN theo tháng ghi nhận (revenueMonth) — chống trùng dự án carryover theo tên
+// Tỷ giá quy đổi: bao nhiêu VNĐ = 1万円 (JPY×10.000). Lưu localStorage, sửa được trên Dashboard.
+function _vndRate(){ var v=parseFloat(localStorage.getItem('vnd_per_manyen')); return (v&&v>0)?v:1700000; }
+function _setVndRate(v){ v=parseFloat(String(v).replace(/[^0-9.]/g,''))||0; if(v>0){ localStorage.setItem('vnd_per_manyen', v); toast('✓ Đã lưu tỷ giá'); try{renderDashboard();}catch(e){} } }
+// Doanh thu việc VN theo tháng ghi nhận (revenueMonth). Giá trị HĐ nhập VNĐ -> quy đổi ra 万円.
 function _vnRevByMonth(){
-  var out={}; var seen={};
+  var out={}; var seen={}; var rate=_vndRate();
   Object.keys(D.months||{}).forEach(function(mid){ var mm=D.months[mid]||{};
-    (mm.projectsVN||[]).forEach(function(p){ if(p.revenueMonth && (+p.contractValue||0)>0){ var k=(p.nameVN||p.nameJP||p.id)+'|'+p.revenueMonth+'|'+p.contractValue; if(!seen[k]){ seen[k]=1; out[p.revenueMonth]=(out[p.revenueMonth]||0)+(+p.contractValue||0); } } });
+    (mm.projectsVN||[]).forEach(function(p){ if(p.revenueMonth && (+p.contractValue||0)>0){ var k=(p.nameVN||p.nameJP||p.id)+'|'+p.revenueMonth+'|'+p.contractValue; if(!seen[k]){ seen[k]=1; out[p.revenueMonth]=(out[p.revenueMonth]||0)+((+p.contractValue||0)/rate); } } });
   });
   return out;
 }
@@ -10302,7 +10507,8 @@ function renderRevenueDashboard(){
         +card('#818cf8','図面 Bản vẽ Nhật (JP)','revTargetZumen',M.tZ,zumenActual,'tiền 図面 Osaka/Tokyo (hoặc 作成×đơn giá)')
         +card('#fbbf24','🇻🇳 Việc Việt Nam','revTargetVn',M.tV,vnActual,'ô ベトナム単独 hoặc Σ hợp đồng')
       +'</div>'
-      +'<div style="background:#182338;border:1px solid #2b3a58;border-radius:8px;padding:6px 11px;margin-bottom:12px;font-size:10px;color:#c8d6e5">💡 Chỉ tiêu năm chia đều 12 tháng. Việc Nhật: doanh thu = số mai 作成 × đơn giá (đơn giá = chỉ tiêu tiền tháng ÷ mục tiêu số mai). 修正 chỉ thống kê, không tính tiền. Việc VN: Σ giá trị hợp đồng theo tháng ghi nhận.</div>'
+      +'<div style="background:#182338;border:1px solid #2b3a58;border-radius:8px;padding:6px 11px;margin-bottom:12px;font-size:10px;color:#c8d6e5;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:260px">💡 Chỉ tiêu năm chia đều 12 tháng. Việc Nhật: doanh thu từ tiền Osaka/Tokyo (hoặc 作成×đơn giá). 修正 chỉ thống kê. Việc VN: giá trị hợp đồng (VNĐ) quy đổi ra 万円.</span>'
+        +'<span style="white-space:nowrap">💱 Tỷ giá: 1万円 = <input type="number" value="'+_vndRate()+'" style="width:100px;background:#eef2f8;color:#15213a;font-weight:700;border:1px solid #c3ccdb;border-radius:5px;padding:2px 6px;font-size:11px" onblur="_setVndRate(this.value)"> VNĐ</span></div>'
       +'<div style="background:#141d30;border:1px solid #24304a;border-radius:11px;padding:10px 12px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">売上 Doanh số thực tế vs Đường mục tiêu tích lũy <span style="color:#8fa1bd;font-weight:400;font-size:10px">(万円)</span></div>'+svg
         +'<div style="display:flex;gap:14px;font-size:10px;color:#8fa1bd"><span><span style="display:inline-block;width:12px;height:3px;background:#38bdf8;vertical-align:middle"></span> Thực tế</span><span><span style="display:inline-block;width:12px;height:2px;background:#f4c430;vertical-align:middle"></span> Mục tiêu tích lũy</span></div></div>'
     +'</div></div>' + '<div class="card" style="margin-bottom:14px"><div class="card-hd"><span class="card-hd-title">📄 Bảng 実績 (điền tay ô tiền theo tháng)</span></div><div style="padding:10px 12px;overflow-x:auto">'+_jissekiTableHtml(M,true)+'</div></div>';

@@ -1947,6 +1947,7 @@ function savePjDetailField(pjId, field, val) {
   if (!p) return;
   p[field] = val;
   save();
+  try{ if(typeof _libSyncFromApp==='function') _libSyncFromApp(p, field, val); }catch(e){}
   if (window._sbReady && foundMid) {
     const colMap = { area:'area', scope:'scope', buildingType:'building_type',
                      constructionStart:'construction_start', constructionEnd:'construction_end',
@@ -3414,7 +3415,8 @@ function renderLibrary(){
    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">'
    +'<div><h2 style="font-size:17px;font-weight:700;color:var(--navy,#1f3a5f);margin:0">📋 Danh sách dự án</h2>'
    +'<div style="font-size:12px;color:#8592a8;margin-top:2px">'+P.length+' dự án · '+withWeb+' có link web · '+okCnt+' đã rà · '+needCnt+' cần rà · nguồn: koutei 2021–2026</div></div>'
-   +'<button class="btn btn-sm" onclick="libReload()">🔄 Tải lại</button></div>'
+   +'<div><button class="btn btn-sm" onclick="libFillCurrentProjects()" title="Điền thông tin còn thiếu cho các dự án đang chạy trong phần mềm, lấy từ kho này (chỉ điền ô trống)" style="margin-right:6px">🔗 Bổ sung dự án đang chạy</button>'
+   +'<button class="btn btn-sm" onclick="libReload()">🔄 Tải lại</button></div></div>'
    +'<div style="padding:12px;border:1px solid #e6e9f0;border-radius:12px;margin-bottom:12px">'
    +'<input class="lib-inp" placeholder="🔍 Gõ tên dự án / CĐT / nhân sự (担当) / hạng mục…" value="'+_esc(_libState.q)+'" oninput="_libSet(\'q\',this.value)">'
    +'<div style="margin-top:8px">'+modeChips+'</div>'
@@ -3444,6 +3446,7 @@ async function _libSave(id, alsoConfirm){
   _libRecalcMissing(p); patch.missing=p.missing;
   if(alsoConfirm){ p.reviewed=true; p.reviewed_by=(document.getElementById('whoami')&&document.getElementById('whoami').textContent)||'admin'; p.reviewed_at=new Date().toISOString().slice(0,10); patch.reviewed=true; patch.reviewed_by=p.reviewed_by; patch.reviewed_at=p.reviewed_at; }
   _libState.editing=false; renderLibrary();
+  try{ _libSyncToApp(p); }catch(e){}
   try{ var r=await _sb.from('lib_projects').update(patch).eq('id', id);
     if(r && r.error) alert('Lưu Supabase lỗi: '+r.error.message+'\n(Đã lưu tạm trên máy, thử lại sau.)');
   }catch(e){ alert('Lưu lỗi: '+(e.message||e)); }
@@ -3547,6 +3550,73 @@ function _libPdf(id){
   if(!ov){ ov=document.createElement('div'); ov.id='kjPrintOverlay'; document.body.appendChild(ov); }
   ov.innerHTML=html; document.body.classList.add('kj-printing');
   setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; },400); },150);
+}
+
+/* ===== LIÊN KẾT dự án hiện tại (D.months) ↔ Danh sách dự án (kho), đồng bộ 2 chiều theo TÊN ===== */
+var _Z2H_LIB='０１２３４５６７８９';
+function _libNKey(name){
+  var k=(name||'').replace(/[\s　]/g,'');
+  k=k.replace(/ＰＪ|ＰJ|Ｐｊ|ｐｊ|ＰＩ|PJ|Pj|pj/g,'');
+  k=k.replace(/（[^）]*）/g,'').replace(/\([^)]*\)/g,'');
+  k=k.replace(/[０-９]/g,function(d){return _Z2H_LIB.indexOf(d);});
+  k=k.replace(/[･・]/g,'');
+  k=k.replace(/二丁目/g,'2丁目').replace(/三丁目/g,'3丁目').replace(/一丁目/g,'1丁目')
+     .replace(/四丁目/g,'4丁目').replace(/五丁目/g,'5丁目').replace(/六丁目/g,'6丁目');
+  k=k.replace(/ザパークハビオ/g,'パークハビオ').replace(/ザ?パークハビオ/g,'パークハビオ');
+  return k.trim();
+}
+// map: app field <-> lib field
+var _LIB_A2L=[['client','client'],['buildingType','building_type'],['scope','address'],
+  ['constructionStart','kickoff'],['constructionEnd','completion'],['area','main_staff']];
+var _LIB_APPCOL={client:'client',buildingType:'building_type',scope:'scope',
+  constructionStart:'construction_start',constructionEnd:'construction_end',area:'area'};
+
+// Bổ sung thông tin còn TRỐNG của dự án hiện tại từ kho + thiết lập liên kết theo tên
+async function libFillCurrentProjects(){
+  if(!_LIB.loaded){ toast('Đang tải kho…'); await _libFetch(); }
+  if(!_LIB.projects.length){ alert('Danh sách dự án chưa có dữ liệu (chạy SQL nạp trước).'); return; }
+  var idx={}; _LIB.projects.forEach(function(L){ var k=_libNKey(L.name_jp); if(k&&!idx[k]) idx[k]=L; });
+  var matched=0, filled=0, updates=[];
+  Object.values(D.months).forEach(function(m){
+    [].concat(m.projects||[], m.projectsVN||[]).forEach(function(p){
+      var L=idx[_libNKey(p.nameJP||p.nameVN)]; if(!L) return; matched++;
+      var cols={}, any=false;
+      _LIB_A2L.forEach(function(mm){ var af=mm[0], lf=mm[1];
+        if((!p[af] || p[af]==='') && L[lf]){ p[af]=L[lf]; cols[_LIB_APPCOL[af]]=L[lf]; filled++; any=true; }
+      });
+      if(any) updates.push({id:p.id, cols:cols});
+    });
+  });
+  save();
+  var ok=0;
+  for(var i=0;i<updates.length;i++){ try{ var r=await _sb.from('projects').update(updates[i].cols).eq('id',updates[i].id); if(!(r&&r.error)) ok++; }catch(e){} }
+  try{ if(activePage==='main') renderContent(); }catch(e){}
+  alert('🔗 Đã liên kết '+matched+' lượt dự án hiện tại với kho.\n➕ Bổ sung '+filled+' ô đang trống (giữ nguyên ô đã có).\n💾 Ghi Supabase: '+ok+'/'+updates.length+' dòng.\n\n(Từ giờ sửa ở Danh sách dự án hay ở dự án hiện tại đều tự đồng bộ theo tên.)');
+}
+// App -> Lib: khi sửa 1 trường dự án hiện tại, cập nhật kho theo tên
+function _libSyncFromApp(p, field, val){
+  if(!_LIB.loaded || !p) return;
+  var lf=({client:'client',buildingType:'building_type',scope:'address',constructionStart:'kickoff',constructionEnd:'completion',area:'main_staff'})[field];
+  if(!lf) return;
+  var k=_libNKey(p.nameJP||p.nameVN);
+  var L=_LIB.projects.find(function(x){return _libNKey(x.name_jp)===k;});
+  if(!L) return;
+  if((L[lf]||'')===(val||'')) return;
+  L[lf]=val||''; _libRecalcMissing(L);
+  try{ var patch={}; patch[lf]=val||''; patch.missing=L.missing; _sb.from('lib_projects').update(patch).eq('id',L.id); }catch(e){}
+}
+// Lib -> App: khi sửa ở Danh sách dự án, cập nhật mọi dự án hiện tại trùng tên
+function _libSyncToApp(L){
+  if(!L) return; var k=_libNKey(L.name_jp); var changed=false;
+  Object.values(D.months).forEach(function(m){
+    [].concat(m.projects||[], m.projectsVN||[]).forEach(function(p){
+      if(_libNKey(p.nameJP||p.nameVN)!==k) return;
+      _LIB_A2L.forEach(function(mm){ var af=mm[0], lf=mm[1];
+        if((p[af]||'')!==(L[lf]||'')){ p[af]=L[lf]||''; if(typeof savePjDetailField==='function') savePjDetailField(p.id, af, L[lf]||''); changed=true; }
+      });
+    });
+  });
+  if(changed){ save(); try{ if(activePage==='main') renderContent(); }catch(e){} }
 }
 
 /* MONTH STRIP */

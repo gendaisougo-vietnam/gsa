@@ -3237,6 +3237,7 @@ function showPage(pg) {
     const btnIntl=document.getElementById('navMainIntl'); if(btnIntl) btnIntl.classList.toggle('active', activeSection==='intl');
   }
   var _nl=document.getElementById('navLibrary'); if(_nl) _nl.classList.toggle('active', pg==='library');
+  var _ms=document.getElementById('monthStrip'); if(_ms) _ms.style.display = (pg==='library')?'none':'';
   if(pg==='dashboard') renderDashboard();
   else if(pg==='staff') renderStaffPage();
   else if(pg==='settings') renderSettings();
@@ -3355,6 +3356,9 @@ function _libStyle(){ return '<style>'
    +'body.night .lib-warn{background:#3a2f16!important;border-color:#7a5c1e!important;color:#f0d79a!important}'
    +'body.night .lib-warn.red{background:#3a1f1d!important;border-color:#7a3b34!important;color:#f0a99f!important}'
    +'body.night .lib-ok{background:#12301f!important;border-color:#2c6b45!important;color:#8fe0ab!important}'
+   +'body.night #llkPanel{background:#141d30!important;color:#e4e9f2!important}'
+   +'body.night #llkPanel h3,body.night #llkPanel h2{color:#eef2f9!important}'
+   +'body.night #llkResults{border-color:#28374f!important}'
    +'</style>'; }
 
 function renderLibrary(){
@@ -3487,10 +3491,7 @@ function _libDetail(p){
   if(p.reviewed){
     warn='<div class="lib-ok">✅ Đã xác nhận rà soát'+(p.reviewed_by?(' bởi '+_esc(p.reviewed_by)):'')+(p.reviewed_at?(' · '+_esc(p.reviewed_at)):'')+(miss?(' <span style="color:#a9752a">(vẫn còn thiếu: '+_esc(miss)+')</span>'):'')+'</div>';
   } else if(miss){
-    var onweb=!!p.web_url;
-    warn='<div class="lib-warn'+(onweb?'':' red')+'"><b>⚠ Thiếu dữ liệu:</b> '+_esc(miss)+'<br>'
-      +'<b>Lý do &amp; cách kiểm:</b> '+_esc(p.missing_reason||'')+'<br>'
-      +'<span style="opacity:.85">Bấm <b>✏️ Sửa</b> để điền, rồi <b>Xác nhận</b>.</span></div>';
+    warn='<div class="lib-warn"><b>⚠ Thiếu:</b> '+_esc(miss)+'. &nbsp;<b>Tra ở file gốc:</b> 工程/'+_esc(p.src_last||'?')+(p.web_url?' hoặc bấm 🌐 web':'')+'.</div>';
   }
   var row=function(k,v){ return '<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+(v||'<span style="color:#c0392b">— trống —</span>')+'</div></div>'; };
   var itemRows=its.length? its.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join('')
@@ -4766,12 +4767,94 @@ function exportKouteiPdf(){
   setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; }, 400); }, 150);
 }
 
-// ===== Tra lịch sử dự án — mở Danh sách dự án (thư viện koutei 6 năm: tra theo CĐT/tên/担当/hạng mục + PDF) =====
-function openProjectHistoryLookup(){
-  // Mở kho Danh sách dự án (thư viện) — nơi tra cứu chuyên nghiệp + xuất PDF.
-  // Gợi ý chế độ tra theo phòng đang xem.
-  try{ _libState.mode='all'; _libState.q=''; _libState.sel=null; _libState.need=false; }catch(e){}
-  showPage('library');
+// ===== Tra lịch sử dự án — POPUP nhỏ tra cứu từ thư viện (tab loại tìm + 1 ô + danh sách khớp) =====
+var _llk = { mode:'client', q:'', sel:null };
+function openProjectHistoryLookup(){ openLibLookup(); }
+function openLibLookup(){
+  if(!_LIB.loaded){
+    _llkShow('<div style="padding:36px;text-align:center;color:#8a94a6;font-size:14px">🔎 Đang tải dữ liệu dự án…</div>');
+    _libFetch().then(function(){ openLibLookup(); });
+    return;
+  }
+  _llk.sel=null; _llkRender();
+}
+function _llkShow(html){
+  var ov=document.getElementById('libLookupOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='libLookupOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(10,16,28,.55);display:flex;align-items:flex-start;justify-content:center;padding:60px 16px';
+    ov.onclick=function(e){ if(e.target===ov) _llkClose(); };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML='<div id="llkPanel" style="width:min(860px,96vw);max-height:82vh;overflow:auto;background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.4)">'+html+'</div>';
+}
+function _llkClose(){ var ov=document.getElementById('libLookupOverlay'); if(ov) ov.remove(); }
+function _llkMatch(p,q,mode){
+  q=(q||'').trim().toLowerCase(); if(!q) return false;
+  if(mode==='client') return (p.client||'').toLowerCase().indexOf(q)>=0;
+  if(mode==='name')   return ((p.name_jp||'')+' '+(p.web_name||'')).toLowerCase().indexOf(q)>=0;
+  if(mode==='tantou') return (p.main_staff||'').toLowerCase().indexOf(q)>=0;
+  if(mode==='staff'){ var its=_LIB.items[p.id]||[]; return ((p.main_staff||'')+' '+(p.note||'')).toLowerCase().indexOf(q)>=0 || its.some(function(r){return (r.staff||'').toLowerCase().indexOf(q)>=0;}); }
+  return false;
+}
+function _llkResultsHtml(){
+  var q=(_llk.q||'').trim();
+  if(!q) return '<div style="padding:26px;text-align:center;color:#9aa4b2;font-size:13px">Nhập tên để tra cứu…</div>';
+  var res=_LIB.projects.filter(function(p){return _llkMatch(p,q,_llk.mode);});
+  res.sort(function(a,b){return (b.last_seen||'').localeCompare(a.last_seen||'');});
+  if(!res.length) return '<div style="padding:26px;text-align:center;color:#9aa4b2;font-size:13px">Không tìm thấy dự án khớp "'+_esc(q)+'".</div>';
+  return res.slice(0,120).map(function(p){
+    var web=p.web_url?'<span class="lib-b lib-b-web" style="margin-left:4px">🌐</span>':'';
+    return '<div class="lib-card" onclick="_llkSel(\''+p.id+'\')">'
+      +'<div class="lib-card-nm">'+_esc(p.name_jp||'')+web+'</div>'
+      +'<div class="lib-card-sub">'+_esc(p.client||'—')+(p.building_type?(' · '+_esc(p.building_type)):'')+' · 担当 '+_esc(p.main_staff||'—')+'</div></div>';
+  }).join('');
+}
+function _llkRender(){
+  var tabs=[['client','Chủ đầu tư'],['name','Tên dự án'],['tantou','担当 (Nhật)'],['staff','Nhân sự / liên hệ']]
+    .map(function(t){return '<button class="lib-chip'+(_llk.mode===t[0]?' on':'')+'" onclick="_llkTab(\''+t[0]+'\')">'+t[1]+'</button>';}).join('');
+  var body;
+  if(_llk.sel){
+    var p=_LIB.projects.find(function(x){return x.id===_llk.sel;});
+    body='<div style="padding:6px 4px"><button class="lib-btn lib-btn-s" onclick="_llkBack()">← Quay lại danh sách</button></div>'+_llkDetail(p);
+  } else {
+    body='<div style="padding:10px 4px 2px"><input id="llk-q" class="lib-inp" autofocus placeholder="Gõ tên…" value="'+_esc(_llk.q)+'" oninput="_llkType(this.value)"></div>'
+      +'<div id="llkResults" style="border:1px solid #e6e9f0;border-radius:10px;margin-top:8px;max-height:52vh;overflow:auto">'+_llkResultsHtml()+'</div>';
+  }
+  _llkShow(_libStyle()
+    +'<div style="padding:16px 18px 18px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    +'<h3 style="margin:0;font-size:16px;color:var(--navy,#1f3a5f)">🔎 Tra cứu dự án (kho koutei 2021–2026)</h3>'
+    +'<button onclick="_llkClose()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:#8592a8">✕</button></div>'
+    +(_llk.sel?'':'<div style="margin-bottom:2px">'+tabs+'</div>')
+    +body+'</div>');
+  var qi=document.getElementById('llk-q'); if(qi){ qi.focus(); qi.setSelectionRange(qi.value.length,qi.value.length); }
+}
+function _llkTab(m){ _llk.mode=m; _llkRender(); }
+function _llkType(v){ _llk.q=v; var r=document.getElementById('llkResults'); if(r) r.innerHTML=_llkResultsHtml(); }
+function _llkSel(id){ _llk.sel=id; _llkRender(); }
+function _llkBack(){ _llk.sel=null; _llkRender(); }
+function _llkDetail(p){
+  if(!p) return '';
+  var its=(_LIB.items[p.id]||[]).slice().sort(function(a,b){return (b.qty||0)-(a.qty||0);});
+  var web = p.web_url ? '<a class="lib-btn lib-btn-web" href="'+_esc(p.web_url)+'" target="_blank" rel="noopener">🌐 Xem trên web'+(p.web_name?(' — '+_esc(p.web_name)):'')+'</a>' : '';
+  var search = p.web_search ? '<a class="lib-btn lib-btn-s" href="'+_esc(p.web_search)+'" target="_blank" rel="noopener">🔎 Tìm trên web</a>' : '';
+  var pdf='<button class="lib-btn lib-btn-pdf" onclick="_libPdf(\''+p.id+'\')">🖨 Xuất PDF</button>';
+  var row=function(k,v){ return v?('<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>'):''; };
+  var itemRows=its.length? its.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join('')
+    : '<tr><td colspan="3" style="color:#9aa4b6">—</td></tr>';
+  return '<div class="lib-d" style="padding:8px 4px">'
+    +'<h2>'+(p.web_url?'🌐 ':'')+_esc(p.name_jp||'')+'</h2>'
+    +(p.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:6px">Tên hoàn công: '+_esc(p.web_name)+'</div>'):'')
+    +'<div>'+web+search+pdf+'</div>'
+    +row('Chủ đầu tư', _esc(p.client||'—'))
+    +row('Loại công trình', _esc(p.building_type||'—'))
+    +row('Địa chỉ', _esc(p.address||''))
+    +row('Người phụ trách (担当)', _esc(p.main_staff||'—'))
+    +row('Khởi công / Bàn giao', _esc(p.kickoff||'—')+' → '+_esc(p.completion||'—'))
+    +row('Theo dõi', (p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' · '+p.weeks+' tuần'):''))
+    +'<div style="margin-top:12px;font-weight:700;color:#1f2d45;font-size:13px">🗂 Hạng mục ('+its.length+')</div>'
+    +'<table class="lib-itemtbl"><tr><th>Hạng mục</th><th>NV</th><th style="text-align:center">Lần</th></tr>'+itemRows+'</table>'
+    +'</div>';
 }
 // (giữ lại) Xuất PDF lịch sử từ dữ liệu SỐNG các tháng hiện tại — dùng khi cần lịch sử số mai theo tháng
 function openProjectHistoryLookupLive(){

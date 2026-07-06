@@ -305,6 +305,8 @@ body.night :where(.content,.modal,#pageDashboard,#pageStaff,#pageSettings,#pageO
 body.night table.detail-tl, body.night table.detail-tl td, body.night table.detail-tl th{ border-color:#2b3a58 !important; }
 /* Cot HANG MUC (o nhom) trong bang chi tiet: nen TOI, chi o nhap ten sang (input rule lo) */
 body.night .kj-grp-cell{ background:#141d30 !important; }
+/* Hàng NHÓM bảng tiến độ VN dùng gradient sáng (#EEF2FF..#F8F9FF) -> nền tối */
+body.night [style*="linear-gradient(90deg,#EEF2FF"]{ background:#1a2438 !important; border-top-color:#2b3a58 !important; }
 /* Ngay T7/CN + le: xanh XÁM DỊU (mờ) — chỉ để phân biệt nhẹ */
 body.night [style*="background:rgba(231,76,60,.04)"],
 body.night [style*="background:rgba(0,0,0,.03)"]{ background:rgba(92,124,168,.13) !important; }
@@ -6600,6 +6602,33 @@ function renderVNInfoPanel(p) {
   </div>`;
 }
 
+// Số ngày LÀM VIỆC (T2–T6, trừ ngày lễ) giữa 2 mốc
+function _workingDaysBetween(a, b){
+  if(b<a) return 0;
+  var hol=null; try{ hol=new Set((getHolidays()||[]).map(function(h){return h.date;})); }catch(e){ hol=new Set(); }
+  var n=0, d=new Date(a.getTime());
+  while(d<=b){ var dow=d.getDay(); if(dow!==0 && dow!==6 && !hol.has(localDateStr(d))) n++; d.setDate(d.getDate()+1); }
+  return n;
+}
+// Thông tin tiến độ theo HỢP ĐỒNG (so ngày thực tế với tổng tiến độ HĐ) -> cảnh báo
+function _contractProgressInfo(p){
+  if(!p) return null;
+  var dur=+p.contractDur||0; if(dur<=0 || !p.contractStart) return null;
+  var start=new Date(p.contractStart+'T00:00:00'); if(isNaN(start)) return null;
+  var today=new Date(); today.setHours(0,0,0,0);
+  var type=p.contractDurType||'days', totalDays, elapsedDays;
+  if(type==='weeks'){ totalDays=dur*7; elapsedDays=Math.max(0,Math.floor((today-start)/86400000)); }
+  else { totalDays=dur; elapsedDays=Math.max(0,_workingDaysBetween(start,today)); }
+  var remaining=totalDays-elapsedDays;
+  var pct= totalDays>0? Math.min(999, Math.round(elapsedDays/totalDays*100)) : 0;
+  var unit = type==='weeks' ? 'ngày' : 'ngày làm';
+  var status,color,label;
+  if(today<start){ status='ok'; color='#3b82f6'; label='Chưa tới ngày bắt đầu HĐ'; }
+  else if(remaining<0){ status='over'; color='#ef4444'; label='Quá hạn HĐ '+(-remaining)+' '+unit+' ⚠ điều phối gấp'; }
+  else if(remaining<=Math.max(3, Math.round(totalDays*0.15))){ status='soon'; color='#f59e0b'; label='Sắp hết HĐ · còn '+remaining+' '+unit; }
+  else { status='ok'; color='#22c55e'; label='Còn '+remaining+' '+unit+' theo HĐ'; }
+  return {totalDays:totalDays, elapsedDays:elapsedDays, remaining:remaining, pct:pct, status:status, color:color, label:label, type:type, dur:dur};
+}
 function renderProjectTimeline_VN(p) {
   const allTasks = getTlTasks(p);
   const today = localDateStr(new Date());
@@ -6878,6 +6907,7 @@ function renderProjectTimeline_VN(p) {
       <div style="text-align:center;padding:5px 12px;background:#fef2f2;border-radius:var(--r)"><div style="font-size:16px;font-weight:700;color:#ef4444">${late}</div><div style="font-size:10px;color:#b91c1c">Trễ/UP</div></div>
     </div>
     ${_ovStaff.length?`<div style="margin:6px 12px;padding:6px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;font-size:11px;color:#9a3412">⚠ <b>Nhân sự quá tải</b> (bị xếp nhiều việc trùng ngày): ${_ovStaff.map(s=>x(staffShortName(s))).join(', ')}</div>`:''}
+    ${(function(){ var ci=_contractProgressInfo(p); if(!ci) return ''; var bg=ci.status==='over'?'#fef2f2':ci.status==='soon'?'#fff7ed':'#f0fdf4'; return '<div style="margin:6px 12px;padding:6px 10px;background:'+bg+';border:1px solid '+ci.color+';border-radius:6px;font-size:11px;color:'+ci.color+'">📃 <b>Tiến độ hợp đồng:</b> '+ci.dur+' '+(ci.type==='weeks'?'tuần':'ngày làm')+' · đã dùng '+ci.elapsedDays+' ('+ci.pct+'%) · <b>'+ci.label+'</b></div>'; })()}
     <div style="overflow-x:auto">
     <div class="tl-scroll-inner" style="position:relative;width:max-content;min-width:100%">
     <table style="border-collapse:collapse;width:100%;font-size:11px">
@@ -9544,6 +9574,31 @@ function openEditProject(id) {
       <div class="field"><label>Ngày Hoàn công</label>
         <input id="ep-constructionEnd" type="date" value="${x(p.constructionEnd||'')}"></div>
     </div>
+    <div style="font-size:11px;font-weight:700;color:#0f766e;margin:12px 0 8px;padding:4px 8px;background:#ecfdf5;border-radius:4px">💰 Nhóm 2b — Hợp đồng & Tiến độ hợp đồng <span style="font-size:9px;color:#94a3b8">(link Dashboard doanh số)</span></div>
+    <div class="info-grid c2" style="gap:10px">
+      <div class="field"><label>Giá trị hợp đồng (万円)</label>
+        <input id="ep-contractValue" type="number" value="${x(p.contractValue||'')}" placeholder="0"></div>
+      <div class="field"><label>Loại doanh số</label>
+        <select id="ep-revenueType">
+          <option value=""${!p.revenueType?' selected':''}>— chọn —</option>
+          <option value="honsha"${p.revenueType==='honsha'?' selected':''}>本社下請 (thầu HQ)</option>
+          <option value="vn_solo"${p.revenueType==='vn_solo'?' selected':''}>ベトナム単独 (VN ký)</option>
+        </select></div>
+      <div class="field"><label>Tháng ghi nhận doanh số</label>
+        <input id="ep-revenueMonth" type="month" value="${x(p.revenueMonth||'')}"></div>
+      <div class="field"><label>Tổng tiến độ HĐ</label>
+        <div style="display:flex;gap:6px">
+          <input id="ep-contractDur" type="number" value="${x(p.contractDur||'')}" placeholder="0" style="flex:1">
+          <select id="ep-contractDurType" style="flex:1.3">
+            <option value="days"${(p.contractDurType||'days')==='days'?' selected':''}>ngày làm việc</option>
+            <option value="weeks"${p.contractDurType==='weeks'?' selected':''}>tuần (cả T7,CN)</option>
+          </select>
+        </div></div>
+      <div class="field"><label>Ngày bắt đầu HĐ</label>
+        <input id="ep-contractStart" type="date" value="${x(p.contractStart||'')}"></div>
+      <div class="field"><label>Ngày bàn giao HĐ</label>
+        <input id="ep-contractDeadline" type="date" value="${x(p.contractDeadline||'')}"></div>
+    </div>
     <div style="font-size:11px;font-weight:700;color:#7d3c98;margin:12px 0 8px;padding:4px 8px;background:#fdf2f8;border-radius:4px">👥 Nhóm 3 — Nhân sự</div>
     <div class="info-grid c2" style="gap:10px">
       <div class="field"><label>Người liên hệ</label>
@@ -9610,6 +9665,17 @@ function confirmEditPj(id) {
   p.area             = (document.getElementById('ep-area')?.value||'').trim();
   p.constructionStart= (document.getElementById('ep-constructionStart')?.value||'');
   p.constructionEnd  = (document.getElementById('ep-constructionEnd')?.value||'');
+  // Hợp đồng & tiến độ HĐ (chỉ cập nhật khi ô có mặt = form VN, tránh xóa khi sửa JP)
+  var _cv=document.getElementById('ep-contractValue');
+  if(_cv){
+    p.contractValue    = _cv.value||'';
+    p.revenueType      = (document.getElementById('ep-revenueType')?.value||'');
+    p.revenueMonth     = (document.getElementById('ep-revenueMonth')?.value||'');
+    p.contractStart    = (document.getElementById('ep-contractStart')?.value||'');
+    p.contractDeadline = (document.getElementById('ep-contractDeadline')?.value||'');
+    p.contractDur      = (document.getElementById('ep-contractDur')?.value||'');
+    p.contractDurType  = (document.getElementById('ep-contractDurType')?.value||'days');
+  }
 
   // Đồng bộ THÔNG TIN DỰ ÁN sang mọi tháng (cùng dự án):
   //  - Tên + Văn phòng + Người liên hệ + Khung tên (担当/quy cách/địa chỉ/ngày/chủ đầu tư): giống nhau mọi tháng
@@ -9623,6 +9689,7 @@ function confirmEditPj(id) {
     q.contact = p.contact;
     q.client = p.client; q.buildingType = p.buildingType; q.scope = p.scope; q.area = p.area;
     q.constructionStart = p.constructionStart; q.constructionEnd = p.constructionEnd;
+    if(_cv){ q.contractValue=p.contractValue; q.revenueType=p.revenueType; q.revenueMonth=p.revenueMonth; q.contractStart=p.contractStart; q.contractDeadline=p.contractDeadline; q.contractDur=p.contractDur; q.contractDurType=p.contractDurType; }
     if (section === _editPool) q[_msKey] = p[_msKey];   // người triển khai chính: chỉ phòng đang sửa
     _sbSaveProject(q, mid, section);  // ghi thẳng Supabase (bỏ qua duyệt cho các tháng khác)
     syncedCount++;

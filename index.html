@@ -3282,6 +3282,7 @@ async function _libFetch(){
 }
 function libReload(){ _LIB.loaded=false; _LIB.projects=[]; renderLibrary(); }
 function _libContactOf(p){
+  if(p && p.contact_vn) return p.contact_vn;   // từ kho koutei
   try{ if(typeof _liveGatherByKey!=='function'||typeof _libNKey!=='function') return '';
     var g=_liveGatherByKey(_libNKey(p.name_jp||'')); return g?(g.info.contact||''):''; }catch(e){ return ''; }
 }
@@ -3305,7 +3306,7 @@ function _libMatch(p){
   var m=_libState.mode;
   var inName=((p.name_jp||'')+' '+(p.web_name||'')).toLowerCase().indexOf(q)>=0;
   var inClient=(p.client||'').toLowerCase().indexOf(q)>=0;
-  var staffAll=((p.main_staff||'')+' '+(p.note||'')).toLowerCase();
+  var staffAll=((p.main_staff||'')+' '+(p.contact_vn||'')+' '+(p.note||'')).toLowerCase();
   var inStaff=staffAll.indexOf(q)>=0;
   var its=_LIB.items[p.id]||[];
   var inItem=its.some(function(r){ return ((r.item_name||'')+(r.staff||'')).toLowerCase().indexOf(q)>=0; });
@@ -3447,7 +3448,7 @@ async function _libSave(id, alsoConfirm){
   var p=_LIB.projects.find(function(x){return x.id===id;}); if(!p) return;
   var patch={ client:_libV('le-client'), client_src:(_libV('le-client')&&!p.client)?'sửa tay':(p.client_src||''),
     building_type:_libV('le-btype'), address:_libV('le-address'), office:_libV('le-office'),
-    main_staff:_libV('le-staff'), kickoff:_libV('le-kickoff'), completion:_libV('le-completion') };
+    main_staff:_libV('le-staff'), contact_vn:_libV('le-contact'), kickoff:_libV('le-kickoff'), completion:_libV('le-completion') };
   Object.assign(p, patch);
   _libRecalcMissing(p); patch.missing=p.missing;
   if(alsoConfirm){ p.reviewed=true; p.reviewed_by=(document.getElementById('whoami')&&document.getElementById('whoami').textContent)||'admin'; p.reviewed_at=new Date().toISOString().slice(0,10); patch.reviewed=true; patch.reviewed_by=p.reviewed_by; patch.reviewed_at=p.reviewed_at; }
@@ -3485,7 +3486,8 @@ function _libDetail(p){
       +er('Loại công trình','le-btype',p.building_type)
       +er('Địa chỉ','le-address',p.address)
       +er('Phòng / VP','le-office',p.office)
-      +er('Người phụ trách (担当)','le-staff',p.main_staff)
+      +er('担当 (phụ trách Nhật)','le-staff',p.main_staff)
+      +er('Liên hệ (VN)','le-contact',_libContactOf(p))
       +er('Khởi công (着工)','le-kickoff',p.kickoff)
       +er('Bàn giao (引渡)','le-completion',p.completion)
       +'<div style="margin-top:14px">'
@@ -4899,7 +4901,7 @@ function _llkMerged(key){
     address:(li.scope)||(L?L.address:'')||'',
     office:(li.office)||(L?L.office:'')||'',
     tantou:(li.area)||(L?L.main_staff:'')||'',          // 担当 (Nhật)
-    contact:(li.contact)||'',                            // 連絡 Liên hệ (VN)
+    contact:(li.contact)||(L?L.contact_vn:'')||'',       // 連絡 Liên hệ (VN)
     kickoff:(li.constructionStart)||(L?L.kickoff:'')||'',
     completion:(li.constructionEnd)||(L?L.completion:'')||'',
     first_seen:L?L.first_seen:'', last_seen:L?L.last_seen:'', weeks:L?L.weeks:0, src_last:L?L.src_last:'',

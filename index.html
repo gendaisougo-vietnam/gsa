@@ -2439,8 +2439,8 @@ function _kpiColHidden() {
 
 // ── Phân quyền hiển thị theo tài khoản (accounts) ────────────────────────
 //   Nhóm "trang/phòng" (ẩn nút) + nhóm "chi tiết" (kpi/ot — ẩn cột trong hạng mục)
-const _PERM_FEATURES = ['studio','intl','vn','dashboard','staff','org','settings','report','kpi','ot','attendance','manage_studio','manage_intl','manage_vn'];
-const _PERM_LABELS = { studio:'Phòng Design Studio (phối cảnh)', intl:'Phòng International (bản vẽ)', vn:'Phòng Design Department (VN)', dashboard:'Dashboard', staff:'Nhân sự (đầy đủ)', org:'Sơ đồ tổ chức', settings:'Cài đặt', report:'Báo cáo / Xuất file', kpi:'Xem KPI / đánh giá trong hạng mục', ot:'Xem cột OT (giờ tăng ca)', attendance:'Chỉ theo dõi chấm công (nghỉ / đi muộn-sớm)', manage_studio:'⭐ Quản lý Design Studio (duyệt + sửa trực tiếp)', manage_intl:'⭐ Quản lý International (duyệt + sửa trực tiếp)', manage_vn:'⭐ Quản lý Design Dept VN (duyệt + sửa trực tiếp)' };
+const _PERM_FEATURES = ['studio','intl','vn','dashboard','staff','org','settings','library','report','kpi','ot','attendance','manage_studio','manage_intl','manage_vn'];
+const _PERM_LABELS = { studio:'Phòng Design Studio (phối cảnh)', intl:'Phòng International (bản vẽ)', vn:'Phòng Design Department (VN)', dashboard:'Dashboard', staff:'Nhân sự (đầy đủ)', org:'Sơ đồ tổ chức', settings:'Cài đặt', library:'📋 Danh sách dự án (rà soát + sửa)', report:'Báo cáo / Xuất file', kpi:'Xem KPI / đánh giá trong hạng mục', ot:'Xem cột OT (giờ tăng ca)', attendance:'Chỉ theo dõi chấm công (nghỉ / đi muộn-sớm)', manage_studio:'⭐ Quản lý Design Studio (duyệt + sửa trực tiếp)', manage_intl:'⭐ Quản lý International (duyệt + sửa trực tiếp)', manage_vn:'⭐ Quản lý Design Dept VN (duyệt + sửa trực tiếp)' };
 // Tài khoản CHỈ được giao theo dõi chấm công (không thấy trang Nhân sự đầy đủ)
 function _attendanceOnly() {
   var r = sessionStorage.getItem('splash_role') || SYNC.role || 'none';
@@ -2565,6 +2565,8 @@ function applyPermUI() {
   // Nút Báo cáo / Theme (trong menu logo) — theo quyền 'report'
   var _mr = document.getElementById('menuReport'); if (_mr) _mr.style.display = perms.report ? 'block' : 'none';
   var _mt = document.getElementById('menuTheme'); if (_mt) _mt.style.display = perms.report ? 'block' : 'none';
+  // Danh sách dự án (menu logo) — theo quyền 'library' (admin luôn thấy)
+  var _nlib = document.getElementById('navLibrary'); if (_nlib) _nlib.style.display = (perms.library || (typeof _isAdmin==='function' && _isAdmin())) ? 'block' : 'none';
   // Online badge chỉ admin
   var ob = document.getElementById('onlineBtn'); if (ob) ob.style.display = 'none';
   // Vào section đầu tiên được phép
@@ -3216,7 +3218,7 @@ function showPage(pg) {
   if (sessionRole === 'edit' && (pg === 'dashboard' || pg === 'staff' || pg === 'org')) return;
   if (sessionRole === 'custom') {
     const _pm = _currentPerms();
-    if ((pg==='dashboard'&&!_pm.dashboard)||(pg==='staff'&&!(_pm.staff||_pm.attendance))||(pg==='org'&&!_pm.org)||(pg==='settings'&&!_pm.settings)) return;
+    if ((pg==='dashboard'&&!_pm.dashboard)||(pg==='staff'&&!(_pm.staff||_pm.attendance))||(pg==='org'&&!_pm.org)||(pg==='settings'&&!_pm.settings)||(pg==='library'&&!_pm.library)) return;
   }
 
   activePage=pg;

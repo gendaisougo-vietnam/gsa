@@ -3264,6 +3264,9 @@ function setSection(sec) {
 
 /* ================= DANH SÁCH DỰ ÁN (kho koutei 6 năm + tra cứu + đối chiếu web + sửa/xác nhận) ================= */
 var _LIB = { projects:[], items:{}, loaded:false, loading:false, err:'' };
+// Link tới file koutei gốc (PDF) trên Supabase Storage bucket "koutei" (upload giữ thư mục năm)
+var _KOUTEI_BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/koutei/';
+function _kouteiUrl(path){ return _KOUTEI_BASE + encodeURI((path||'').replace(/^工程\//,'')); }
 var _libState = { q:'', mode:'all', year:'', office:'', client:'', sel:null, need:false, editing:false };
 
 async function _libFetch(){
@@ -3508,10 +3511,10 @@ function _libDetail(p){
   var itemRows=its.length? its.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join('')
     : '<tr><td colspan="3" style="color:#9aa4b6">Chưa bóc được hạng mục.</td></tr>';
   var filesHtml = files.length
-    ? '<div class="lib-files">📄 File gốc mới nhất: <b>'+_esc(p.src_last||'')+'</b>'
+    ? '<div class="lib-files">📄 File gốc mới nhất: <a href="'+_kouteiUrl(p.src_last)+'" target="_blank" rel="noopener" style="color:#1e5fbf;font-weight:700">'+_esc(p.src_last||'')+' 🔗</a>'
       + '<details style="margin-top:4px"><summary style="cursor:pointer;color:#345bbf;font-size:12px">Xem tất cả '+files.length+' file koutei nguồn</summary>'
-      + '<div style="margin-top:6px;color:#48577a;font-size:11.5px;line-height:1.9">'+files.map(function(f){return '📂 工程/'+_esc(f);}).join('<br>')+'</div></details>'
-      + '<div style="color:#8592a8;font-size:11px;margin-top:4px">→ Mở file này trong máy (thư mục <b>工程</b>) để đối chiếu bản gốc.</div></div>'
+      + '<div style="margin-top:6px;color:#48577a;font-size:11.5px;line-height:1.9">'+files.map(function(f){return '📂 <a href="'+_kouteiUrl(f)+'" target="_blank" rel="noopener" style="color:#345bbf">工程/'+_esc(f)+'</a>';}).join('<br>')+'</div></details>'
+      + '<div style="color:#8592a8;font-size:11px;margin-top:4px">→ Bấm tên file để mở koutei gốc (PDF) trên Storage đối chiếu.</div></div>'
     : '<div style="color:#9aa4b6;font-size:12px">Không rõ file nguồn.</div>';
 
   return '<div class="lib-d">'
@@ -4984,7 +4987,7 @@ function _llkDetail(key){
       +(lit.length?lit.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join(''):'<tr><td colspan="3" style="color:#9aa4b6">—</td></tr>')+'</table>';
   } else { nItems=0; itemsHtml='<div style="color:#9aa4b6;font-size:12px">—</div>'; }
   var srcNote = M.isLive ? '<span style="color:#1f8a4c">● Dự án đang chạy — số liệu lấy trực tiếp từ phần mềm (đầy đủ nhất).</span>'
-    : (M.src_last?('Nguồn kho: 工程/'+_esc(M.src_last)):'');
+    : (M.src_last?('Nguồn: <a href="'+_kouteiUrl(M.src_last)+'" target="_blank" rel="noopener" style="color:#345bbf">工程/'+_esc(M.src_last)+' 🔗</a>'):'');
   return '<div class="lib-d" style="padding:8px 4px">'
     +'<h2>'+(M.web_url?'🌐 ':'')+_esc(M.name_jp||M.name_vn||'')+'</h2>'
     +(M.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:6px">Tên hoàn công: '+_esc(M.web_name)+'</div>'):'')

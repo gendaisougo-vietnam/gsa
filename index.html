@@ -3279,6 +3279,10 @@ async function _libFetch(){
   _LIB.loading = false;
 }
 function libReload(){ _LIB.loaded=false; _LIB.projects=[]; renderLibrary(); }
+function _libContactOf(p){
+  try{ if(typeof _liveGatherByKey!=='function'||typeof _libNKey!=='function') return '';
+    var g=_liveGatherByKey(_libNKey(p.name_jp||'')); return g?(g.info.contact||''):''; }catch(e){ return ''; }
+}
 function _libRecalcMissing(p){
   var m=[];
   if(!p.client) m.push('Chủ đầu tư');
@@ -3516,7 +3520,8 @@ function _libDetail(p){
     +row('Loại công trình', _esc(p.building_type||''))
     +row('Địa chỉ', _esc(p.address||''))
     +row('Phòng / VP', _esc(p.office||''))
-    +row('Người phụ trách (担当)', _esc(p.main_staff||''))
+    +row('担当 (phụ trách Nhật)', _esc(p.main_staff||''))
+    +row('Liên hệ (VN)', _esc(_libContactOf(p)))
     +row('Khởi công (着工)', _esc(p.kickoff||''))
     +row('Bàn giao (引渡)', _esc(p.completion||''))
     +'<div class="lib-row"><div class="k">Theo dõi</div><div class="v">'+(p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' · '+p.weeks+' tuần'):'')+'</div></div>'
@@ -4851,41 +4856,93 @@ function openLibLookup(){
 function _llkShow(html){
   var ov=document.getElementById('libLookupOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='libLookupOverlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(10,16,28,.55);display:flex;align-items:flex-start;justify-content:center;padding:60px 16px';
+    ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(8,12,22,.5);backdrop-filter:blur(1.5px);display:flex;align-items:center;justify-content:center;padding:16px';
     ov.onclick=function(e){ if(e.target===ov) _llkClose(); };
     document.body.appendChild(ov);
   }
   ov.innerHTML='<div id="llkPanel" style="width:min(860px,96vw);max-height:82vh;overflow:auto;background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.4)">'+html+'</div>';
 }
 function _llkClose(){ var ov=document.getElementById('libLookupOverlay'); if(ov) ov.remove(); }
-function _llkMatch(p,q,mode){
+// Gom dữ liệu SỐNG (D.months) theo key tên: info + lịch sử hạng mục qua các tháng
+function _liveGatherByKey(key){
+  var info=null, items={}, months={};
+  Object.keys(D.months||{}).sort().forEach(function(mid){ var m=D.months[mid];
+    [].concat(m.projects||[], m.projectsVN||[]).forEach(function(p){
+      if(_libNKey(p.nameJP||p.nameVN)!==key) return;
+      if(!info) info={nameJP:p.nameJP||'',nameVN:p.nameVN||'',client:p.client||'',buildingType:p.buildingType||'',scope:p.scope||'',area:p.area||'',contact:p.contact||'',constructionStart:p.constructionStart||'',constructionEnd:p.constructionEnd||'',office:p.office||''};
+      else { ['client','buildingType','scope','area','contact','constructionStart','constructionEnd','office'].forEach(function(f){ if(!info[f] && p[f]) info[f]=p[f]; }); }
+      months[mid]=1;
+      (p.groups||[]).forEach(function(g){ (g.rows||[]).forEach(function(r){
+        if(r.isCarryRef||r.tentative) return;
+        if(!r.staff && !(r.qty>0) && !r.dateTo && !r.dateFrom) return;
+        var kk=(g.type||'')+'|'+(r.staff||'')+'|'+(g.dept||'studio');
+        if(!items[kk]) items[kk]={type:g.type||'',staff:r.staff||'',dept:g.dept||'studio',n:0,rev:0,cnt:0,months:{}};
+        var it=items[kk]; it.cnt++; it.months[mid]=1;
+        if(r.status==='new') it.n+=(r.qty||0); else if(r.status==='rev') it.rev+=(r.qty||0);
+      }); });
+    });
+  });
+  if(!info) return null;
+  return {info:info, months:Object.keys(months).sort(), items:Object.values(items)};
+}
+// Gộp 1 dự án: thông tin ưu tiên dữ liệu SỐNG (đầy đủ), bổ sung từ KHO (web link…)
+function _llkMerged(key){
+  var L=(_LIB.loaded?_LIB.projects:[]).find(function(x){return _libNKey(x.name_jp)===key;})||null;
+  var g=_liveGatherByKey(key); var li=g?g.info:{};
+  return { key:key,
+    name_jp:(li.nameJP)||(L?L.name_jp:'')||'', name_vn:(li.nameVN)||'',
+    web_url:L?(L.web_url||''):'', web_name:L?(L.web_name||''):'', web_search:L?(L.web_search||''):'',
+    client:(li.client)||(L?L.client:'')||'',
+    building_type:(li.buildingType)||(L?L.building_type:'')||'',
+    address:(li.scope)||(L?L.address:'')||'',
+    office:(li.office)||(L?L.office:'')||'',
+    tantou:(li.area)||(L?L.main_staff:'')||'',          // 担当 (Nhật)
+    contact:(li.contact)||'',                            // 連絡 Liên hệ (VN)
+    kickoff:(li.constructionStart)||(L?L.kickoff:'')||'',
+    completion:(li.constructionEnd)||(L?L.completion:'')||'',
+    first_seen:L?L.first_seen:'', last_seen:L?L.last_seen:'', weeks:L?L.weeks:0, src_last:L?L.src_last:'',
+    isLive:!!g, isLib:!!L, live:g, lib:L };
+}
+function _llkList(){
+  var ks={};
+  (_LIB.loaded?_LIB.projects:[]).forEach(function(L){ var k=_libNKey(L.name_jp); if(k) ks[k]=1; });
+  Object.values(D.months||{}).forEach(function(m){ [].concat(m.projects||[],m.projectsVN||[]).forEach(function(p){ var k=_libNKey(p.nameJP||p.nameVN); if(k) ks[k]=1; }); });
+  return Object.keys(ks).map(_llkMerged);
+}
+function _llkMatch(M,q,mode){
   q=(q||'').trim().toLowerCase(); if(!q) return false;
-  if(mode==='client') return (p.client||'').toLowerCase().indexOf(q)>=0;
-  if(mode==='name')   return ((p.name_jp||'')+' '+(p.web_name||'')).toLowerCase().indexOf(q)>=0;
-  if(mode==='tantou') return (p.main_staff||'').toLowerCase().indexOf(q)>=0;
-  if(mode==='staff'){ var its=_LIB.items[p.id]||[]; return ((p.main_staff||'')+' '+(p.note||'')).toLowerCase().indexOf(q)>=0 || its.some(function(r){return (r.staff||'').toLowerCase().indexOf(q)>=0;}); }
+  if(mode==='client') return (M.client||'').toLowerCase().indexOf(q)>=0;
+  if(mode==='name')   return ((M.name_jp||'')+' '+(M.name_vn||'')+' '+(M.web_name||'')).toLowerCase().indexOf(q)>=0;
+  if(mode==='tantou') return (M.tantou||'').toLowerCase().indexOf(q)>=0;
+  if(mode==='staff'){ // Nhân sự / liên hệ VN
+    var s=((M.contact||'')+' '+(M.tantou||'')).toLowerCase();
+    if(s.indexOf(q)>=0) return true;
+    if(M.live) return M.live.items.some(function(r){return (r.staff||'').toLowerCase().indexOf(q)>=0;});
+    if(M.lib){ var its=_LIB.items[M.lib.id]||[]; return its.some(function(r){return (r.staff||'').toLowerCase().indexOf(q)>=0;}); }
+  }
   return false;
 }
 function _llkResultsHtml(){
   var q=(_llk.q||'').trim();
   if(!q) return '<div style="padding:26px;text-align:center;color:#9aa4b2;font-size:13px">Nhập tên để tra cứu…</div>';
-  var res=_LIB.projects.filter(function(p){return _llkMatch(p,q,_llk.mode);});
-  res.sort(function(a,b){return (b.last_seen||'').localeCompare(a.last_seen||'');});
+  var res=_llkList().filter(function(M){return _llkMatch(M,q,_llk.mode);});
+  res.sort(function(a,b){ if(a.isLive!==b.isLive) return a.isLive?-1:1; return (b.last_seen||'').localeCompare(a.last_seen||''); });
   if(!res.length) return '<div style="padding:26px;text-align:center;color:#9aa4b2;font-size:13px">Không tìm thấy dự án khớp "'+_esc(q)+'".</div>';
-  return res.slice(0,120).map(function(p){
-    var web=p.web_url?'<span class="lib-b lib-b-web" style="margin-left:4px">🌐</span>':'';
-    return '<div class="lib-card" onclick="_llkSel(\''+p.id+'\')">'
-      +'<div class="lib-card-nm">'+_esc(p.name_jp||'')+web+'</div>'
-      +'<div class="lib-card-sub">'+_esc(p.client||'—')+(p.building_type?(' · '+_esc(p.building_type)):'')+' · 担当 '+_esc(p.main_staff||'—')+'</div></div>';
+  return res.slice(0,120).map(function(M){
+    var web=M.web_url?'<span class="lib-b lib-b-web" style="margin-left:4px">🌐</span>':'';
+    var liveB=M.isLive?'<span class="lib-b" style="background:#e6f7ec;color:#1f8a4c;margin-left:2px">đang chạy</span>':'';
+    return '<div class="lib-card" onclick="_llkSel(\''+encodeURIComponent(M.key)+'\')">'
+      +'<div class="lib-card-nm">'+_esc(M.name_jp||M.name_vn||'')+web+liveB+'</div>'
+      +'<div class="lib-card-sub">'+_esc(M.client||'—')+(M.building_type?(' · '+_esc(M.building_type)):'')
+      +' · 担当 '+_esc(M.tantou||'—')+(M.contact?(' · Liên hệ '+_esc(M.contact)):'')+'</div></div>';
   }).join('');
 }
 function _llkRender(){
-  var tabs=[['client','Chủ đầu tư'],['name','Tên dự án'],['tantou','担当 (Nhật)'],['staff','Nhân sự / liên hệ']]
+  var tabs=[['client','Chủ đầu tư'],['name','Tên dự án'],['tantou','担当 (Nhật)'],['staff','Liên hệ (VN)/NV']]
     .map(function(t){return '<button class="lib-chip'+(_llk.mode===t[0]?' on':'')+'" onclick="_llkTab(\''+t[0]+'\')">'+t[1]+'</button>';}).join('');
   var body;
   if(_llk.sel){
-    var p=_LIB.projects.find(function(x){return x.id===_llk.sel;});
-    body='<div style="padding:6px 4px"><button class="lib-btn lib-btn-s" onclick="_llkBack()">← Quay lại danh sách</button></div>'+_llkDetail(p);
+    body='<div style="padding:6px 4px"><button class="lib-btn lib-btn-s" onclick="_llkBack()">← Quay lại danh sách</button></div>'+_llkDetail(_llk.sel);
   } else {
     body='<div style="padding:10px 4px 2px"><input id="llk-q" class="lib-inp" autofocus placeholder="Gõ tên…" value="'+_esc(_llk.q)+'" oninput="_llkType(this.value)"></div>'
       +'<div id="llkResults" style="border:1px solid #e6e9f0;border-radius:10px;margin-top:8px;max-height:52vh;overflow:auto">'+_llkResultsHtml()+'</div>';
@@ -4893,7 +4950,7 @@ function _llkRender(){
   _llkShow(_libStyle()
     +'<div style="padding:16px 18px 18px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
-    +'<h3 style="margin:0;font-size:16px;color:var(--navy,#1f3a5f)">🔎 Tra cứu dự án (kho koutei 2021–2026)</h3>'
+    +'<h3 style="margin:0;font-size:16px;color:var(--navy,#1f3a5f)">🔎 Tra cứu dự án</h3>'
     +'<button onclick="_llkClose()" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:#8592a8">✕</button></div>'
     +(_llk.sel?'':'<div style="margin-bottom:2px">'+tabs+'</div>')
     +body+'</div>');
@@ -4901,30 +4958,72 @@ function _llkRender(){
 }
 function _llkTab(m){ _llk.mode=m; _llkRender(); }
 function _llkType(v){ _llk.q=v; var r=document.getElementById('llkResults'); if(r) r.innerHTML=_llkResultsHtml(); }
-function _llkSel(id){ _llk.sel=id; _llkRender(); }
+function _llkSel(k){ _llk.sel=decodeURIComponent(k); _llkRender(); }
 function _llkBack(){ _llk.sel=null; _llkRender(); }
-function _llkDetail(p){
-  if(!p) return '';
-  var its=(_LIB.items[p.id]||[]).slice().sort(function(a,b){return (b.qty||0)-(a.qty||0);});
-  var web = p.web_url ? '<a class="lib-btn lib-btn-web" href="'+_esc(p.web_url)+'" target="_blank" rel="noopener">🌐 Xem trên web'+(p.web_name?(' — '+_esc(p.web_name)):'')+'</a>' : '';
-  var search = p.web_search ? '<a class="lib-btn lib-btn-s" href="'+_esc(p.web_search)+'" target="_blank" rel="noopener">🔎 Tìm trên web</a>' : '';
-  var pdf='<button class="lib-btn lib-btn-pdf" onclick="_libPdf(\''+p.id+'\')">🖨 Xuất PDF</button>';
-  var row=function(k,v){ return v?('<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>'):''; };
-  var itemRows=its.length? its.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join('')
-    : '<tr><td colspan="3" style="color:#9aa4b6">—</td></tr>';
+function _llkDetail(key){
+  var M=_llkMerged(key); if(!M) return '';
+  var web = M.web_url ? '<a class="lib-btn lib-btn-web" href="'+_esc(M.web_url)+'" target="_blank" rel="noopener">🌐 Xem trên web'+(M.web_name?(' — '+_esc(M.web_name)):'')+'</a>' : '';
+  var search = M.web_search ? '<a class="lib-btn lib-btn-s" href="'+_esc(M.web_search)+'" target="_blank" rel="noopener">🔎 Tìm trên web</a>' : '';
+  var pdf='<button class="lib-btn lib-btn-pdf" onclick="_llkPdf(\''+encodeURIComponent(key)+'\')">🖨 Xuất PDF</button>';
+  var row=function(k,v){ return '<div class="lib-row"><div class="k">'+k+'</div><div class="v">'+(v||'<span style="color:#8592a8">—</span>')+'</div></div>'; };
+  // hạng mục: ưu tiên dữ liệu sống (lịch sử qua các tháng)
+  var itemsHtml, nItems;
+  if(M.live && M.live.items.length){
+    var its=M.live.items.slice().sort(function(a,b){return (b.n+b.rev)-(a.n+a.rev);});
+    nItems=its.length;
+    itemsHtml='<table class="lib-itemtbl"><tr><th>Hạng mục</th><th>NV</th><th>Phòng</th><th style="text-align:center">作成</th><th style="text-align:center">修正</th><th style="text-align:center">Số tháng</th></tr>'
+      +its.map(function(r){return '<tr><td>'+_esc(r.type||'')+'</td><td>'+_esc(r.staff||'')+'</td><td>'+(r.dept==='intl'?'図面':'パース')+'</td><td style="text-align:center;color:#27ae60">'+(r.n||'')+'</td><td style="text-align:center;color:#e67e22">'+(r.rev||'')+'</td><td style="text-align:center;color:#8592a8">'+Object.keys(r.months).length+'</td></tr>';}).join('')+'</table>';
+  } else if(M.lib){
+    var lit=(_LIB.items[M.lib.id]||[]).slice().sort(function(a,b){return (b.qty||0)-(a.qty||0);});
+    nItems=lit.length;
+    itemsHtml='<table class="lib-itemtbl"><tr><th>Hạng mục</th><th>NV</th><th style="text-align:center">Số lần</th></tr>'
+      +(lit.length?lit.map(function(r){return '<tr><td>'+_esc(r.item_name||'')+'</td><td>'+_esc(r.staff||'')+'</td><td style="text-align:center;color:#8592a8">'+(r.qty||'')+'</td></tr>';}).join(''):'<tr><td colspan="3" style="color:#9aa4b6">—</td></tr>')+'</table>';
+  } else { nItems=0; itemsHtml='<div style="color:#9aa4b6;font-size:12px">—</div>'; }
+  var srcNote = M.isLive ? '<span style="color:#1f8a4c">● Dự án đang chạy — số liệu lấy trực tiếp từ phần mềm (đầy đủ nhất).</span>'
+    : (M.src_last?('Nguồn kho: 工程/'+_esc(M.src_last)):'');
   return '<div class="lib-d" style="padding:8px 4px">'
-    +'<h2>'+(p.web_url?'🌐 ':'')+_esc(p.name_jp||'')+'</h2>'
-    +(p.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:6px">Tên hoàn công: '+_esc(p.web_name)+'</div>'):'')
+    +'<h2>'+(M.web_url?'🌐 ':'')+_esc(M.name_jp||M.name_vn||'')+'</h2>'
+    +(M.web_name?('<div style="font-size:13px;color:#1e5fbf;margin-bottom:6px">Tên hoàn công: '+_esc(M.web_name)+'</div>'):'')
     +'<div>'+web+search+pdf+'</div>'
-    +row('Chủ đầu tư', _esc(p.client||'—'))
-    +row('Loại công trình', _esc(p.building_type||'—'))
-    +row('Địa chỉ', _esc(p.address||''))
-    +row('Người phụ trách (担当)', _esc(p.main_staff||'—'))
-    +row('Khởi công / Bàn giao', _esc(p.kickoff||'—')+' → '+_esc(p.completion||'—'))
-    +row('Theo dõi', (p.first_seen||'')+' → '+(p.last_seen||'')+(p.weeks?(' · '+p.weeks+' tuần'):''))
-    +'<div style="margin-top:12px;font-weight:700;color:#1f2d45;font-size:13px">🗂 Hạng mục ('+its.length+')</div>'
-    +'<table class="lib-itemtbl"><tr><th>Hạng mục</th><th>NV</th><th style="text-align:center">Lần</th></tr>'+itemRows+'</table>'
+    +row('Chủ đầu tư', _esc(M.client))
+    +row('Loại công trình', _esc(M.building_type))
+    +row('Địa chỉ', _esc(M.address))
+    +row('担当 (phụ trách Nhật)', _esc(M.tantou))
+    +row('Liên hệ (VN)', _esc(M.contact))
+    +row('Khởi công / Bàn giao', _esc(M.kickoff||'—')+' → '+_esc(M.completion||'—'))
+    +'<div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between"><div style="font-weight:700;color:#1f2d45;font-size:13px">🗂 Hạng mục ('+nItems+')</div><div style="font-size:11px;color:#8592a8">'+srcNote+'</div></div>'
+    +itemsHtml
     +'</div>';
+}
+// Xuất PDF từ dữ liệu gộp (sống + kho)
+function _llkPdf(key){
+  var M=_llkMerged(decodeURIComponent(key)); if(!M) return;
+  var TD='border:1px solid #000;padding:3px 6px;font-size:11px';
+  var TH='border:1px solid #000;padding:4px 6px;font-size:11px;font-weight:800;background:#eee;text-align:center';
+  var info='<div style="font-size:12px;margin:6px 0 12px;line-height:1.8">'
+    +'<b style="font-size:16px">'+_esc(M.name_jp||M.name_vn||'')+'</b>'+(M.web_name?' <span style="color:#666">（'+_esc(M.web_name)+'）</span>':'')+'<br>'
+    +'施主 CĐT: <b>'+_esc(M.client||'—')+'</b> ｜ 仕様: '+_esc(M.building_type||'—')+'<br>'
+    +'担当(Nhật): '+_esc(M.tantou||'—')+' ｜ 連絡/Liên hệ(VN): '+_esc(M.contact||'—')+'<br>'
+    +(M.address?('所在地: '+_esc(M.address)+'<br>'):'')
+    +'着工: '+_esc(M.kickoff||'—')+' ｜ 引渡: '+_esc(M.completion||'—')+(M.web_url?('<br>Web: '+_esc(M.web_url)):'')
+    +'</div>';
+  var body,head;
+  if(M.live && M.live.items.length){
+    head='<tr><th style="'+TH+'">項目 Hạng mục</th><th style="'+TH+'">担当 NV</th><th style="'+TH+'">区分</th><th style="'+TH+'">作成</th><th style="'+TH+'">修正</th><th style="'+TH+'">月数</th></tr>';
+    body=M.live.items.slice().sort(function(a,b){return (b.n+b.rev)-(a.n+a.rev);}).map(function(r){return '<tr><td style="'+TD+'">'+_esc(r.type||'')+'</td><td style="'+TD+'">'+_esc(r.staff||'')+'</td><td style="'+TD+'">'+(r.dept==='intl'?'図面':'パース')+'</td><td style="'+TD+';text-align:center">'+(r.n||'')+'</td><td style="'+TD+';text-align:center">'+(r.rev||'')+'</td><td style="'+TD+';text-align:center">'+Object.keys(r.months).length+'</td></tr>';}).join('');
+  } else {
+    var lit=M.lib?(_LIB.items[M.lib.id]||[]):[];
+    head='<tr><th style="'+TH+'">項目 Hạng mục</th><th style="'+TH+'">担当 NV</th><th style="'+TH+'">回数</th></tr>';
+    body=lit.length?lit.map(function(r){return '<tr><td style="'+TD+'">'+_esc(r.item_name||'')+'</td><td style="'+TD+'">'+_esc(r.staff||'')+'</td><td style="'+TD+';text-align:center">'+(r.qty||'')+'</td></tr>';}).join(''):'<tr><td colspan="3" style="'+TD+'">—</td></tr>';
+  }
+  var nowD=new Date(); var rw=nowD.getFullYear()-2018; var dateStr='令和'+rw+'年'+String(nowD.getMonth()+1).padStart(2,'0')+'月'+String(nowD.getDate()).padStart(2,'0')+'日';
+  var html='<div class="kj-page"><div class="kj-print-head">プロジェクト情報 — Hồ sơ dự án</div>'+info
+    +'<table style="border-collapse:collapse;width:100%"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+    +'<div class="kj-print-foot"><div class="ft-l">特記事項</div><div class="ft-r"><div>作製</div><div style="font-weight:800">現代綜合設計ベトナム</div><div>'+dateStr+'</div></div></div></div>';
+  var ov=document.getElementById('kjPrintOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='kjPrintOverlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; document.body.classList.add('kj-printing');
+  setTimeout(function(){ window.print(); setTimeout(function(){ document.body.classList.remove('kj-printing'); ov.innerHTML=''; },400); },150);
 }
 // (giữ lại) Xuất PDF lịch sử từ dữ liệu SỐNG các tháng hiện tại — dùng khi cần lịch sử số mai theo tháng
 function openProjectHistoryLookupLive(){

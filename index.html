@@ -9771,6 +9771,7 @@ function updPj(pjId,field,val) { const p=getPj(pjId); if(!p) return; p[field]=va
 
 function openAddProject() {
   window._apFullSource = null;  // reset state mỗi lần mở modal
+  try{ if(typeof _LIB!=='undefined' && !_LIB.loaded && typeof _libFetch==='function') _libFetch(); }catch(e){}
   const hist = getPjHistory();
   const histOptions = hist.map(h=>`<option value="${x(h.nameVN||h.nameJP)}">`).join('');
   const isVN = activeSection === 'vn';
@@ -9783,7 +9784,7 @@ function openAddProject() {
       </div>
       <div class="field"><label>Tên dự án (JP)</label>
         <input id="ap-nJP" list="ap-hist-jp" placeholder="例：吹田市計画" oninput="apTryLoadHistory()">
-        <datalist id="ap-hist-jp">${hist.map(h=>`<option value="${x(h.nameJP||h.nameVN)}">`).join('')}</datalist>
+        <datalist id="ap-hist-jp">${hist.map(h=>`<option value="${x(h.nameJP||h.nameVN)}">`).join('')}${(typeof _LIB!=='undefined'&&_LIB.loaded)?_LIB.projects.map(p=>`<option value="${x(p.name_jp||'')}">`).join(''):''}</datalist>
       </div>
       <div class="field"><label>Văn phòng</label>
         <select id="ap-off"><option>大阪</option><option>東京</option><option>ハノイ</option><option>HCM</option></select>
@@ -9876,6 +9877,14 @@ function openAddProject() {
 }
 
 // Thử tự động tìm trong history khi người dùng gõ
+function _libFindByName(name){
+  try{
+    if (typeof _LIB==='undefined' || !_LIB.loaded || !name || typeof _libNKey!=='function') return null;
+    var k=_libNKey(name); if(k.length<3) return null;
+    return _LIB.projects.find(function(p){ return _libNKey(p.name_jp)===k; }) || null;
+  }catch(e){ return null; }
+}
+function _libDateInput(s){ var m=(s||'').match(/^(\d{4})[.\-](\d{1,2})[.\-](\d{1,2})$/); return m? (m[1]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[3]).slice(-2)):''; }
 function apTryLoadHistory() {
   const nVN = document.getElementById('ap-nVN')?.value.trim();
   const nJP = document.getElementById('ap-nJP')?.value.trim();
@@ -9909,6 +9918,19 @@ function apTryLoadHistory() {
     return;
   }
 
+  // 1.5) Danh sách dự án (kho koutei 2021–2026) — thông tin + người liên hệ VN
+  if (!isVN) {
+    if (typeof _LIB!=='undefined' && !_LIB.loaded && typeof _libFetch==='function') { try{ _libFetch().then(function(){ apTryLoadHistory(); }); }catch(e){} }
+    var L = _libFindByName(nJP||nVN);
+    if (L) {
+      preview.style.display='block'; preview.style.background='#eef4ff'; preview.style.borderColor='#a9c3ef';
+      info.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1e5fbf;margin-bottom:6px">📋 Tìm thấy trong Danh sách dự án (kho koutei)</div>'
+        +'<div style="font-size:11px;color:#555;margin-bottom:8px"><b>'+x(L.name_jp||'')+'</b> · VP '+x(L.office||'?')+' · CĐT: '+x(L.client||'?')+'<br>'
+        +'担当: '+x(L.main_staff||'?')+' · Liên hệ: '+x(L.contact_vn||'?')+' · '+x(L.building_type||'?')+'</div>'
+        +'<button class="btn btn-xs" style="background:#e3f0ff;color:#1e5fbf;border:1px solid #a9c3ef;padding:4px 10px;font-size:11px;font-weight:600" onclick="apLoadHistory(\'lib\')">📋 Tải thông tin từ kho (CĐT, loại CT, địa chỉ, ngày, liên hệ…)</button>';
+      return;
+    }
+  }
   // 2) Fallback pj_history localStorage
   const found = loadPjFromHistory(nVN, nJP);
   if (found) {
@@ -9955,6 +9977,26 @@ function apLoadHistory(mode) {
     const nR = (src.groups||[]).reduce((s,g)=>s+(g.rows||[]).length, 0);
     const nP = (src.photos||[]).filter(Boolean).length;
     toast(`🔥 Sẵn sàng tạo "${src.nameVN||src.nameJP}" với ${nG} hạng mục · ${nR} dòng · ${nP} ảnh. Bấm "Thêm dự án" để xác nhận.`, 3500);
+    return;
+  }
+
+  // LIB mode: load thông tin từ Danh sách dự án (kho koutei) — CĐT, loại CT, địa chỉ, ngày, 担当, liên hệ
+  if (mode === 'lib') {
+    window._apFullSource = null;
+    var L = _libFindByName(nJP||nVN);
+    if (!L) { toast('Không tìm thấy trong Danh sách dự án'); return; }
+    var _set=function(id,v){ var e=document.getElementById(id); if(e && v) e.value=v; };
+    _set('ap-nJP', L.name_jp);
+    var offSelL=document.getElementById('ap-off'); if(offSelL && L.office)[...offSelL.options].forEach(o=>o.selected=o.value===L.office);
+    _set('ap-area', L.main_staff);
+    _set('ap-buildingType', L.building_type);
+    _set('ap-scope', L.address);
+    _set('ap-client', L.client);
+    _set('ap-constructionStart', _libDateInput(L.kickoff));
+    _set('ap-constructionEnd', _libDateInput(L.completion));
+    var ctSelL=document.getElementById('ap-ct');
+    if(ctSelL && L.contact_vn){ var hasOpt=[...ctSelL.options].some(o=>o.value===L.contact_vn); if(hasOpt)[...ctSelL.options].forEach(o=>o.selected=o.value===L.contact_vn); }
+    toast('📋 Đã tải thông tin dự án "'+(L.name_jp||'')+'" từ kho. Kiểm tra rồi bấm "Thêm dự án".', 3200);
     return;
   }
 

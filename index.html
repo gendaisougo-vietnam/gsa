@@ -4856,7 +4856,7 @@ function openLibLookup(){
 function _llkShow(html){
   var ov=document.getElementById('libLookupOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='libLookupOverlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(8,12,22,.5);backdrop-filter:blur(1.5px);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(6,10,18,.8);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:16px';
     ov.onclick=function(e){ if(e.target===ov) _llkClose(); };
     document.body.appendChild(ov);
   }

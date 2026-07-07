@@ -3266,7 +3266,7 @@ function setSection(sec) {
 var _LIB = { projects:[], items:{}, loaded:false, loading:false, err:'' };
 // Link tới file koutei gốc (PDF) trên Supabase Storage bucket "koutei" (upload giữ thư mục năm)
 var _KOUTEI_BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/koutei/';
-function _kouteiUrl(path){ return _KOUTEI_BASE + encodeURI((path||'').replace(/^工程\//,'')); }
+function _kouteiUrl(path){ var b=(path||'').split('/').pop(); var m=b.match(/(\d{6})/); return _KOUTEI_BASE + (m? m[1]+'.pdf' : encodeURI(b)); }
 var _libState = { q:'', mode:'all', year:'', office:'', client:'', sel:null, need:false, editing:false };
 
 async function _libFetch(){

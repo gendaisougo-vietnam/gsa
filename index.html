@@ -11283,9 +11283,11 @@ function contractNextAnnual(dateStr, todayStr) {
   const base = new Date(dateStr);
   if (isNaN(base)) return null;
   const now = new Date(todayStr);
+  // Tôn trọng ngày HĐ tương lai: nếu contractEnd đã ở tương lai thì ĐÓ là kỳ review kế.
+  // Nếu ở quá khứ thì cuộn tới theo từng năm (nhắc định kỳ hằng năm).
+  // => Bấm "gia hạn +1 năm" đẩy contractEnd ra xa => cảnh báo tự tắt.
   let next = new Date(base);
-  next.setFullYear(now.getFullYear());
-  if (next <= now) next.setFullYear(now.getFullYear() + 1);
+  while (next < now) next.setFullYear(next.getFullYear() + 1);
   return localDateStr(next);
 }
 function contractDaysUntil(dateStr, todayStr) {
@@ -11330,6 +11332,11 @@ function renderContractBlock(staffName, prof, todayStr) {
     + ' style="width:100%;padding:4px 7px;border:1px solid ' + cdBorder + ';border-radius:var(--r);font-size:11px;background:' + cdBg + '"'
     + ' onchange="contractDateChanged(this)">'
     + renderDateStatus(nextContract, cdDays, cdInfo)
+    + '<button onclick="contractReviewDone(\'' + x(staffName) + '\')"'
+    + ' style="width:100%;margin-top:7px;padding:6px 8px;border:none;border-radius:var(--r);cursor:pointer;'
+    + 'background:#0f766e;color:#fff;font-family:inherit;font-size:11px;font-weight:700"'
+    + ' title="Bấm sau khi thoả thuận/review lương xong: tự gia hạn HĐ thêm 1 năm và tắt cảnh báo review">'
+    + '🤝 Đã review lương — Gia hạn HĐ +1 năm</button>'
     + '</div>';
 }
 
@@ -11811,6 +11818,74 @@ function _onContractEndChange(name, newDate) {
     if (!prof.contractEndHistory) prof.contractEndHistory = [];
     prof.contractEndHistory.push(oldDate);
   }
+}
+
+// ── Gia hạn HĐ / Review lương ──────────────────────────────────────────────
+// Đẩy contractEnd ra thêm 1 năm (từ kỳ review kế). Không hỏi, không toast — dùng chung.
+async function _contractExtendOneYear(name) {
+  const prof = getStaffProfile(name);
+  const cur = prof.contractEnd || '';
+  const today = new Date(localDateStr(new Date()));
+  let d = cur ? new Date(cur) : new Date();
+  if (isNaN(d)) d = new Date();
+  while (d < today) d.setFullYear(d.getFullYear() + 1); // cuộn tới kỳ review kế
+  d.setFullYear(d.getFullYear() + 1);                   // +1 năm gia hạn
+  const nd = localDateStr(d);
+  await saveStaffProfile(name, 'contractEnd', nd);       // tự push history + đồng bộ Supabase
+  return nd;
+}
+
+// Tính trước ngày HĐ mới (để hiển thị trong hộp xác nhận)
+function _previewNextContractEnd(name) {
+  const prof = getStaffProfile(name);
+  const cur = prof.contractEnd || '';
+  const today = new Date(localDateStr(new Date()));
+  let d = cur ? new Date(cur) : new Date();
+  if (isNaN(d)) d = new Date();
+  while (d < today) d.setFullYear(d.getFullYear() + 1);
+  d.setFullYear(d.getFullYear() + 1);
+  return localDateStr(d);
+}
+
+// Nút "Đã review lương — gia hạn HĐ 1 năm": xác nhận, gia hạn, tắt cảnh báo.
+async function contractReviewDone(name) {
+  const nd = _previewNextContractEnd(name);
+  if (!confirm('Xác nhận đã thoả thuận / review lương xong?\n\n'
+    + 'Hợp đồng sẽ được gia hạn tới ' + nd + ' (thêm 1 năm).\n'
+    + 'Cảnh báo "sắp đến kỳ review lương" sẽ tắt tới kỳ sau.')) return;
+  await _contractExtendOneYear(name);
+  if (typeof toast === 'function') toast('✅ Đã gia hạn HĐ tới ' + nd + ' — đã tắt cảnh báo review');
+  try { refreshStaffDetailModal(); } catch(e) {}
+  try { renderStaffPage(); } catch(e) {}
+}
+
+// Ô "% tăng lương": tính Gross/Net mới từ lương hiện tại × (1+%/100),
+// đồng thời coi như review xong => gia hạn HĐ 1 năm.
+async function applySalaryRaise(name, si) {
+  const inp = document.getElementById('sal-pct-' + si);
+  if (!inp) return;
+  const pct = parseFloat(String(inp.value).replace('%', '').replace(',', '.').trim());
+  if (!pct || isNaN(pct)) { if (typeof toast === 'function') toast('⚠️ Nhập % tăng (vd 5)'); return; }
+  const prof = getStaffProfile(name);
+  let baseGross = +prof.salaryGross || 0;
+  if (!baseGross && (+prof.salaryNet || 0)) baseGross = netToGross(+prof.salaryNet);
+  if (!baseGross) { if (typeof toast === 'function') toast('⚠️ Chưa có lương gốc để tính'); return; }
+  const newGross = Math.round(baseGross * (1 + pct / 100) / 1000) * 1000; // làm tròn nghìn
+  const newNet = grossToNet(newGross);
+  const nd = _previewNextContractEnd(name);
+  if (!confirm('Tăng ' + pct + '% lương:\n'
+    + 'Gross: ' + _formatMoney(baseGross) + '  →  ' + _formatMoney(newGross) + '\n'
+    + 'Net (ước):  ≈ ' + _formatMoney(newNet) + '\n\n'
+    + 'Áp dụng xong sẽ coi như đã review lương và tự gia hạn HĐ tới ' + nd + '. Đồng ý?')) return;
+  await saveStaffProfile(name, 'salaryGross', newGross);
+  await saveStaffProfile(name, 'salaryNet', newNet);
+  const g = document.getElementById('sal-gross-' + si); if (g) g.value = _formatMoney(newGross);
+  const n = document.getElementById('sal-net-' + si);   if (n) n.value = _formatMoney(newNet);
+  inp.value = '';
+  await _contractExtendOneYear(name); // review xong => gia hạn 1 năm, tắt cảnh báo
+  if (typeof toast === 'function') toast('💰 +' + pct + '% → Gross ' + _formatMoney(newGross) + ' / Net ' + _formatMoney(newNet) + ' · Gia hạn HĐ tới ' + nd);
+  try { refreshStaffDetailModal(); } catch(e) {}
+  try { renderStaffPage(); } catch(e) {}
 }
 
 // Helpers cho getStaffStatsBetween
@@ -13577,8 +13652,7 @@ function renderStaffPage() {
       const base = new Date(dateStr);
       if (isNaN(base)) return;
       let next = new Date(base);
-      next.setFullYear(todayD.getFullYear());
-      if (next <= todayD) next.setFullYear(todayD.getFullYear()+1);
+      while (next < todayD) next.setFullYear(next.getFullYear()+1);
       const days = Math.ceil((next - todayD) / 86400000);
       let level = null;
       if (days <= 0) level = 'past';
@@ -13900,6 +13974,15 @@ function renderStaffPage() {
                     onblur="_onSalaryChange('${x(s)}','salaryNet',${si},this)">
                   <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
                 </div>
+              </div>
+              <div style="display:flex;align-items:flex-end;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--gray2)">
+                <div class="field" style="flex:0 0 92px"><label style="font-size:10px">% tăng lương</label>
+                  <input id="sal-pct-${si}" type="text" placeholder="vd 5" style="font-family:inherit;font-size:12px;text-align:right"
+                    title="Nhập % tăng so với lương hiện tại. Áp dụng sẽ tự tính Gross/Net mới và gia hạn HĐ 1 năm (coi như đã review lương)."
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();applySalaryRaise('${x(s)}','${si}')}"></div>
+                <button onclick="applySalaryRaise('${x(s)}','${si}')"
+                  style="flex:1;padding:7px 8px;border:none;border-radius:var(--r);cursor:pointer;background:#b45309;color:#fff;font-family:inherit;font-size:11px;font-weight:700"
+                  title="Tính Gross/Net mới theo % rồi gia hạn HĐ 1 năm">📈 Tăng lương & gia hạn HĐ</button>
               </div>
               <div style="font-size:9px;color:var(--gray4);margin-top:6px;font-style:italic">💡 Quy đổi tự động theo luật VN 2026 (BHXH 8%, BHYT 1.5%, BHTN 1%, TNCN 7 bậc).</div>
             </div>
@@ -15012,6 +15095,15 @@ function renderStaffDetailModalContent(s) {
                 onblur="_onSalaryChange('${x(s)}','salaryNet','${si}',this)">
               <div style="font-size:9px;color:var(--gray4)">VND / tháng</div>
             </div>
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--gray2)">
+            <div class="field" style="flex:0 0 92px"><label style="font-size:10px">% tăng lương</label>
+              <input id="sal-pct-${si}" type="text" placeholder="vd 5" style="font-family:inherit;font-size:12px;text-align:right"
+                title="Nhập % tăng so với lương hiện tại. Áp dụng sẽ tự tính Gross/Net mới và gia hạn HĐ 1 năm (coi như đã review lương)."
+                onkeydown="if(event.key==='Enter'){event.preventDefault();applySalaryRaise('${x(s)}','${si}')}"></div>
+            <button onclick="applySalaryRaise('${x(s)}','${si}')"
+              style="flex:1;padding:7px 8px;border:none;border-radius:var(--r);cursor:pointer;background:#b45309;color:#fff;font-family:inherit;font-size:11px;font-weight:700"
+              title="Tính Gross/Net mới theo % rồi gia hạn HĐ 1 năm">📈 Tăng lương & gia hạn HĐ</button>
           </div>
           <div style="font-size:9px;color:var(--gray4);margin-top:6px;font-style:italic">💡 Quy đổi tự động theo luật VN 2026.</div>
         </div>

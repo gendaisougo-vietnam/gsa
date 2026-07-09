@@ -4210,7 +4210,7 @@ function renderSidebar() {
   //  Nhóm 2: đã hết lịch UP (có lịch nhưng đã UP hết) -> dưới nữa.
   //  Nhóm 3: chưa có lịch nào (mới tạo / lấy từ lịch sử chưa xếp lịch) -> DƯỚI CÙNG (giữ thứ tự thêm vào).
   function _pjSortInfo(p){
-    const rows=(p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>r.dateTo);
+    const rows=(p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>r.dateTo && !r.tentative);
     const todayUp  = rows.some(r=>r.dateTo===today && !r.doneAt);
     const futureUp = rows.some(r=>r.dateTo>today && !r.doneAt);
     const hasSched = rows.length>0;
@@ -4234,13 +4234,13 @@ function renderSidebar() {
     const thumbHtml = thumb ? `<img src="${thumb}" alt="">` : `<div class="pj-thumb-ph">🏗</div>`;
 
     // CHỈ tính hạng mục của PHÒNG đang xem (lịch UP / trạng thái / nhân sự riêng từng phòng)
-    const allRows = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>r.dateTo);
+    const allRows = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>r.dateTo && !r.tentative);
 
     // Hàng có dateTo = hôm nay
     const todayRows = allRows.filter(r => r.dateTo === today);
     // Hàng đang active (lịch kéo qua hôm nay)
     const activeRows = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r => {
-      if (!r.staff) return false;
+      if (!r.staff || r.tentative) return false;
       const from = r.dateFrom||r.dateTo, to = r.dateTo||r.dateFrom;
       return from && to && from <= today && to >= today;
     });
@@ -4270,7 +4270,7 @@ function renderSidebar() {
     }
 
     // ── Phân loại mức độ ưu tiên hiển thị (chỉ theo phòng đang xem) ──
-    const allRowsAll = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]);
+    const allRowsAll = (p.groups||[]).filter(_groupInDept).flatMap(g=>g.rows||[]).filter(r=>!r.tentative);
     const hasTodayUp  = allRowsAll.some(r => r.dateTo === today && !r.doneAt);
     const hasFutureUp = allRowsAll.some(r => r.dateTo > today && !r.doneAt);
     const hasAnySchedule = allRowsAll.some(r => r.dateTo);
@@ -4678,7 +4678,7 @@ function renderKouteiJP(pjs, win){
       if(g){
         const upRow=(g.rows||[]).find(r=>r.dateTo===ds);
         if(upRow){
-          const upToday = (upRow.dateTo===todayStr && !upRow.doneAt);
+          const upToday = (upRow.dateTo===todayStr && !upRow.doneAt && !upRow.tentative);
           const ud = upRow.doneAt || (upRow.dateTo<todayStr);
           const lc = bw ? (ud?'#888':'#000') : (upToday?'#e74c3c':(ud?'#6b7280':(upRow.status==='new'?'#5a9a35':'#d4900a')));
           const lt = _upTypeLabel(upRow);
@@ -4726,10 +4726,11 @@ function renderKouteiJP(pjs, win){
       if(g){
         gNew=(g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
         gRev=(g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
-        const gDone=(g.rows||[]).length>0 && (g.rows||[]).every(r=>r.doneAt);
-        const gTodayUp=(g.rows||[]).some(r=>r.dateTo===todayStr && !r.doneAt);
-        const gPend=(g.rows||[]).some(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
-        const pr=(g.rows||[]).find(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
+        const _gReal=(g.rows||[]).filter(r=>!r.tentative);   // dòng DỰ KIẾN không tính lịch UP
+        const gDone=_gReal.length>0 && _gReal.every(r=>r.doneAt);
+        const gTodayUp=_gReal.some(r=>r.dateTo===todayStr && !r.doneAt);
+        const gPend=_gReal.some(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
+        const pr=_gReal.find(r=>r.dateTo && !r.doneAt && r.dateTo>=todayStr);
         const c = bw ? (gDone?'#888':'#000') : (gDone?'#6b7280':gTodayUp?'#e74c3c':gPend?(pr&&pr.status==='new'?'#5a9a35':'#d4900a'):'#666');
         nmStyle='color:'+c+';font-weight:'+(((gPend||gTodayUp)&&!gDone)?'700':'500');
         nmText=x(g.type||'—')+((gTodayUp&&!bw)?' 🔴':'')+(gDone?' ✓':'');
@@ -5328,12 +5329,12 @@ function renderProjectTimeline(pjs) {
     const _infoMinRows = isVN ? 14 : 0;
     const _totalRows = Math.max(allGrpRows.length, _infoMinRows);
     const _fillerCount = Math.max(0, _totalRows - allGrpRows.length);
-    const allDone = allGrpRows.length>0 && allGrpRows.every(g=>(g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt)) && allGrpRows.some(g=>(g.rows||[]).some(r=>r.dateTo));
+    const allDone = allGrpRows.length>0 && allGrpRows.every(g=>(g.rows||[]).filter(r=>r.dateTo && !r.tentative).every(r=>r.doneAt)) && allGrpRows.some(g=>(g.rows||[]).some(r=>r.dateTo && !r.tentative));
     const rowDim = allDone ? `color:${DONE_COLOR}` : '';
     // Project-level pending check — dùng cho info panel VN (không phụ thuộc group đầu tiên)
-    // Áp dụng cho cả groups từ tlTasks lẫn groups thêm thủ công
+    // Áp dụng cho cả groups từ tlTasks lẫn groups thêm thủ công. Dòng DỰ KIẾN không tính.
     const pjHasPendingUp = (p.groups||[]).some(g =>
-      (g.rows||[]).some(r => r.dateTo >= todayStr && !r.doneAt)
+      (g.rows||[]).some(r => r.dateTo >= todayStr && !r.doneAt && !r.tentative)
     );
     const carryoverBadge = p._carryover
       ? `<span style="font-size:7px;background:#f39c12;color:#fff;border-radius:3px;padding:1px 4px;margin-left:3px;vertical-align:middle">↩ T.cũ</span>`
@@ -5370,14 +5371,15 @@ function renderProjectTimeline(pjs) {
       const rowBorderB = (isLastGrp && _fillerCount===0) ? PB : CB;
       const grpNew = (g.rows||[]).filter(r=>r.status==='new'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
       const grpRev = (g.rows||[]).filter(r=>r.status==='rev'&&!r.isCarryRef&&!r.tentative&&_rowCountsIn(r,D.activeMonth)).reduce((s,r)=>s+(r.qty||0),0);
-      const grpAllDone = (g.rows||[]).some(r=>r.dateTo) && (g.rows||[]).filter(r=>r.dateTo).every(r=>r.doneAt);
+      const _gRealRows = (g.rows||[]).filter(r=>!r.tentative);   // dòng DỰ KIẾN không tính lịch UP
+      const grpAllDone = _gRealRows.some(r=>r.dateTo) && _gRealRows.filter(r=>r.dateTo).every(r=>r.doneAt);
       const _compactGrp = !isVN && grpAllDone;   // hạng mục đã UP xong -> thu gọn (chỉ bảng JP)
       // Có lịch UP chưa done và deadline chưa qua
-      const grpHasPendingUp = (g.rows||[]).some(r => r.dateTo >= todayStr && !r.doneAt);
+      const grpHasPendingUp = _gRealRows.some(r => r.dateTo >= todayStr && !r.doneAt);
       // Done state: gray đậm (không opacity, không line-through)
       const grpDoneStyle = grpAllDone ? `color:${DONE_COLOR};` : '';
       // Màu tên hạng mục: khớp với status của row đang pending (mới=xanh, sửa=vàng)
-      const pendingRow = (g.rows||[]).find(r=>r.dateTo && !r.doneAt && r.dateTo >= todayStr);
+      const pendingRow = _gRealRows.find(r=>r.dateTo && !r.doneAt && r.dateTo >= todayStr);
       const grpNameColor = grpAllDone ? DONE_COLOR : grpHasPendingUp
         ? (isVN
             ? (pendingRow?.status==='new' ? '#7c3aed' : '#db2777')
@@ -5899,9 +5901,10 @@ function renderMonthGantt(pjs) {
   // ── Inner helpers: 1 hạng mục = 1 <tr> (đồng bộ kiến trúc Chi tiết dự án) ──
   function buildTaskNameCell(r) {
     const isActuallyDone = !!r.doneAt;
-    const isDoneByDate = r.dateTo && r.dateTo<todayStr && !isActuallyDone;
-    const isTodayUp = r.dateTo === todayStr && !isActuallyDone;
-    const isUrgent = r.dateTo && r.dateTo > todayStr && r.dateTo <= soon3Str && !isActuallyDone;
+    // Dòng DỰ KIẾN (nét đứt): chưa chốt lịch -> không coi là lịch UP / quá hạn / gấp
+    const isDoneByDate = !r.tentative && r.dateTo && r.dateTo<todayStr && !isActuallyDone;
+    const isTodayUp = !r.tentative && r.dateTo === todayStr && !isActuallyDone;
+    const isUrgent = !r.tentative && r.dateTo && r.dateTo > todayStr && r.dateTo <= soon3Str && !isActuallyDone;
     const isNew = r.status === 'new';
     const isTrip = !!r._isTrip;
     const numColor = isTrip ? '#8e44ad'
@@ -8997,8 +9000,9 @@ function renderGroups(p) {
     const gc   = GRP[gi % GRP.length];
 
     // ── CẤP HẠNG MỤC: sáng+viền xanh nếu có UP hôm nay/tương lai; xám nếu không ──
-    const gHasTodayUp   = rows.some(r=>r.dateTo===today && !r.doneAt);
-    const gHasFutureUp  = rows.some(r=>r.dateTo>today && !r.doneAt);
+    // Dòng DỰ KIẾN (tentative) KHÔNG được coi là có lịch UP.
+    const gHasTodayUp   = rows.some(r=>r.dateTo===today && !r.doneAt && !r.tentative);
+    const gHasFutureUp  = rows.some(r=>r.dateTo>today && !r.doneAt && !r.tentative);
     const gHasActiveUp  = gHasTodayUp || gHasFutureUp;
     // Border: xanh khi active, transparent khi xám
     const gBorderColor  = gHasActiveUp ? '#27ae60' : 'transparent';
@@ -9075,8 +9079,8 @@ function renderGroups(p) {
       const rowStyle = `background:${rowBg};`;
       const isDark = parseInt(gc.bg.slice(1,3),16) < 180;
 
-      const deadlinePast = r.dateTo && r.dateTo < today && !r.doneAt;
-      const deadlineSoon = rActiveUp && r.dateTo <= soon3;
+      const deadlinePast = r.dateTo && r.dateTo < today && !r.doneAt && !r.tentative;
+      const deadlineSoon = rActiveUp && !r.tentative && r.dateTo <= soon3;
       const isVNProject  = !!(D.months[D.activeMonth]?.projectsVN||[]).find(pv=>pv.id===p.id);
       const chipNewBg  = isVNProject ? '#ede9fe' : 'var(--new-bg)';
       const chipNewTx  = isVNProject ? '#5b21b6' : 'var(--new-tx)';
@@ -9143,12 +9147,14 @@ function renderGroups(p) {
             : `<input type="date" class="tbl-input" value="${r.dateTo||''}"
                 style="font-size:10px;padding:3px 5px;min-width:0;${deadlinePast?'border-color:#e74c3c;background:#fff5f5':deadlineSoon?'border-color:var(--orange);background:#fffbf0':''}"
                 onchange="updRow('${p.id}','${g.id}','${r.id}','dateTo',this.value);refreshStaffSched('${p.id}')">
-              ${r.dateTo ? (r.dateTo < today
-                ? '<div style="font-size:9px;color:#e67e22;font-weight:700">⚠️ Quá hạn</div>'
-                : r.dateTo === today
-                  ? '<div style="font-size:9px;color:#e74c3c;font-weight:700">⚡ UP hôm nay</div>'
-                  : '<div style="font-size:9px;color:#2980b9;font-weight:700">⏳ Đang làm</div>'
-              ) : ''}
+              ${r.tentative
+                ? '<div style="font-size:9px;color:#7c3aed;font-weight:700">✎ Dự kiến — không tính lịch UP</div>'
+                : (r.dateTo ? (r.dateTo < today
+                    ? '<div style="font-size:9px;color:#e67e22;font-weight:700">⚠️ Quá hạn</div>'
+                    : r.dateTo === today
+                      ? '<div style="font-size:9px;color:#e74c3c;font-weight:700">⚡ UP hôm nay</div>'
+                      : '<div style="font-size:9px;color:#2980b9;font-weight:700">⏳ Đang làm</div>'
+                  ) : '')}
               <label style="display:flex;align-items:center;justify-content:center;gap:3px;font-size:8.5px;color:#7c3aed;margin-top:2px;cursor:pointer" title="Lịch dự kiến: thanh tiến độ hiện nét đứt">
                 <input type="checkbox" ${r.tentative?'checked':''} style="width:11px;height:11px;margin:0;accent-color:#7c3aed"
                   onchange="updRow('${p.id}','${g.id}','${r.id}','tentative',this.checked)"> Dự kiến
@@ -9214,8 +9220,14 @@ function renderGroups(p) {
             : (() => {
                 const role = sessionStorage.getItem('splash_role')||'admin';
                 const hasTimeline = !!(r.dateTo);
-                const isPast = r.dateTo && r.dateTo < localDateStr(new Date());
+                const isPast = r.dateTo && r.dateTo < localDateStr(new Date()) && !r.tentative;
                 if (role !== 'admin') return '<span style="color:#ddd;font-size:10px">—</span>';
+                // Dòng DỰ KIẾN: chưa chốt lịch -> không cho UP, không nhắc quá hạn
+                if (r.tentative) {
+                  return `<button class="btn btn-xs" disabled
+                    style="background:#f5f3ff;color:#a78bfa;border-color:#ddd6fe;font-size:10px;padding:2px 6px;cursor:not-allowed"
+                    title="Lịch dự kiến — bỏ tích 'Dự kiến' để chốt lịch rồi mới UP">✎ Dự kiến</button>`;
+                }
                 if (!hasTimeline) {
                   return `<button class="btn btn-xs" disabled
                     style="background:#f5f5f5;color:#ccc;border-color:#e0e0e0;font-size:10px;padding:2px 6px;cursor:not-allowed;opacity:.6"
@@ -9436,7 +9448,7 @@ function renderStaffSchedule(p) {
           <span style="color:#e74c3c;overflow:hidden;text-overflow:ellipsis">Nghỉ ${l.from||'?'}${l.to&&l.to!==l.from?'→'+l.to:''}</span>
         </div>`).join('')
         + tasks.map(r=>{
-          const overdue = r.dateTo && r.dateTo < todayStr && !r.doneAt;
+          const overdue = r.dateTo && r.dateTo < todayStr && !r.doneAt && !r.tentative;
           const done    = !!(r.doneAt);
           const dotColor = done ? DONE_BAR_COLOR : r.status==='new' ? '#70AD47' : 'var(--gold)';
           return `<div style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden">
@@ -12149,7 +12161,7 @@ function getStaffStatsBetween(name, fromDate, toDate) {
     [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
       (p.groups||[]).forEach(g => {
         (g.rows||[]).forEach(r => {
-          if (r.staff !== name) return;
+          if (r.staff !== name || r.tentative) return;   // dòng DỰ KIẾN: không tính số mai
           const refDate = r.doneAt ? r.doneAt.slice(0,10) : (r.dateTo || '');
           if (refDate && (refDate < fromDate || refDate > toDate)) return;
           const qty = r.qty || 0;
@@ -12236,7 +12248,7 @@ function getStaffMonthBreakdown(staffName, fromDate, toDate) {
     [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
       (p.groups||[]).forEach(g => {
         (g.rows||[]).forEach(row => {
-          if (row.staff !== staffName) return;
+          if (row.staff !== staffName || row.tentative) return;   // dòng DỰ KIẾN: không tính
           const refDate = row.doneAt ? row.doneAt.slice(0,10) : (row.dateTo || '');
           if (refDate && (refDate < fromDate || refDate > toDate)) return;
           const qty = row.qty || 0;
@@ -12277,7 +12289,7 @@ function getStaffRateBreakdown(staffName, fromDate, toDate) {
     [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
       (p.groups||[]).forEach(g => {
         (g.rows||[]).forEach(r => {
-          if (r.staff !== staffName) return;
+          if (r.staff !== staffName || r.tentative) return;   // dòng DỰ KIẾN: không tính
           const refDate = r.doneAt ? r.doneAt.slice(0,10) : (r.dateTo || '');
           if (refDate && (refDate < fromDate || refDate > toDate)) return;
           Object.values(groups).forEach(grp => {
@@ -12320,7 +12332,7 @@ function getTeamAvgRateBreakdown(role, excludeName, fromDate, toDate) {
     [...(m.projects||[]), ...(m.projectsVN||[])].forEach(p => {
       (p.groups||[]).forEach(g => {
         (g.rows||[]).forEach(r => {
-          if (!teamSet.has(r.staff)) return;
+          if (!teamSet.has(r.staff) || r.tentative) return;   // dòng DỰ KIẾN: không tính
           const refDate = r.doneAt ? r.doneAt.slice(0,10) : (r.dateTo || '');
           if (refDate && (refDate < fromDate || refDate > toDate)) return;
           Object.values(groups).forEach(grp => {
@@ -15714,7 +15726,8 @@ function checkMorningNotification(force) {
           if (_allowDepts && _allowDepts.indexOf(_dept) < 0) return;  // không có quyền xem phòng này -> bỏ qua
           var gName = g.type || '';
           (g.rows||[]).forEach(function(r) {
-            if (!r.dateTo || r.doneAt) return;
+            // Lịch DỰ KIẾN (nét đứt): không tính số mai, không có lịch UP, không nhắc.
+            if (!r.dateTo || r.doneAt || r.tentative) return;
             var k = pName + '|' + gName + '|' + (r.staff||'') + '|' + r.dateTo;
             if (_seenMN[k]) return;
             if (r.dateTo === today) {

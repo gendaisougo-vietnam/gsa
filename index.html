@@ -13559,7 +13559,11 @@ function _activeAssignmentsAt(asOf){
   const out=[];
   Object.keys(byStaff).forEach(function(sid){
     const list=byStaff[sid].slice().sort(function(a,b){ return (a.date_from||'').localeCompare(b.date_from||''); });
-    let chosen=list.find(function(a){ return (a.date_from||'0000-00-00')<=day && (!a.date_to || a.date_to>day); });
+    // Lấy phân công MỚI NHẤT còn hiệu lực tại thời điểm 'day' (không phải cái đầu tiên).
+    // -> Nếu 1 người còn sót phân công phòng cũ CHƯA đóng + phân công phòng mới, luôn ưu tiên MỚI NHẤT.
+    // Nhờ đó bảng Nhân sự (nguồn chuẩn) đổi phòng thì mọi bảng công việc đồng bộ theo.
+    const _actives=list.filter(function(a){ return (a.date_from||'0000-00-00')<=day && (!a.date_to || a.date_to>day); });
+    let chosen=_actives.length ? _actives[_actives.length-1] : null;   // list sort tăng theo date_from -> cuối = mới nhất
     // asOf trước mốc phân công đầu: CHỈ người gốc (seed) mới coi như đã ở phòng đó từ trước (baseline);
     // người mới thêm sau (note khác seed) thì KHÔNG hiện ở tháng cũ trước khi vào.
     if(!chosen && day < (list[0].date_from||'9999') && /seed/i.test(list[0].note||'')) chosen=list[0];

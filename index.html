@@ -6027,6 +6027,8 @@ function renderMonthGantt(pjs) {
       if(ia===-1&&ib===-1)return 0;if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;
     });
   }
+  // Loại nhân sự ĐÃ NGHỈ VIỆC khỏi bảng tiến độ (dù còn phân công/việc cũ trong dữ liệu)
+  sortedStaff = sortedStaff.filter(function(s){ return !(typeof isStaffLeft==='function' && isStaffLeft(s)); });
   const _sepRow = '<tr><td colspan="'+(3+allDaysStr.length)+'" style="border-top:3px solid #9aa3b2;height:7px;padding:0;background:#eef0f4"></td></tr>';
   const staffRows = sortedStaff.map(staff => {
     const _sep = _teamBreaks.has(staff) ? _sepRow : '';  // vạch phân cách đầu nhóm
@@ -9332,7 +9334,8 @@ function renderStaffSchedule(p) {
   const _allStaffOrder = (activeSection==='intl') ? _deptStaffNames(_asOfSS)
     : (activeSection==='jp') ? _assignableStaffNames(_asOfSS)   // Studio: gộp cả 設計室 (hỗ trợ chéo)
     : D.settings.staffList;
-  const sortStaff = arr => _allStaffOrder.filter(s=>arr.includes(s));
+  // Loại nhân sự đã nghỉ việc khỏi lịch dự án
+  const sortStaff = arr => _allStaffOrder.filter(s=>arr.includes(s) && !(typeof isStaffLeft==='function' && isStaffLeft(s)));
   const activeStaffList = sortStaff(pjStaffActive);
   const pastStaffList   = sortStaff(pjStaffPast);
 

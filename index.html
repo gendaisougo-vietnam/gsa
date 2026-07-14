@@ -10187,34 +10187,44 @@ function apLoadHistory(mode) {
     window._apFullSource = null;
     var L = _libFindByName(nJP||nVN);
     if (!L) { toast('Không tìm thấy trong Danh sách dự án'); return; }
-    var _set=function(id,v){ var e=document.getElementById(id); if(e && v) e.value=v; };
-    _set('ap-nJP', L.name_jp);
-    var offSelL=document.getElementById('ap-off'); if(offSelL && L.office)[...offSelL.options].forEach(o=>o.selected=o.value===L.office);
-    _set('ap-area', L.main_staff);
-    _set('ap-buildingType', L.building_type);
-    _set('ap-scope', L.address);
-    _set('ap-client', L.client);
-    _set('ap-constructionStart', _libDateInput(L.kickoff));
-    _set('ap-constructionEnd', _libDateInput(L.completion));
-    var ctSelL=document.getElementById('ap-ct');
-    if(ctSelL && L.contact_vn){ var hasOpt=[...ctSelL.options].some(o=>o.value===L.contact_vn); if(hasOpt)[...ctSelL.options].forEach(o=>o.selected=o.value===L.contact_vn); }
+    _apFillFromLib(L);
     toast('📋 Đã tải thông tin dự án "'+(L.name_jp||'')+'" từ kho. Kiểm tra rồi bấm "Thêm dự án".', 3200);
     return;
   }
 
-  // BASIC mode (như cũ): chỉ điền 5 field từ pj_history
+  // BASIC mode: điền field cơ bản từ pj_history + BỔ SUNG khung tên từ kho koutei (nếu có).
+  // Nhờ vậy dù bấm nút "Tải từ lịch sử" (chân) hay "Tải thông tin từ kho" đều có thông tin.
   window._apFullSource = null;
   const found = loadPjFromHistory(nVN, nJP);
-  if (!found) { toast('Không tìm thấy trong lịch sử — thử nhập tên dự án trước'); return; }
-  if (document.getElementById('ap-nVN')) document.getElementById('ap-nVN').value = found.nameVN||'';
-  if (document.getElementById('ap-nJP')) document.getElementById('ap-nJP').value = found.nameJP||'';
-  const offSel = document.getElementById('ap-off');
-  if (offSel && found.office) [...offSel.options].forEach(o=>{ o.selected = o.value===found.office; });
-  if (document.getElementById('ap-ct')) document.getElementById('ap-ct').value = found.contact||'';
-  const stSel = document.getElementById('ap-st');
-  if (stSel && found.mainStaff) [...stSel.options].forEach(o=>{ o.selected = o.value===found.mainStaff; });
-  toast(`✅ Đã tải thông tin "${found.nameVN||found.nameJP}" từ lịch sử`);
+  var _Llib2 = _libFindByName(nJP||nVN);
+  if (!found && !_Llib2) { toast('Không tìm thấy trong lịch sử — thử nhập tên dự án trước'); return; }
+  if (found) {
+    if (document.getElementById('ap-nVN')) document.getElementById('ap-nVN').value = found.nameVN||'';
+    if (document.getElementById('ap-nJP')) document.getElementById('ap-nJP').value = found.nameJP||'';
+    const offSel = document.getElementById('ap-off');
+    if (offSel && found.office) [...offSel.options].forEach(o=>{ o.selected = o.value===found.office; });
+    if (document.getElementById('ap-ct')) document.getElementById('ap-ct').value = found.contact||'';
+    const stSel = document.getElementById('ap-st');
+    if (stSel && found.mainStaff) [...stSel.options].forEach(o=>{ o.selected = o.value===found.mainStaff; });
+  }
+  if (_Llib2) _apFillFromLib(_Llib2);   // bổ sung khung tên (CĐT, loại CT, địa chỉ, ngày, 担当…) từ kho
+  toast(found ? `✅ Đã tải thông tin "${found.nameVN||found.nameJP}"`+(_Llib2?' + khung tên từ kho':'') : '📋 Đã tải khung tên từ kho koutei');
   apTryLoadHistory();
+}
+// Helper: nạp khung tên dự án từ 1 bản ghi kho koutei (L) vào form Thêm dự án
+function _apFillFromLib(L){
+  if(!L) return;
+  var _set=function(id,v){ var e=document.getElementById(id); if(e && v) e.value=v; };
+  _set('ap-nJP', L.name_jp);
+  var offSelL=document.getElementById('ap-off'); if(offSelL && L.office)[...offSelL.options].forEach(o=>o.selected=o.value===L.office);
+  _set('ap-area', L.main_staff);
+  _set('ap-buildingType', L.building_type);
+  _set('ap-scope', L.address);
+  _set('ap-client', L.client);
+  _set('ap-constructionStart', (typeof _libDateInput==='function'?_libDateInput(L.kickoff):''));
+  _set('ap-constructionEnd', (typeof _libDateInput==='function'?_libDateInput(L.completion):''));
+  var ctSelL=document.getElementById('ap-ct');
+  if(ctSelL && L.contact_vn){ var hasOpt=[...ctSelL.options].some(o=>o.value===L.contact_vn); if(hasOpt)[...ctSelL.options].forEach(o=>o.selected=o.value===L.contact_vn); }
 }
 async function confirmAddPj() {
   const nVN=document.getElementById('ap-nVN').value.trim();
@@ -10305,12 +10315,17 @@ async function confirmAddPj() {
     photos: hist?.photo ? [hist.photo] : [],
     otLog:[],notes:''};
   // Khung tên: đọc cho CẢ JP + VN (JP: area=担当 PM, scope=địa chỉ, buildingType=quy cách)
-  pj.client           = (document.getElementById('ap-client')?.value||'').trim();
-  pj.buildingType     = (document.getElementById('ap-buildingType')?.value||'').trim();
-  pj.scope            = (document.getElementById('ap-scope')?.value||'').trim();
-  pj.area             = (document.getElementById('ap-area')?.value||'').trim();
-  pj.constructionStart= (document.getElementById('ap-constructionStart')?.value||'');
-  pj.constructionEnd  = (document.getElementById('ap-constructionEnd')?.value||'');
+  // FALLBACK: nếu ô còn trống nhưng dự án CÓ trong kho koutei -> tự lấy từ kho
+  // (đề phòng user chưa bấm "Tải thông tin từ kho"). _Llib có thể null.
+  var _Llib = (typeof _libFindByName==='function') ? _libFindByName(nJP||nVN) : null;
+  var _ld = (typeof _libDateInput==='function') ? _libDateInput : function(s){ return s||''; };
+  pj.client           = (document.getElementById('ap-client')?.value||'').trim()          || (_Llib?(_Llib.client||''):'');
+  pj.buildingType     = (document.getElementById('ap-buildingType')?.value||'').trim()     || (_Llib?(_Llib.building_type||''):'');
+  pj.scope            = (document.getElementById('ap-scope')?.value||'').trim()            || (_Llib?(_Llib.address||''):'');
+  pj.area             = (document.getElementById('ap-area')?.value||'').trim()             || (_Llib?(_Llib.main_staff||''):'');
+  pj.constructionStart= (document.getElementById('ap-constructionStart')?.value||'')        || (_Llib?_ld(_Llib.kickoff):'');
+  pj.constructionEnd  = (document.getElementById('ap-constructionEnd')?.value||'')          || (_Llib?_ld(_Llib.completion):'');
+  if(!pj.contact && _Llib && _Llib.contact_vn) pj.contact = _Llib.contact_vn;
   // Tạo mới dự án -> mặc định hiện ở CẢ 2 phòng (sau đó phòng nào không cần thì ẩn thủ công)
   pj.studioOn = true;
   pj.intlOn   = true;
@@ -10329,7 +10344,9 @@ async function confirmAddPj() {
     _sbQueueChange('Thêm dự án: "' + (pj.nameVN || pj.nameJP || 'mới') + '"',
       'projects', 'insert', pj.id,
       { month_id: D.activeMonth, section: activeSection, name_vn: pj.nameVN||'', name_jp: pj.nameJP||'',
-        office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', main_staff_intl: pj.mainStaffIntl||'', notes: pj.notes||'', is_carryover: false },
+        office: pj.office||'', contact: pj.contact||'', main_staff: pj.mainStaff||'', main_staff_intl: pj.mainStaffIntl||'', notes: pj.notes||'', is_carryover: false,
+        client: pj.client||null, building_type: pj.buildingType||null, scope: pj.scope||null, area: pj.area||null,
+        construction_start: pj.constructionStart||null, construction_end: pj.constructionEnd||null },
       { monthId: D.activeMonth });
   } else {
     _sbSaveProject(pj, D.activeMonth, activeSection);

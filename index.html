@@ -3244,7 +3244,7 @@ function showPage(pg) {
     const btnIntl=document.getElementById('navMainIntl'); if(btnIntl) btnIntl.classList.toggle('active', activeSection==='intl');
   }
   var _nl=document.getElementById('navLibrary'); if(_nl) _nl.classList.toggle('active', pg==='library');
-  var _ms=document.getElementById('monthStrip'); if(_ms) _ms.style.display = (pg==='library')?'none':'';
+  var _ms=document.getElementById('monthStrip'); if(_ms) _ms.style.display = (pg==='library'||pg==='staff')?'none':'';
   if(pg==='dashboard') renderDashboard();
   else if(pg==='staff') renderStaffPage();
   else if(pg==='settings') renderSettings();
@@ -5952,8 +5952,10 @@ function renderMonthGantt(pjs) {
         : '1px solid #ddd';
       let inner = '';
       if (task) {
-        const from = task.dateFrom || task.dateTo;
+        const from0 = task.dateFrom || task.dateTo;
         const to = task.dateTo || task.dateFrom;
+        // Lịch DỰ KIẾN (nét đứt) chỉ hiện TỪ HÔM NAY trở đi — phần quá khứ trước hôm nay biến mất
+        const from = (task.tentative && from0 && from0 < todayStr) ? todayStr : from0;
         const active = from && to && from <= dkStr && to >= dkStr;
         if (active) {
           const isActuallyDone = !!task.doneAt;

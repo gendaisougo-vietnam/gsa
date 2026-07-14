@@ -10093,6 +10093,8 @@ function apTryLoadHistory() {
   const preview = document.getElementById('ap-hist-preview');
   const info = document.getElementById('ap-hist-info');
   if (!preview || !info) return;
+  // Theme tối: set màu bằng JS (không dựa CSS override vì JS lưu style thành rgb()).
+  const _nite = document.body.classList.contains('night');
 
   const isVN = activeSection === 'vn';
 
@@ -10104,17 +10106,18 @@ function apTryLoadHistory() {
     const nRows   = (p.groups||[]).reduce((s,g)=>s+(g.rows||[]).length, 0);
     const nPhotos = (p.photos||[]).filter(Boolean).length;
     preview.style.display = 'block';
-    preview.style.background = '#fff8e7';
-    preview.style.borderColor = '#f9d56e';
+    preview.style.background = _nite ? '#1e2a42' : '#fff8e7';
+    preview.style.borderColor = _nite ? '#4a5a2e' : '#f9d56e';
+    var _hc0 = _nite ? '#e9c46a' : '#7d6608', _sc0 = _nite ? '#aab6cc' : '#555';
     info.innerHTML = `
-      <div style="font-size:11px;font-weight:700;color:#7d6608;margin-bottom:6px">🔥 Tìm thấy trong dữ liệu app (tháng ${monthLabel(dMatch.monthId)})</div>
-      <div style="font-size:11px;color:#555;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:${_hc0};margin-bottom:6px">🔥 Tìm thấy trong dữ liệu app (tháng ${monthLabel(dMatch.monthId)})</div>
+      <div style="font-size:11px;color:${_sc0};margin-bottom:8px">
         <b>${x(p.nameVN||p.nameJP||'?')}</b> · ${x(p.office||'?')} · ${x(p.mainStaff||'?')}<br>
         📦 Có thể load: <b>${nGroups}</b> hạng mục · <b>${nRows}</b> dòng nhân sự · <b>${nPhotos}</b> ảnh
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-xs" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;padding:4px 10px;font-size:11px;font-weight:600" onclick="apLoadHistory('full')">🔥 Tải đầy đủ (groups+rows+photos)</button>
-        <button class="btn btn-xs" style="background:#fff;color:#555;border:1px solid #ddd;padding:4px 10px;font-size:11px" onclick="apLoadHistory('basic')">📂 Chỉ tải thông tin (5 field)</button>
+        <button class="btn btn-xs" style="background:${_nite?'#7a5c12':'#fef3c7'};color:${_nite?'#ffe6a3':'#92400e'};border:1px solid ${_nite?'#a5801f':'#fcd34d'};padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer" onclick="apLoadHistory('full')">🔥 Tải đầy đủ (groups+rows+photos)</button>
+        <button class="btn btn-xs" style="background:${_nite?'#26324c':'#fff'};color:${_nite?'#cdd6e6':'#555'};border:1px solid ${_nite?'#3a4a6b':'#ddd'};padding:5px 12px;font-size:11px;cursor:pointer" onclick="apLoadHistory('basic')">📂 Chỉ tải thông tin (5 field)</button>
       </div>
     `;
     return;
@@ -10125,11 +10128,14 @@ function apTryLoadHistory() {
     if (typeof _LIB!=='undefined' && !_LIB.loaded && typeof _libFetch==='function') { try{ _libFetch().then(function(){ apTryLoadHistory(); }); }catch(e){} }
     var L = _libFindByName(nJP||nVN);
     if (L) {
-      preview.style.display='block'; preview.style.background='#eef4ff'; preview.style.borderColor='#a9c3ef';
-      info.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1e5fbf;margin-bottom:6px">📋 Tìm thấy trong Danh sách dự án (kho koutei)</div>'
-        +'<div style="font-size:11px;color:#555;margin-bottom:8px"><b>'+x(L.name_jp||'')+'</b> · VP '+x(L.office||'?')+' · CĐT: '+x(L.client||'?')+'<br>'
+      preview.style.display='block';
+      preview.style.background = _nite ? '#15203a' : '#eef4ff';
+      preview.style.borderColor = _nite ? '#33436b' : '#a9c3ef';
+      var _hc = _nite ? '#8fb4ff' : '#1e5fbf', _sc = _nite ? '#aab6cc' : '#555';
+      info.innerHTML = '<div style="font-size:11px;font-weight:700;color:'+_hc+';margin-bottom:6px">📋 Tìm thấy trong Danh sách dự án (kho koutei)</div>'
+        +'<div style="font-size:11px;color:'+_sc+';margin-bottom:8px"><b>'+x(L.name_jp||'')+'</b> · VP '+x(L.office||'?')+' · CĐT: '+x(L.client||'?')+'<br>'
         +'担当: '+x(L.main_staff||'?')+' · Liên hệ: '+x(L.contact_vn||'?')+' · '+x(L.building_type||'?')+'</div>'
-        +'<button class="btn btn-xs" style="background:#e3f0ff;color:#1e5fbf;border:1px solid #a9c3ef;padding:4px 10px;font-size:11px;font-weight:600" onclick="apLoadHistory(\'lib\')">📋 Tải thông tin từ kho (CĐT, loại CT, địa chỉ, ngày, liên hệ…)</button>';
+        +'<button class="btn btn-xs" style="background:'+(_nite?'#1e3a6b':'#e3f0ff')+';color:'+(_nite?'#cfe0ff':'#1e5fbf')+';border:1px solid '+(_nite?'#3a5a9b':'#a9c3ef')+';padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer" onclick="apLoadHistory(\'lib\')">📋 Tải thông tin từ kho (CĐT, loại CT, địa chỉ, ngày, liên hệ…)</button>';
       return;
     }
   }
@@ -10137,14 +10143,15 @@ function apTryLoadHistory() {
   const found = loadPjFromHistory(nVN, nJP);
   if (found) {
     preview.style.display = 'block';
-    preview.style.background = '#f8fff8';
-    preview.style.borderColor = '#a9dfbf';
+    preview.style.background = _nite ? '#15291f' : '#f8fff8';
+    preview.style.borderColor = _nite ? '#2f5a41' : '#a9dfbf';
+    var _hc1 = _nite ? '#7ee0a6' : '#1e8449', _sc1 = _nite ? '#aab6cc' : '#555', _mc1 = _nite ? '#7f8ba3' : '#888';
     info.innerHTML = `
-      <div style="font-size:11px;font-weight:700;color:#1e8449;margin-bottom:6px">✅ Đã tìm thấy trong lịch sử (metadata)</div>
-      <div style="font-size:11px;color:#555">
+      <div style="font-size:11px;font-weight:700;color:${_hc1};margin-bottom:6px">✅ Đã tìm thấy trong lịch sử (metadata)</div>
+      <div style="font-size:11px;color:${_sc1}">
         <b>${x(found.nameVN||found.nameJP)}</b> · ${found.office||'?'} · ${found.mainStaff||'?'}<br>
         Hạng mục: ${(found.groups||[]).map(g=>x(g.type)).filter(Boolean).join(', ')||'—'}<br>
-        <span style="color:#888">Lưu lúc: ${found.savedAt||'?'}</span>
+        <span style="color:${_mc1}">Lưu lúc: ${found.savedAt||'?'}</span>
         ${found.photo?`<div style="margin-top:6px"><img src="${found.photo}" style="height:50px;border-radius:4px;object-fit:cover"></div>`:''}
       </div>
     `;

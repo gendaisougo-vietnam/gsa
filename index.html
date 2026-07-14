@@ -7344,7 +7344,7 @@ function renderVNInfoPanel(p) {
     </div>
     <div style="border-top:1px dashed #c7d2fe;margin:3px 0 4px"></div>
     <div style="font-size:9px;font-weight:700;color:#0f766e;margin-bottom:3px">💰 HỢP ĐỒNG</div>
-    ${row('Giá trị (VNĐ)', `<input type="number" class="vn-info-input" value="${x(p.contractValue||'')}" placeholder="0" style="font-size:10px;color:#0f766e;font-weight:700" onblur="savePjDetailField('${p.id}','contractValue',this.value)">`)}
+    ${row('Giá trị (VNĐ)', `<input type="text" inputmode="numeric" class="vn-info-input" value="${_formatMoney(+p.contractValue||0)}" placeholder="0" style="font-size:10px;color:#0f766e;font-weight:700" oninput="this.value=_formatMoney(_parseMoneyInput(this.value))" onblur="savePjDetailField('${p.id}','contractValue',_parseMoneyInput(this.value)||'')">`)}
     ${row('Loại DS', `<select class="vn-info-input" style="font-size:10px;color:var(--navy)" onchange="savePjDetailField('${p.id}','revenueType',this.value)">
         <option value=""${!p.revenueType?' selected':''}>— chọn —</option>
         <option value="honsha"${p.revenueType==='honsha'?' selected':''}>本社下請 (thầu HQ)</option>
@@ -10426,7 +10426,7 @@ function openEditProject(id) {
     <div style="font-size:11px;font-weight:700;color:#0f766e;margin:12px 0 8px;padding:4px 8px;background:#ecfdf5;border-radius:4px">💰 Nhóm 2b — Hợp đồng & Tiến độ hợp đồng <span style="font-size:9px;color:#94a3b8">(link Dashboard doanh số)</span></div>
     <div class="info-grid c2" style="gap:10px">
       <div class="field"><label>Giá trị hợp đồng (VNĐ)</label>
-        <input id="ep-contractValue" type="number" value="${x(p.contractValue||'')}" placeholder="vd 2000000000"></div>
+        <input id="ep-contractValue" type="text" inputmode="numeric" value="${_formatMoney(+p.contractValue||0)}" placeholder="vd 2.000.000.000" oninput="this.value=_formatMoney(_parseMoneyInput(this.value))"></div>
       <div class="field"><label>Loại doanh số</label>
         <select id="ep-revenueType">
           <option value=""${!p.revenueType?' selected':''}>— chọn —</option>
@@ -10517,7 +10517,7 @@ function confirmEditPj(id) {
   // Hợp đồng & tiến độ HĐ (chỉ cập nhật khi ô có mặt = form VN, tránh xóa khi sửa JP)
   var _cv=document.getElementById('ep-contractValue');
   if(_cv){
-    p.contractValue    = _cv.value||'';
+    p.contractValue    = _parseMoneyInput(_cv.value)||'';   // bỏ dấu phân cách -> số thuần
     p.revenueType      = (document.getElementById('ep-revenueType')?.value||'');
     p.revenueMonth     = (document.getElementById('ep-revenueMonth')?.value||'');
     p.contractStart    = (document.getElementById('ep-contractStart')?.value||'');
@@ -11028,7 +11028,10 @@ function _somaiNewByDept(mid){
 }
 // Tỷ giá quy đổi: bao nhiêu VNĐ = 1万円 (JPY×10.000). Lưu localStorage, sửa được trên Dashboard.
 function _vndRate(){ var v=parseFloat(localStorage.getItem('vnd_per_manyen')); return (v&&v>0)?v:1700000; }
-function _setVndRate(v){ v=parseFloat(String(v).replace(/[^0-9.]/g,''))||0; if(v>0){ localStorage.setItem('vnd_per_manyen', v); toast('✓ Đã lưu tỷ giá'); try{renderDashboard();}catch(e){} } }
+function _setVndRate(v){ v=_parseMoneyInput(v); if(v>0){ localStorage.setItem('vnd_per_manyen', v); toast('✓ Đã lưu tỷ giá'); try{renderDashboard();}catch(e){} } }
+// Bộ quy đổi nhanh 2 chiều trên Dashboard (VNĐ <-> 万円), dùng đúng tỷ giá đang lưu.
+function _fxFromVnd(){ var r=_vndRate(); var v=_parseMoneyInput((document.getElementById('fxVnd')||{}).value||''); var o=document.getElementById('fxVndOut'); if(o) o.textContent=(v>0? (Math.round(v/r*100)/100).toLocaleString('vi-VN'):'0'); }
+function _fxFromMan(){ var r=_vndRate(); var m=parseFloat(String((document.getElementById('fxMan')||{}).value||'').replace(/[^0-9.]/g,''))||0; var o=document.getElementById('fxManOut'); if(o) o.textContent=(m>0? _formatMoney(Math.round(m*r)):'0'); }
 // Doanh thu việc VN theo tháng ghi nhận (revenueMonth). Giá trị HĐ nhập VNĐ -> quy đổi ra 万円.
 function _vnRevByMonth(){
   var out={}; var seen={}; var rate=_vndRate();
@@ -11138,7 +11141,14 @@ function renderRevenueDashboard(){
         +card('#fbbf24','🇻🇳 Việc Việt Nam','revTargetVn',M.tV,vnActual,'ô ベトナム単独 hoặc Σ hợp đồng')
       +'</div>'
       +'<div style="background:#182338;border:1px solid #2b3a58;border-radius:8px;padding:6px 11px;margin-bottom:12px;font-size:10px;color:#c8d6e5;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:260px">💡 Chỉ tiêu năm chia đều 12 tháng. Việc Nhật: doanh thu từ tiền Osaka/Tokyo (hoặc 作成×đơn giá). 修正 chỉ thống kê. Việc VN: giá trị hợp đồng (VNĐ) quy đổi ra 万円.</span>'
-        +'<span style="white-space:nowrap">💱 Tỷ giá: 1万円 = <input type="number" value="'+_vndRate()+'" style="width:100px;background:#eef2f8;color:#15213a;font-weight:700;border:1px solid #c3ccdb;border-radius:5px;padding:2px 6px;font-size:11px" onblur="_setVndRate(this.value)"> VNĐ</span></div>'
+        +'<span style="white-space:nowrap">💱 Tỷ giá: 1万円 = <input type="text" inputmode="numeric" value="'+_formatMoney(_vndRate())+'" style="width:120px;background:#eef2f8;color:#15213a;font-weight:700;border:1px solid #c3ccdb;border-radius:5px;padding:2px 6px;font-size:11px" oninput="this.value=_formatMoney(_parseMoneyInput(this.value))" onblur="_setVndRate(this.value)"> VNĐ</span></div>'
+      // Bộ quy đổi nhanh 2 chiều — dùng đúng tỷ giá đang lưu, cập nhật khi gõ
+      +'<div style="background:#182338;border:1px solid #2b3a58;border-radius:8px;padding:7px 11px;margin-bottom:12px;font-size:11px;color:#c8d6e5;display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+        +'<span style="font-weight:700;color:#8fb4ff">🧮 Quy đổi nhanh</span>'
+        +'<span style="white-space:nowrap">VNĐ <input id="fxVnd" type="text" inputmode="numeric" placeholder="vd 1.700.000" style="width:130px;background:#0f1930;color:#e4e9f2;border:1px solid #33436b;border-radius:5px;padding:3px 7px;font-size:11px" oninput="_fxFromVnd()"> = <b id="fxVndOut" style="color:#4ade80">0</b> 万円</span>'
+        +'<span style="color:#3a4a6b">|</span>'
+        +'<span style="white-space:nowrap">万円 <input id="fxMan" type="text" inputmode="numeric" placeholder="vd 100" style="width:90px;background:#0f1930;color:#e4e9f2;border:1px solid #33436b;border-radius:5px;padding:3px 7px;font-size:11px" oninput="_fxFromMan()"> = <b id="fxManOut" style="color:#4ade80">0</b> VNĐ</span>'
+      +'</div>'
       +'<div style="background:#141d30;border:1px solid #24304a;border-radius:11px;padding:10px 12px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">売上 Doanh số thực tế vs Đường mục tiêu tích lũy <span style="color:#8fa1bd;font-weight:400;font-size:10px">(万円)</span></div>'+svg
         +'<div style="display:flex;gap:14px;font-size:10px;color:#8fa1bd"><span><span style="display:inline-block;width:12px;height:3px;background:#38bdf8;vertical-align:middle"></span> Thực tế</span><span><span style="display:inline-block;width:12px;height:2px;background:#f4c430;vertical-align:middle"></span> Mục tiêu tích lũy</span></div></div>'
     +'</div></div>' + '<div class="card" style="margin-bottom:14px"><div class="card-hd"><span class="card-hd-title">📄 Bảng 実績 (điền tay ô tiền theo tháng)</span></div><div style="padding:10px 12px;overflow-x:auto">'+_jissekiTableHtml(M,true)+'</div></div>';

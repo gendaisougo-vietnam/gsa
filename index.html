@@ -7742,7 +7742,10 @@ function renderProjectDetail(ci, p) {
   <div class="card">
     <div class="card-hd">
       <span class="card-hd-title">${activeSection==='vn' ? '👥 Tiến độ nhân sự' : activeSection==='intl' ? '📐 Hạng mục bản vẽ (図面)' : '🎨 Hạng mục phối cảnh'}</span>
+      <span>
+      ${(function(){ var seen={},d=0; (p.groups||[]).forEach(function(g){ if(!_groupInDept(g))return; var t=(g.type||'').trim(); if(t) seen[t]=(seen[t]||0)+1; }); Object.keys(seen).forEach(function(t){ if(seen[t]>1) d++; }); return d>0 ? '<button class="btn btn-sm" style="background:#7c2d12;color:#fed7aa;border:1px solid #b45309;margin-right:6px" onclick="_mergeDupGroupsInProject(\''+p.id+'\')" title="Có '+d+' tên hạng mục bị trùng — bấm để gộp lại">🧹 Gộp trùng ('+d+')</button>' : ''; })()}
       <button class="btn btn-gold btn-sm" onclick="addGroup('${p.id}')">＋ Thêm hạng mục</button>
+      </span>
     </div>
     <div style="overflow-x:auto">
     <table class="rtbl" id="rtbl-${p.id}">
@@ -9873,6 +9876,22 @@ async function _mergeGroups(p, pjId, gFrom, gTo){
   try{ _refreshOverviewParts(); }catch(e){}
   _sbAuditLog('update','groups',gTo.id,'Gộp hạng mục trùng tên "'+(gTo.type||'')+'" trong "'+(p.nameVN||p.nameJP||pjId)+'"');
   toast('✓ Đã gộp vào hạng mục "'+(gTo.type||'')+'" ('+fromRows.length+' dòng được gộp)');
+}
+// Gộp TẤT CẢ hạng mục trùng tên (cùng dự án, cùng phòng) về 1 — dùng cho nút "🧹 Gộp trùng".
+async function _mergeDupGroupsInProject(pjId){
+  const p=getPjGlobal(pjId)||getPj(pjId); if(!p) return;
+  if(_needsApproval()){ alert('Tài khoản cần duyệt không tự gộp được — nhờ quản trị/trưởng phòng gộp giúp.'); return; }
+  const byKey={};
+  (p.groups||[]).forEach(function(g){ const t=(g.type||'').trim(); if(!t) return; const k=(g.dept||'studio')+'|'+t; (byKey[k]=byKey[k]||[]).push(g); });
+  const dupKeys=Object.keys(byKey).filter(function(k){ return byKey[k].length>1; });
+  if(!dupKeys.length){ toast('Không có hạng mục trùng tên'); return; }
+  if(!confirm('Có '+dupKeys.length+' tên hạng mục bị trùng trong dự án này.\n\nGộp mỗi tên về 1 hạng mục? Toàn bộ dòng / người làm sẽ được GỘP LẠI, không mất dữ liệu.')) return;
+  for(const k of dupKeys){
+    const grps=byKey[k].slice().sort(function(a,b){ return (b.rows||[]).length-(a.rows||[]).length; }); // giữ cái nhiều dòng nhất
+    const keeper=grps[0];
+    for(let i=1;i<grps.length;i++){ await _mergeGroups(p, pjId, grps[i], keeper); }
+  }
+  toast('✓ Đã gộp xong hạng mục trùng tên');
 }
 async function updGroup(pjId,gid2,field,val) {
   const p=getPjGlobal(pjId)||getPj(pjId); if(!p) return;

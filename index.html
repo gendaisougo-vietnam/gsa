@@ -9853,10 +9853,43 @@ function setRowSt(pjId,gid2,rid,status,btn) {
   btn.classList.add('on');
   refreshPjTotals(pjId);
 }
+// Gộp hạng mục gFrom VÀO gTo (giữ gTo): chuyển toàn bộ dòng sang gTo rồi xóa gFrom. KHÔNG mất dữ liệu.
+async function _mergeGroups(p, pjId, gFrom, gTo){
+  const fromRows = gFrom.rows || [];
+  // 1) Chuyển chủ các dòng sang gTo (Supabase) — làm TRƯỚC khi xóa để không bị cascade xóa dòng
+  if (window._sbReady && fromRows.length){
+    try { const {error}=await _sb.from('rows').update({ group_id: gTo.id }).eq('group_id', gFrom.id); if(error) _sbReport('_mergeGroups', error, {op:'update', table:'rows'}); }
+    catch(e){ _sbReport('_mergeGroups', e, {op:'update', table:'rows'}); }
+  }
+  gTo.rows = (gTo.rows || []).concat(fromRows);      // gộp dòng (local)
+  // 2) Xóa hạng mục thừa gFrom
+  p.groups = (p.groups || []).filter(x => x.id !== gFrom.id);
+  if (window._sbReady){
+    try { const {error}=await _sb.from('groups').delete().eq('id', gFrom.id); if(error) _sbReport('_mergeGroups', error, {op:'delete', table:'groups'}); }
+    catch(e){ _sbReport('_mergeGroups', e, {op:'delete', table:'groups'}); }
+  }
+  save(); rebuildGroups(pjId); refreshPjTotals(pjId);
+  try{ _refreshVnTimeline(pjId); }catch(e){}
+  try{ _refreshOverviewParts(); }catch(e){}
+  _sbAuditLog('update','groups',gTo.id,'Gộp hạng mục trùng tên "'+(gTo.type||'')+'" trong "'+(p.nameVN||p.nameJP||pjId)+'"');
+  toast('✓ Đã gộp vào hạng mục "'+(gTo.type||'')+'" ('+fromRows.length+' dòng được gộp)');
+}
 async function updGroup(pjId,gid2,field,val) {
   const p=getPjGlobal(pjId)||getPj(pjId); if(!p) return;
   const g=(p.groups||[]).find(g=>g.id===gid2); if(!g) return;
   g[field]=val; save();
+  // ── CHỐNG TRÙNG: đặt/đổi tên trùng hạng mục đã có (cùng dự án, cùng phòng) -> hỏi gộp ──
+  if (field==='type' && val && val.trim() && !_needsApproval()){
+    const _nm = val.trim();
+    const _dupe = (p.groups||[]).find(x => x.id!==gid2 && (x.type||'').trim()===_nm && (x.dept||'studio')===(g.dept||'studio'));
+    if (_dupe){
+      if (confirm('⚠ Hạng mục "'+_nm+'" đã tồn tại trong dự án này.\n\nGộp hạng mục vừa nhập VÀO hạng mục đã có?\n(toàn bộ dòng / người làm bên trong sẽ được GỘP LẠI, KHÔNG bị xóa)')){
+        await _mergeGroups(p, pjId, g, _dupe);   // g (vừa đặt tên) gộp vào _dupe (đã có trước)
+        return;
+      }
+      // Không gộp -> vẫn giữ 2 hạng mục trùng tên theo lựa chọn của người dùng
+    }
+  }
   if (window._sbReady && field === 'type') {
     if (_needsApproval()) {
       // Tài khoản cần duyệt: gửi yêu cầu (upsert đủ trường để không phụ thuộc thứ tự duyệt)

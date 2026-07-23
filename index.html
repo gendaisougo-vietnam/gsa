@@ -4676,7 +4676,7 @@ function renderKouteiJP(pjs, win){
       }
       let lbl='';
       if(g){
-        const upRow=(g.rows||[]).find(r=>r.dateTo===ds);
+        const upRow=(g.rows||[]).find(r=>r.dateTo===ds && !(r.tentative && r.dateTo<todayStr));  // dự kiến quá khứ: bỏ nhãn (khớp vạch đã ẩn)
         if(upRow){
           const upToday = (upRow.dateTo===todayStr && !upRow.doneAt && !upRow.tentative);
           const ud = upRow.doneAt || (upRow.dateTo<todayStr);
@@ -5584,6 +5584,8 @@ function renderMonthOverview(ci) {
       return false;
     }).sort((a,b)=>(smPerf[b]||0)-(smPerf[a]||0));
   }
+  // FIX QA: loại người ĐÃ NGHỈ VIỆC khỏi box Hiệu suất nhân sự
+  _perfRoster = _perfRoster.filter(s => !(typeof isStaffLeft==='function' && isStaffLeft(s)));
 
   ci.innerHTML=`
   <div id="heroStatsRow" class="hero-row" style="grid-template-columns:160px 160px 1fr 220px">
@@ -8910,6 +8912,12 @@ function updRowRating(pjId, gId, rId, field, val) {
   if (!r) return;
   r[field] = +val;
   persistD();
+  // FIX QA: trước đây chỉ lưu local -> điểm đánh giá mất khi tải lại/đổi máy. Ghi lên Supabase.
+  const _col = _COL_MAP[field];
+  if (_col) {
+    if (_needsApproval()) _sbQueueRowDebounced(pjId, gId, rId, { [_col]: +val }, 'Sửa đánh giá ' + field);
+    else _sbSaveRowDebounced(gId, rId, { [_col]: +val });
+  }
 }
 
 
@@ -10981,6 +10989,11 @@ async function cloneProjectFromHistory(srcPj, srcMonthId) {
     mainStaff: srcPj.mainStaff || '', mainStaffIntl: srcPj.mainStaffIntl || '',
     client: srcPj.client || '', buildingType: srcPj.buildingType || '',
     scope: srcPj.scope || '', area: srcPj.area || '',
+    // FIX QA: giữ NGÀY khởi công/hoàn công + thông tin HỢP ĐỒNG khi clone (trước đây bị rơi)
+    constructionStart: srcPj.constructionStart || '', constructionEnd: srcPj.constructionEnd || '',
+    contractValue: srcPj.contractValue || '', revenueType: srcPj.revenueType || '', revenueMonth: srcPj.revenueMonth || '',
+    contractStart: srcPj.contractStart || '', contractDeadline: srcPj.contractDeadline || '',
+    contractDur: srcPj.contractDur || '', contractDurType: srcPj.contractDurType || 'days',
     groups: newGroups,
     photos: photos,
     otLog: [], notes: '',
@@ -11083,7 +11096,7 @@ function _vndRate(){ var v=parseFloat(localStorage.getItem('vnd_per_manyen')); r
 function _setVndRate(v){ v=_parseMoneyInput(v); if(v>0){ localStorage.setItem('vnd_per_manyen', v); toast('✓ Đã lưu tỷ giá'); try{renderDashboard();}catch(e){} } }
 // Bộ quy đổi nhanh 2 chiều trên Dashboard (VNĐ <-> 万円), dùng đúng tỷ giá đang lưu.
 function _fxFromVnd(){ var r=_vndRate(); var v=_parseMoneyInput((document.getElementById('fxVnd')||{}).value||''); var o=document.getElementById('fxVndOut'); if(o) o.textContent=(v>0? (Math.round(v/r*100)/100).toLocaleString('vi-VN'):'0'); }
-function _fxFromMan(){ var r=_vndRate(); var m=parseFloat(String((document.getElementById('fxMan')||{}).value||'').replace(/[^0-9.]/g,''))||0; var o=document.getElementById('fxManOut'); if(o) o.textContent=(m>0? _formatMoney(Math.round(m*r)):'0'); }
+function _fxFromMan(){ var r=_vndRate(); var m=_parseMoneyInput((document.getElementById('fxMan')||{}).value||''); var o=document.getElementById('fxManOut'); if(o) o.textContent=(m>0? _formatMoney(Math.round(m*r)):'0'); }
 // Doanh thu việc VN theo tháng ghi nhận (revenueMonth). Giá trị HĐ nhập VNĐ -> quy đổi ra 万円.
 function _vnRevByMonth(){
   var out={}; var seen={}; var rate=_vndRate();

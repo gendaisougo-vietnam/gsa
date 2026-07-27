@@ -9328,8 +9328,8 @@ function renderStaffSchedule(p) {
       (pp.groups||[]).forEach(function(g){
         if(!_groupInDept(g)) return;
         (g.rows||[]).forEach(function(r){
-          if(!r.staff || !(r.dateFrom||r.dateTo)) return;
-          if(r.doneAt) return;          // BỎ việc đã UP (không hiển thị nữa)
+          if(!r.staff || !r.dateTo) return;   // PHẢI có ngày UP — hạng mục chưa xếp lịch không đưa vào (đỡ rối)
+          if(r.doneAt) return;                // BỎ việc đã UP (không hiển thị nữa)
           if(r.isCarryRef) return;
           if(_seenRowSS[r.id]) return; _seenRowSS[r.id]=1;
           allTasks.push(Object.assign({}, r, { pjName:(pp.nameVN||pp.nameJP||''), groupName:(g.type||'—') }));
@@ -9402,104 +9402,97 @@ function renderStaffSchedule(p) {
     `<th colspan="${m.span}" style="background:var(--navy2);color:var(--gold2);font-size:10px;text-align:center;padding:3px;border-right:1px solid rgba(255,255,255,.15)">${m.label}</th>`
   ).join('');
 
-  // Build each staff row — chỉ nhân sự của dự án này
-  function buildStaffRow(staff, isPastStaff) {
-    const tasks = (staffMap[staff]||[]);
-
-    const dayCells = days.map((d,i)=>{
-      const dk = dateKey(d);
-      const isToday = dk===todayStr;
-      const isSun   = d.getDay()===0;
-      const isSat   = d.getDay()===6;
-      const isWeekBorder = d.getDay()===1 && i>0;
-      const activeTasks = tasks.filter(r=>{
-        const from = r.dateFrom||r.dateTo;
-        const to   = r.dateTo||r.dateFrom;
-        return from<=dk && to>=dk;
-      });
-      const leaves = getStaffLeaves(staff);
-      const isOnLeave = leaves.some(l=>{
-        const lf=l.from||l.to, lt=l.to||l.from;
-        return lf && lt && lf<=dk && lt>=dk;
-      });
-      const bg = isOnLeave?'rgba(231,76,60,.08)':isToday?'rgba(255,192,0,.08)':isSun||isSat?'rgba(0,0,0,.03)':'#fff';
-      const borderL = isWeekBorder?'2px solid rgba(0,0,0,.08)':'1px solid #f0f0f0';
-      if(activeTasks.length===0){
-        return `<td style="background:${bg};border-left:${borderL};padding:1px"></td>`;
-      }
-      const blocks = activeTasks.map(r=>{
-        const isActuallyDone = !!(r.doneAt);
-        const isNew = r.status==='new';
-        // Màu thanh: xám đậm nếu past staff hoặc đã UP, xanh/vàng nếu active
-        const barColor = (isPastStaff || isActuallyDone) ? DONE_BAR_COLOR
-          : isNew ? '#5a9a35' : '#d4900a';
-        const isFirstDay = r.dateFrom===dk;
-        const isLastDay  = r.dateTo===dk;
-        const _dash = !!r.tentative;  // lịch dự kiến -> nét đứt
-        const _barStyle = _dash
-          ? `position:absolute;bottom:0;left:0;right:0;height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor}`
-          : `position:absolute;bottom:0;left:0;right:0;height:${GANTT_BAR_H}px;background:${barColor};border-radius:${isFirstDay?'1px 0 0 1px':isLastDay?'0 1px 1px 0':'0'}`;
-        // B1: Bỏ label trên bar (đồng bộ với projectTimeline). Bar mảnh ở dưới container.
-        return `<div title="${x(r.pjName||'')} · ${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'}${_dash?' · Dự kiến':''} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
-          style="position:relative;height:13px;margin:1px 0;overflow:visible">
-          <div style="${_barStyle}"></div>
-        </div>`;
-      }).join('');
-      return `<td style="background:${bg};border-left:${borderL};padding:1px;vertical-align:top">${blocks}</td>`;
-    }).join('');
-
-    const activeLeaveList = getStaffLeaves(staff).filter(l=>{
-      const lt=l.to||l.from; return lt >= todayStr;
+  // ── Mỗi HẠNG MỤC = 1 hàng riêng; nhóm CHA-CON theo công trình; hover sáng dòng + khối nhân sự ──
+  function buildStaffTbody(staff, isFree) {
+    const tasks = (staffMap[staff]||[]).slice().sort(function(a,b){
+      return String(a.pjName||'').localeCompare(String(b.pjName||'')) || String(a.dateFrom||a.dateTo||'').localeCompare(String(b.dateFrom||b.dateTo||''));
     });
-    const taskSummary = tasks.length>0 || activeLeaveList.length>0
-      ? activeLeaveList.map(l=>`<div style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap">
-          <span style="width:6px;height:6px;border-radius:50%;background:#e74c3c;flex-shrink:0;display:inline-block"></span>
-          <span style="color:#e74c3c;overflow:hidden;text-overflow:ellipsis">Nghỉ ${l.from||'?'}${l.to&&l.to!==l.from?'→'+l.to:''}</span>
-        </div>`).join('')
-        + tasks.map(r=>{
-          const overdue = r.dateTo && r.dateTo < todayStr && !r.doneAt && !r.tentative;
-          const done    = !!(r.doneAt);
-          const dotColor = done ? DONE_BAR_COLOR : r.status==='new' ? '#70AD47' : 'var(--gold)';
-          const _pjTag = r.pjName ? (r.pjName.length>7?r.pjName.substring(0,7)+'…':r.pjName)+' · ' : '';
-          return `<div title="${x(r.pjName||'')} · ${x(r.groupName)}" style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden">
-            <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;display:inline-block"></span>
-            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?DONE_COLOR:overdue?'#e74c3c':'inherit'}">${x(_pjTag)}${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
-            ${overdue?'<span style="color:#e74c3c;font-weight:700">!</span>':''}
-            ${done?'<span style="color:#27ae60;font-size:8px">✓</span>':''}
-          </div>`;
-        }).join('')
-      : `<div style="font-size:9px;color:#aaa;font-style:italic">Không có task</div>`;
-
-    // Name cell: hiện trạng thái RẢNH/BẬN để phân việc nhanh
-    const _busyCount = (staffMap[staff]||[]).length;
-    const _statusBadge = isPastStaff
+    const leaves = getStaffLeaves(staff);
+    function isOnLeaveDay(dk){ return leaves.some(l=>{ const lf=l.from||l.to, lt=l.to||l.from; return lf&&lt&&lf<=dk&&lt>=dk; }); }
+    const _statusBadge = isFree
       ? '<span style="font-size:8px;font-weight:700;color:#16a34a;background:#dcfce7;border-radius:3px;padding:0 5px;white-space:nowrap">🟢 Rảnh</span>'
-      : '<span style="font-size:8px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:3px;padding:0 5px;white-space:nowrap">'+_busyCount+' việc</span>';
-    return `<tr class="grp-row" style="border-bottom:1px solid var(--gray2)">
-      <td style="background:var(--gray1);padding:5px 8px;min-width:90px;border-right:1px solid var(--gray2);vertical-align:top">
+      : '<span style="font-size:8px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:3px;padding:0 5px;white-space:nowrap">'+tasks.length+' việc</span>';
+    const activeLeaveList = leaves.filter(l=>{ const lt=l.to||l.from; return lt>=todayStr; });
+    const leaveInfo = activeLeaveList.map(l=>`<div style="font-size:9px;color:#e74c3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">● Nghỉ ${l.from||'?'}${l.to&&l.to!==l.from?'→'+l.to:''}</div>`).join('');
+    const nRows = Math.max(tasks.length, 1);
+    const nameCell = `<td rowspan="${nRows}" style="background:var(--gray1);padding:5px 8px;min-width:90px;border-right:1px solid var(--gray2);vertical-align:top">
         <div class="grp-name-text" style="font-weight:700;font-size:13px;color:var(--navy);display:flex;align-items:center;gap:5px;flex-wrap:wrap">${staff} ${_statusBadge}</div>
-        ${taskSummary}
-      </td>
-      ${dayCells}
-    </tr>`;
+        ${leaveInfo}
+      </td>`;
+
+    function dayCellsFor(r){
+      const from0 = r.dateFrom||r.dateTo, to = r.dateTo||r.dateFrom;
+      const from = (r.tentative && from0 && from0<todayStr) ? todayStr : from0;   // dự kiến: chỉ từ hôm nay
+      const isNew = r.status==='new';
+      const barColor = isNew ? '#5a9a35' : '#d4900a';
+      const overdue = r.dateTo && r.dateTo<todayStr && !r.tentative;
+      return days.map((d,i)=>{
+        const dk = dateKey(d);
+        const isToday = dk===todayStr;
+        const isSun=d.getDay()===0, isSat=d.getDay()===6;
+        const isWeekBorder = d.getDay()===1 && i>0;
+        const bg = isOnLeaveDay(dk)?'rgba(231,76,60,.08)':isToday?'rgba(255,192,0,.10)':isSun||isSat?'rgba(0,0,0,.05)':'transparent';
+        const borderL = isWeekBorder?'2px solid rgba(128,140,160,.35)':'1px solid rgba(128,140,160,.14)';
+        let inner='';
+        if(from && to && from<=dk && to>=dk){
+          const isStart = dk===from, isEnd = dk===to;
+          const L = isStart?'2px':'-1px', R = isEnd?'2px':'-1px';
+          inner += r.tentative
+            ? `<div style="position:absolute;top:70%;transform:translateY(-50%);left:${L};right:${R};height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor};z-index:5"></div>`
+            : `<div style="position:absolute;top:70%;transform:translateY(-50%);left:${L};right:${R};height:${GANTT_BAR_H}px;background:${barColor};z-index:5"></div>`;
+        }
+        if(dk===r.dateTo){
+          const lt2 = (typeof _upTypeLabel==='function') ? _upTypeLabel(r) : (isNew?'作成':'修正');
+          const lc = overdue?'#e74c3c':barColor;
+          inner += `<div style="position:absolute;bottom:calc(30% + 2px);right:1px;font-size:8px;font-weight:800;color:${lc};line-height:1;white-space:nowrap;z-index:6">${lt2}</div>`;
+        }
+        return `<td title="${x(r.pjName||'')} · ${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'}${r.tentative?' · Dự kiến':''} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}" style="background:${bg};border-left:${borderL};padding:0;position:relative;overflow:visible"><div style="height:18px;position:relative;overflow:visible">${inner}</div></td>`;
+      }).join('');
+    }
+
+    if(!tasks.length){
+      const emptyCells = days.map((d,i)=>{
+        const dk=dateKey(d); const isToday=dk===todayStr; const isSun=d.getDay()===0, isSat=d.getDay()===6;
+        const isWeekBorder=d.getDay()===1&&i>0;
+        const bg=isOnLeaveDay(dk)?'rgba(231,76,60,.08)':isToday?'rgba(255,192,0,.10)':isSun||isSat?'rgba(0,0,0,.05)':'transparent';
+        return `<td style="background:${bg};border-left:${isWeekBorder?'2px solid rgba(128,140,160,.35)':'1px solid rgba(128,140,160,.14)'};padding:0"><div style="height:18px"></div></td>`;
+      }).join('');
+      return `<tbody class="ss-grp"><tr class="sst">${nameCell}<td style="padding:2px 8px;font-size:9px;color:#8a94a6;font-style:italic;border-right:1px solid var(--gray2)">Không có lịch</td>${emptyCells}</tr></tbody>`;
+    }
+
+    let prevPj = null;
+    const trs = tasks.map((r,ti)=>{
+      const showPj = (r.pjName||'') !== prevPj; prevPj = r.pjName||'';
+      const overdue = r.dateTo && r.dateTo<todayStr && !r.tentative;
+      const label = `${showPj?`<div style="font-weight:700;font-size:9.5px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${x(r.pjName||'')}">${x(r.pjName||'—')}</div>`:''}
+        <div style="padding-left:9px;font-size:9px;color:${overdue?'#e74c3c':'#7a869c'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${x(r.groupName)}">└ ${x(r.groupName)}${r.tentative?' <span style=\"color:#7c3aed\">✎</span>':''}${overdue?' <b>!</b>':''}</div>`;
+      return `<tr class="sst">${ti===0?nameCell:''}<td style="padding:1px 6px;min-width:130px;max-width:190px;border-right:1px solid var(--gray2);vertical-align:middle">${label}</td>${dayCellsFor(r)}</tr>`;
+    }).join('');
+    return `<tbody class="ss-grp">${trs}</tbody>`;
   }
 
-  // Render: active trước, sau đó past có divider
-  let staffRows = activeStaffList.map(s=>buildStaffRow(s,false)).join('');
+  let bodyHtml = activeStaffList.map(s=>buildStaffTbody(s,false)).join('');
   if(pastStaffList.length>0){
-    staffRows += `<tr><td colspan="${days.length+1}"
-      style="background:#f5f5f5;padding:4px 10px;font-size:10px;color:#aaa;font-style:italic;border-top:2px dashed #e0e0e0">
+    bodyHtml += `<tbody><tr><td colspan="${days.length+2}"
+      style="background:rgba(128,140,160,.12);padding:4px 10px;font-size:10px;color:#8a94a6;font-style:italic;border-top:2px dashed rgba(128,140,160,.4)">
       ↓ Đang RẢNH — không có lịch UP/dự kiến trong 5 tuần tới (có thể phân việc)
-    </td></tr>`;
-    staffRows += pastStaffList.map(s=>buildStaffRow(s,true)).join('');
+    </td></tr></tbody>`;
+    bodyHtml += pastStaffList.map(s=>buildStaffTbody(s,true)).join('');
   }
 
   return `
+  <style>
+    .ss-grp{ border-bottom:2px solid var(--gray2); }
+    .ss-grp:hover td{ background-image:linear-gradient(rgba(255,192,0,.06),rgba(255,192,0,.06)); }
+    .ss-grp tr.sst:hover td{ background-image:linear-gradient(rgba(255,192,0,.17),rgba(255,192,0,.17)); }
+    .ss-grp tr.sst td{ border-bottom:1px solid rgba(128,140,160,.12); }
+  </style>
   <div style="overflow-x:auto">
-  <table class="detail-tl" style="width:100%;border-collapse:collapse;font-size:11px;min-width:870px">
+  <table class="detail-tl" style="width:100%;border-collapse:collapse;font-size:11px;min-width:980px">
     <thead>
       <tr>
         <th style="background:var(--navy);width:90px;min-width:90px;padding:4px 8px;color:rgba(255,255,255,.7);font-size:10px;text-align:left">Nhân sự</th>
+        <th style="background:var(--navy);min-width:130px;padding:4px 8px;color:rgba(255,255,255,.7);font-size:10px;text-align:left">Công trình · Hạng mục</th>
         ${hdrMonths}
       </tr>
       <tr>
@@ -9507,19 +9500,20 @@ function renderStaffSchedule(p) {
           <div>Hôm nay:</div>
           <div style="color:var(--gold);font-weight:700">${todayStr.split('-').slice(1).join('/')}</div>
         </th>
+        <th style="background:var(--navy2)"></th>
         ${hdrDays}
       </tr>
     </thead>
-    <tbody>${staffRows}</tbody>
+    ${bodyHtml}
   </table>
   </div>
   <div style="padding:8px 12px;display:flex;gap:14px;font-size:10px;color:var(--gray4);background:var(--gray1);border-top:1px solid var(--gray2)">
     <span>Chú thích:</span>
-    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:8px;background:#70AD47;border-radius:2px;display:inline-block"></span> Làm mới</span>
-    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:8px;background:var(--gold);border-radius:2px;display:inline-block"></span> Sửa lại</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:2px;background:#5a9a35;display:inline-block"></span> Làm mới</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:2px;background:#d4900a;display:inline-block"></span> Sửa lại</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:5px;border-top:1.2px dashed #d4900a;border-bottom:1.2px dashed #d4900a;display:inline-block;box-sizing:border-box"></span> Dự kiến</span>
     <span style="display:flex;align-items:center;gap:4px"><span style="color:#e74c3c">!</span> Quá hạn</span>
-    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:8px;background:rgba(255,192,0,.15);border:1px solid var(--gold);border-radius:2px;display:inline-block"></span> Hôm nay</span>
-    <span style="margin-left:auto;font-style:italic">Hover chuột vào ô màu để xem chi tiết</span>
+    <span style="margin-left:auto;font-style:italic">Di chuột: sáng dòng hạng mục + cả khối nhân sự</span>
   </div>`;
 }
 

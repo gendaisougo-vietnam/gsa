@@ -9379,16 +9379,21 @@ function renderStaffSchedule(p) {
     if(i===34) monthSpans.push({label:['T1','T2','T3','T4','T5','T6','T7','T8','T9','T10','T11','T12'][curMonth], span:mSpan});
   });
 
+  // Ngày LỄ công ty (giống 2 bảng ngoài): nền _TL_HOL_BG, header chữ đỏ
+  const _ssHol = new Set();
+  try{ if(typeof getHolidays==='function') getHolidays().forEach(h=>_ssHol.add(h.date)); }catch(e){}
+
   const dayVN = ['CN','T2','T3','T4','T5','T6','T7'];
   hdrDays = days.map((d,i)=>{
     const isToday = dateKey(d)===todayStr;
     const isSun   = d.getDay()===0;
     const isSat   = d.getDay()===6;
+    const isRealHol = _ssHol.has(dateKey(d));
     const isWeekBorder = d.getDay()===1 && i>0;
     return `<th style="
       min-width:22px;max-width:30px;text-align:center;font-size:9px;padding:2px 1px;
       background:${isToday?'var(--gold)':'var(--navy)'};
-      color:${isToday?'var(--navy)':isSun||isSat?'rgba(255,255,255,.4)':'rgba(255,255,255,.8)'};
+      color:${isToday?'var(--navy)':isRealHol?'#ff6b6b':isSun||isSat?'rgba(255,255,255,.4)':'rgba(255,255,255,.8)'};
       font-weight:${isToday?'800':'400'};
       border-left:${isWeekBorder?'2px solid rgba(255,255,255,.3)':'none'};
     ">
@@ -9430,8 +9435,10 @@ function renderStaffSchedule(p) {
         const dk = dateKey(d);
         const isToday = dk===todayStr;
         const isSun=d.getDay()===0, isSat=d.getDay()===6;
+        const isHol = _ssHol.has(dk)||isSun||isSat;
         const isWeekBorder = d.getDay()===1 && i>0;
-        const bg = isOnLeaveDay(dk)?'rgba(231,76,60,.08)':isToday?'rgba(255,192,0,.10)':isSun||isSat?'rgba(0,0,0,.05)':'transparent';
+        // Nền ô GIỐNG 2 bảng ngoài: hôm nay/lễ+cuối tuần dùng _tlCellBg; nghỉ phép cá nhân = đỏ nhạt
+        const bg = isOnLeaveDay(dk)?'rgba(231,76,60,.12)':_tlCellBg(isToday,isHol,false);
         const borderL = isWeekBorder?'2px solid rgba(128,140,160,.35)':'1px solid rgba(128,140,160,.14)';
         let inner='';
         if(from && to && from<=dk && to>=dk){
@@ -9453,8 +9460,9 @@ function renderStaffSchedule(p) {
     if(!tasks.length){
       const emptyCells = days.map((d,i)=>{
         const dk=dateKey(d); const isToday=dk===todayStr; const isSun=d.getDay()===0, isSat=d.getDay()===6;
+        const isHol=_ssHol.has(dk)||isSun||isSat;
         const isWeekBorder=d.getDay()===1&&i>0;
-        const bg=isOnLeaveDay(dk)?'rgba(231,76,60,.08)':isToday?'rgba(255,192,0,.10)':isSun||isSat?'rgba(0,0,0,.05)':'transparent';
+        const bg=isOnLeaveDay(dk)?'rgba(231,76,60,.12)':_tlCellBg(isToday,isHol,false);
         return `<td style="background:${bg};border-left:${isWeekBorder?'2px solid rgba(128,140,160,.35)':'1px solid rgba(128,140,160,.14)'};padding:0"><div style="height:18px"></div></td>`;
       }).join('');
       return `<tbody class="ss-grp"><tr class="sst">${nameCell}<td style="padding:2px 8px;font-size:9px;color:#8a94a6;font-style:italic;border-right:1px solid var(--gray2)">Không có lịch</td>${emptyCells}</tr></tbody>`;

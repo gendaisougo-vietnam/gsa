@@ -1583,6 +1583,7 @@ async function sbLoadAll() {
       holidays:      settingsRows?.holidays || [],
       sync:          settingsRows?.sync_config || {},
       leavingWarnDays: settingsRows?.leaving_warn_days || 7,
+      vndRate: (settingsRows && settingsRows.vnd_rate!=null) ? +settingsRows.vnd_rate : null,  // tỷ giá VNĐ/1万円 dùng CHUNG (server)
       staffProfiles: {},
     },
     months: {},
@@ -1836,6 +1837,7 @@ async function sbPushAll() {
         type_list_vn: D.settings.typeListVN||[], contact_list: D.settings.contactList||[],
         contact_list_vn: D.settings.contactListVN||[], holidays: D.settings.holidays||[],
         active_month: D.activeMonth,
+        vnd_rate: (D.settings && D.settings.vndRate!=null) ? D.settings.vndRate : null,
       }).eq('id', window._sbSettingsId);
     } catch(e) { _errs.push('settings: '+e.message); }
   }
@@ -2045,6 +2047,12 @@ async function approveChange(id) {
     var res = await _sb.from('pending_changes').select('*').eq('id', id).single();
     var c = res.data;
     if (!c) { toast('Không tìm thấy yêu cầu'); return; }
+    // FIX QA (E6): trưởng phòng chỉ được duyệt yêu cầu thuộc phòng mình quản lý
+    if (!(typeof _isAdmin==='function' && _isAdmin()) && c.dept && (typeof _managedDepts==='function') && _managedDepts().indexOf(c.dept)<0) {
+      toast('🔒 Bạn không quản lý phòng của yêu cầu này');
+      if (btn) { btn.disabled = false; btn.textContent = '✓ Duyệt'; }
+      return;
+    }
     if (c.operation === 'delete') {
       await _sb.from(c.table_name).delete().eq('id', c.record_id);
     } else if (c.operation === 'insert') {
@@ -3452,6 +3460,7 @@ function _libEdit(on){ _libState.editing=on; renderLibrary(); }
 function _libV(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
 
 async function _libSave(id, alsoConfirm){
+  if (window._viewOnly || window._viewOnlyMode) { if(typeof toast==='function') toast('⚠️ Chế độ chỉ xem — không lưu được'); return; }  // FIX QA (E3)
   var p=_LIB.projects.find(function(x){return x.id===id;}); if(!p) return;
   var patch={ client:_libV('le-client'), client_src:(_libV('le-client')&&!p.client)?'sửa tay':(p.client_src||''),
     building_type:_libV('le-btype'), address:_libV('le-address'), office:_libV('le-office'),
@@ -7814,7 +7823,7 @@ function renderProjectDetail(ci, p) {
 
   <!-- STAFF SCHEDULE -->
   <div class="card" id="staffSched-${p.id}">
-    <div class="card-hd"><span class="card-hd-title">📅 Lịch công việc nhân sự</span></div>
+    <div class="card-hd"><span class="card-hd-title">📅 Lịch nhân sự cả phòng <span style="font-size:10px;font-weight:400;opacity:.7">— ai đang bận / rảnh để phân việc (chỉ lịch chờ UP & dự kiến)</span></span></div>
     <div class="card-body" style="padding:0">
       ${renderStaffSchedule(p)}
     </div>
@@ -9297,65 +9306,49 @@ function renderStaffSchedule(p) {
   let wStart=0;
   days.forEach((d,i)=>{ if(i===0||(d.getDay()===1)){weekStarts.push(i);} });
 
-  // Collect ALL tasks from this project (bao gồm cả ngoài 3 tuần)
-  // Filter + sort groups theo thứ tự tlTasks (same logic as renderGroups)
-  const _tlIdxSS    = new Map((p.tlTasks||[]).map(function(t,i){ return [t.id, i]; }));
-  const _tlIdSSSet   = new Set((p.tlTasks||[]).map(function(t){ return t.id; }));
-  const _tlNameSSSet = new Set((p.tlTasks||[]).map(function(t){ return t.name; }));
-  const _hasTlSS = (p.tlTasks||[]).length > 0;
-  const _linkedTlIdsSS   = new Set((p.groups||[]).filter(function(g){ return g.tlTaskId && _tlIdSSSet.has(g.tlTaskId); }).map(function(g){ return g.tlTaskId; }));
-  const _linkedTlNamesSS = new Set((p.tlTasks||[]).filter(function(t){ return _linkedTlIdsSS.has(t.id); }).map(function(t){ return t.name; }));
-  const _sortedGroupsSS = [...(p.groups||[])]
-    .filter(function(g) {
-      if (!_groupInDept(g)) return false;   // chỉ hạng mục của phòng đang xem (studio/intl)
-      if (g.tlTaskId) return _tlIdSSSet.has(g.tlTaskId);
-      if (!_hasTlSS) return true;
-      if (!_tlNameSSSet.has(g.type)) return false;
-      return !_linkedTlNamesSS.has(g.type);
-    })
-    .sort(function(a,b) {
-      const ai = (a.tlTaskId != null && _tlIdxSS.has(a.tlTaskId)) ? _tlIdxSS.get(a.tlTaskId) : Infinity;
-      const bi = (b.tlTaskId != null && _tlIdxSS.has(b.tlTaskId)) ? _tlIdxSS.get(b.tlTaskId) : Infinity;
-      return ai - bi;
-    });
-  const allTasks = _sortedGroupsSS.flatMap(g=>
-    (g.rows||[]).filter(r=>r.staff&&(r.dateFrom||r.dateTo)).map(r=>({
-      ...r,
-      pjName: p.nameVN||p.nameJP||'Dự án',
-      groupName: g.type||'—'
-    }))
-  );
-
-  // Filter to tasks overlapping the 5-week window
+  // ── Gom lịch CẢ PHÒNG (mọi dự án) để phân việc ngay trong chi tiết dự án ──
+  // Chỉ lấy việc ĐANG CHỜ UP hoặc DỰ KIẾN (bỏ việc đã UP). Áp dụng studio/intl/vn.
   function overlaps(r) {
     const from = r.dateFrom||r.dateTo||'';
     const to   = r.dateTo||r.dateFrom||'';
     if(!from&&!to) return false;
     return (!to || to >= todayStr) && (!from || from <= endStr);
   }
-
-  // Lấy danh sách nhân sự CỦA DỰ ÁN này (có tham gia ít nhất 1 hàng)
-  const pjStaffActive = [...new Set(
-    allTasks.filter(overlaps).map(r=>r.staff).filter(Boolean)
-  )];
-  const pjStaffPast = [...new Set(
-    allTasks.filter(r=>!overlaps(r)).map(r=>r.staff).filter(Boolean)
-      .filter(s=>!pjStaffActive.includes(s))
-  )];
-  // Sắp xếp theo thứ tự nhân sự ĐÚNG PHÒNG (Studio/International lấy từ bảng Nhân sự) -> loại người phòng khác
   const _asOfSS = (typeof _monthAsOf==='function')?_monthAsOf():undefined;
   const _allStaffOrder = (activeSection==='intl') ? _deptStaffNames(_asOfSS)
     : (activeSection==='jp') ? _assignableStaffNames(_asOfSS)   // Studio: gộp cả 設計室 (hỗ trợ chéo)
-    : D.settings.staffList;
-  // Loại nhân sự đã nghỉ việc khỏi lịch dự án
-  const sortStaff = arr => _allStaffOrder.filter(s=>arr.includes(s) && !(typeof isStaffLeft==='function' && isStaffLeft(s)));
-  const activeStaffList = sortStaff(pjStaffActive);
-  const pastStaffList   = sortStaff(pjStaffPast);
+    : _deptStaffNames(_asOfSS);
+  const _isVNsec = (activeSection==='vn');
+  const _seenRowSS = {};
+  const allTasks = [];
+  Object.keys(D.months||{}).forEach(function(mid){
+    const mm = D.months[mid]||{};
+    const list = _isVNsec ? (mm.projectsVN||[]) : (mm.projects||[]);
+    list.forEach(function(pp){
+      (pp.groups||[]).forEach(function(g){
+        if(!_groupInDept(g)) return;
+        (g.rows||[]).forEach(function(r){
+          if(!r.staff || !(r.dateFrom||r.dateTo)) return;
+          if(r.doneAt) return;          // BỎ việc đã UP (không hiển thị nữa)
+          if(r.isCarryRef) return;
+          if(_seenRowSS[r.id]) return; _seenRowSS[r.id]=1;
+          allTasks.push(Object.assign({}, r, { pjName:(pp.nameVN||pp.nameJP||''), groupName:(g.type||'—') }));
+        });
+      });
+    });
+  });
+  // Roster = TOÀN BỘ nhân sự phòng (chưa nghỉ) + ai có việc trong cửa sổ (hỗ trợ chéo)
+  let _roster = _allStaffOrder.filter(s => !(typeof isStaffLeft==='function' && isStaffLeft(s)));
+  const _withTaskSS = new Set(allTasks.filter(overlaps).map(r=>r.staff).filter(Boolean));
+  _withTaskSS.forEach(function(s){ if(_roster.indexOf(s)<0 && !(typeof isStaffLeft==='function' && isStaffLeft(s))) _roster.push(s); });
+  // Bận (đang có lịch UP/dự kiến) lên trên; Rảnh (không lịch) xuống dưới
+  const activeStaffList = _roster.filter(s => _withTaskSS.has(s));
+  const pastStaffList   = _roster.filter(s => !_withTaskSS.has(s));
 
   // Nếu không có nhân sự nào → báo trống
   if (!activeStaffList.length && !pastStaffList.length) {
     return `<div style="padding:20px;text-align:center;color:#aaa;font-size:12px">
-      Chưa có nhân sự nào được gán trong dự án này
+      Chưa có nhân sự trong phòng này
     </div>`;
   }
 
@@ -9447,7 +9440,7 @@ function renderStaffSchedule(p) {
           ? `position:absolute;bottom:0;left:0;right:0;height:5px;border-top:1.2px dashed ${barColor};border-bottom:1.2px dashed ${barColor}`
           : `position:absolute;bottom:0;left:0;right:0;height:${GANTT_BAR_H}px;background:${barColor};border-radius:${isFirstDay?'1px 0 0 1px':isLastDay?'0 1px 1px 0':'0'}`;
         // B1: Bỏ label trên bar (đồng bộ với projectTimeline). Bar mảnh ở dưới container.
-        return `<div title="${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'}${_dash?' · Dự kiến':''} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
+        return `<div title="${x(r.pjName||'')} · ${x(r.groupName)} · ${isNew?'Làm mới':'Sửa lại'}${_dash?' · Dự kiến':''} · ${r.dateFrom||'?'} → ${r.dateTo||'?'}"
           style="position:relative;height:13px;margin:1px 0;overflow:visible">
           <div style="${_barStyle}"></div>
         </div>`;
@@ -9467,23 +9460,24 @@ function renderStaffSchedule(p) {
           const overdue = r.dateTo && r.dateTo < todayStr && !r.doneAt && !r.tentative;
           const done    = !!(r.doneAt);
           const dotColor = done ? DONE_BAR_COLOR : r.status==='new' ? '#70AD47' : 'var(--gold)';
-          return `<div style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden">
+          const _pjTag = r.pjName ? (r.pjName.length>7?r.pjName.substring(0,7)+'…':r.pjName)+' · ' : '';
+          return `<div title="${x(r.pjName||'')} · ${x(r.groupName)}" style="font-size:9px;margin-bottom:1px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden">
             <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;display:inline-block"></span>
-            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?DONE_COLOR:overdue?'#e74c3c':'inherit'}">${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;color:${done?DONE_COLOR:overdue?'#e74c3c':'inherit'}">${x(_pjTag)}${x(r.groupName.length>10?r.groupName.substring(0,10)+'…':r.groupName)}</span>
             ${overdue?'<span style="color:#e74c3c;font-weight:700">!</span>':''}
             ${done?'<span style="color:#27ae60;font-size:8px">✓</span>':''}
           </div>`;
         }).join('')
       : `<div style="font-size:9px;color:#aaa;font-style:italic">Không có task</div>`;
 
-    // Name cell: active = sáng; past staff = gray đậm gần đen
-    const nameBg   = isPastStaff ? '#f9f9f9' : 'var(--gray1)';
-    const nameColor= isPastStaff ? DONE_COLOR : 'var(--navy)';
-    const rowDoneStyle = isPastStaff ? `color:${DONE_COLOR};` : '';
-    return `<tr class="grp-row" style="border-bottom:1px solid var(--gray2);${rowDoneStyle}">
-      <td style="background:${nameBg};padding:5px 8px;min-width:90px;border-right:1px solid var(--gray2);vertical-align:top">
-        <div class="grp-name-text" style="font-weight:700;font-size:13px;color:${nameColor};">${staff}</div>
-        ${isPastStaff?`<div style="font-size:8px;color:${DONE_COLOR}">Đã hoàn thành</div>`:''}
+    // Name cell: hiện trạng thái RẢNH/BẬN để phân việc nhanh
+    const _busyCount = (staffMap[staff]||[]).length;
+    const _statusBadge = isPastStaff
+      ? '<span style="font-size:8px;font-weight:700;color:#16a34a;background:#dcfce7;border-radius:3px;padding:0 5px;white-space:nowrap">🟢 Rảnh</span>'
+      : '<span style="font-size:8px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:3px;padding:0 5px;white-space:nowrap">'+_busyCount+' việc</span>';
+    return `<tr class="grp-row" style="border-bottom:1px solid var(--gray2)">
+      <td style="background:var(--gray1);padding:5px 8px;min-width:90px;border-right:1px solid var(--gray2);vertical-align:top">
+        <div class="grp-name-text" style="font-weight:700;font-size:13px;color:var(--navy);display:flex;align-items:center;gap:5px;flex-wrap:wrap">${staff} ${_statusBadge}</div>
         ${taskSummary}
       </td>
       ${dayCells}
@@ -9495,7 +9489,7 @@ function renderStaffSchedule(p) {
   if(pastStaffList.length>0){
     staffRows += `<tr><td colspan="${days.length+1}"
       style="background:#f5f5f5;padding:4px 10px;font-size:10px;color:#aaa;font-style:italic;border-top:2px dashed #e0e0e0">
-      ↓ Nhân sự đã hoàn thành / không còn lịch trong 5 tuần tới
+      ↓ Đang RẢNH — không có lịch UP/dự kiến trong 5 tuần tới (có thể phân việc)
     </td></tr>`;
     staffRows += pastStaffList.map(s=>buildStaffRow(s,true)).join('');
   }
@@ -11092,8 +11086,23 @@ function _somaiNewByDept(mid){
   return {studio:studio, intl:intl};
 }
 // Tỷ giá quy đổi: bao nhiêu VNĐ = 1万円 (JPY×10.000). Lưu localStorage, sửa được trên Dashboard.
-function _vndRate(){ var v=parseFloat(localStorage.getItem('vnd_per_manyen')); return (v&&v>0)?v:1700000; }
-function _setVndRate(v){ v=_parseMoneyInput(v); if(v>0){ localStorage.setItem('vnd_per_manyen', v); toast('✓ Đã lưu tỷ giá'); try{renderDashboard();}catch(e){} } }
+// Tỷ giá dùng CHUNG toàn công ty: ưu tiên D.settings.vndRate (server), fallback localStorage/mặc định.
+function _vndRate(){
+  var v=(D.settings&&D.settings.vndRate!=null)?+D.settings.vndRate:0;
+  if(!(v>0)) v=parseFloat(localStorage.getItem('vnd_per_manyen'))||0;
+  return (v>0)?v:1700000;
+}
+function _setVndRate(v){
+  v=_parseMoneyInput(v); if(!(v>0)) return;
+  if(!D.settings) D.settings={}; D.settings.vndRate=v;
+  localStorage.setItem('vnd_per_manyen', v);           // cache máy
+  try{ save(); }catch(e){}
+  if(window._sbReady && window._sbSettingsId){          // ghi CHUNG lên server
+    _sb.from('settings').update({vnd_rate:v}).eq('id', window._sbSettingsId).then(function(r){ if(r&&r.error)_sbReport('_setVndRate',r.error,{op:'update',table:'settings'}); },function(){});
+  }
+  toast('✓ Đã lưu tỷ giá (dùng chung)');
+  try{renderDashboard();}catch(e){}
+}
 // Bộ quy đổi nhanh 2 chiều trên Dashboard (VNĐ <-> 万円), dùng đúng tỷ giá đang lưu.
 function _fxFromVnd(){ var r=_vndRate(); var v=_parseMoneyInput((document.getElementById('fxVnd')||{}).value||''); var o=document.getElementById('fxVndOut'); if(o) o.textContent=(v>0? (Math.round(v/r*100)/100).toLocaleString('vi-VN'):'0'); }
 function _fxFromMan(){ var r=_vndRate(); var m=_parseMoneyInput((document.getElementById('fxMan')||{}).value||''); var o=document.getElementById('fxManOut'); if(o) o.textContent=(m>0? _formatMoney(Math.round(m*r)):'0'); }
@@ -13100,6 +13109,11 @@ async function saveStaffProfile(name, field, val) {
     if (typeof toast === 'function') toast('⚠️ Chế độ chỉ xem — không lưu được');
     return;
   }
+  // FIX QA (E1): LƯƠNG là dữ liệu nhạy cảm — chỉ admin được sửa (chặn ghi thẳng từ tài khoản khác)
+  if ((field==='salaryGross' || field==='salaryNet') && typeof _isAdmin==='function' && !_isAdmin()) {
+    if (typeof toast === 'function') toast('🔒 Chỉ quản trị viên được sửa lương');
+    return;
+  }
   if (field === 'contractEnd') {
     try { _onContractEndChange(name, val); } catch(e) { console.warn('[saveStaffProfile] contractEnd history push failed:', e.message); }
   }
@@ -13130,6 +13144,7 @@ function getLateLog(name) {
   return getStaffProfile(name).lateLog || [];
 }
 async function addLateRecord(name, date, minutes, note) {
+  if (window._viewOnly || window._viewOnlyMode) { if(typeof toast==='function') toast('⚠️ Chế độ chỉ xem'); return; }  // FIX QA (E3)
   const p = getStaffProfile(name);
   if (!p.lateLog) p.lateLog = [];
   // Không trùng ngày
@@ -13149,6 +13164,7 @@ async function addLateRecord(name, date, minutes, note) {
   }
 }
 async function deleteLateRecord(name, date) {
+  if (window._viewOnly || window._viewOnlyMode) { if(typeof toast==='function') toast('⚠️ Chế độ chỉ xem'); return; }  // FIX QA (E3)
   const p = getStaffProfile(name);
   if (!p.lateLog) return;
   p.lateLog = p.lateLog.filter(l=>l.date!==date);
@@ -13512,6 +13528,11 @@ function _staffSbId(name){
   return sid||null;
 }
 async function saveStaffAssignment(name){
+  // FIX QA (E2): chuyển phòng là thay đổi cơ cấu — chặn chế độ chỉ-xem và yêu cầu quyền quản lý.
+  if (window._viewOnly || window._viewOnlyMode) { if(typeof toast==='function') toast('⚠️ Chế độ chỉ xem — không đổi được'); return; }
+  if (!(typeof _isAdmin==='function' && _isAdmin()) && !(typeof _managedDepts==='function' && _managedDepts().length>0)) {
+    if(typeof toast==='function') toast('🔒 Chỉ quản trị/trưởng phòng được chuyển phòng nhân sự'); return;
+  }
   try{
     const sid=_staffSbId(name);
     if(!sid){ alert('Không tìm thấy ID nhân sự "'+name+'" trong CSDL. Hãy tải lại trang rồi thử lại.'); return; }

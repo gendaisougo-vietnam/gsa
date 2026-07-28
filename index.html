@@ -16604,69 +16604,66 @@ function exportProjectReport(section) {
   const newColor     = isVN ? '#1A7A3A' : (isIntl ? '#6D28D9' : '#375623');
   const revColor     = isVN ? '#7F4000' : (isIntl ? '#9333EA' : '#7F6000');
 
-  const pjBlocks = pjs.map((p,i) => {
-    const groups = (p.groups||[]).filter(_gDeptOK);
-    const tn = _pn(p), tr = _pr(p);
-    if (!groups.length && tn+tr===0) return '';
-
-    // Group rows: type name + new count + rev count (+ khổ giấy nếu là phòng Bản vẽ)
-    const groupRows = groups.filter(g=>{
-      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
-      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
-      return gNew+gRev > 0;
-    }).map(g => {
-      const gNew = (g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
-      const gRev = (g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+  // ── BÁO CÁO GỌN THEO CHIỀU NGANG (kiểu bảng koutei): 工事名称 | 項目 | 作成 | 修正 ──
+  // Màu dùng rgb() để KHÔNG bị CSS theme tối ghi đè (rule night match theo chuỗi hex trong style).
+  const NAVY='rgb(31,56,100)', INK='rgb(26,26,26)', MUT='rgb(120,128,140)';
+  const NEWC='rgb(55,86,35)', REVC='rgb(127,96,0)';
+  const CBr='1px solid rgb(190,196,205)', PBr='2px solid rgb(90,102,125)';
+  let _idx=0, bodyRows='';
+  pjs.forEach(p=>{
+    const gl=(p.groups||[]).filter(_gDeptOK).map(g=>{
+      const gNew=(g.rows||[]).filter(r=>r.status==='new' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
+      const gRev=(g.rows||[]).filter(r=>r.status==='rev' && !r.isCarryRef && !r.tentative).reduce((s,r)=>s+(r.qty||0),0);
       let _ps='';
-      if(isIntl){ const pc={}; (g.rows||[]).forEach(r=>{ if(r.isCarryRef)return; const k=r.paperSize||''; if(k==='A1'||k==='A2'||k==='A3') pc[k]=(pc[k]||0)+(r.qty||0); }); const tags=['A1','A2','A3'].filter(k=>pc[k]).map(k=>k+':'+pc[k]).join(' '); if(tags) _ps=` <span style="font-size:9px;color:#6d28d9;font-weight:600">(${tags})</span>`; }
-      return `<tr>
-        <td style="padding:5px 10px;border-bottom:1px solid #f0f0f0">${x(g.type||'—')}${_ps}</td>
-        <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;color:#375623;font-weight:600">${gNew||'—'}</td>
-        <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;color:#7F6000;font-weight:600">${gRev||'—'}</td>
-        <td style="padding:5px 10px;text-align:center;border-bottom:1px solid #f0f0f0;font-weight:700">${gNew+gRev}</td>
-      </tr>`;
-    }).join('');
+      if(isIntl){ const pc={}; (g.rows||[]).forEach(r=>{ if(r.isCarryRef)return; const k=r.paperSize||''; if(k==='A1'||k==='A2'||k==='A3') pc[k]=(pc[k]||0)+(r.qty||0); }); const tags=['A1','A2','A3'].filter(k=>pc[k]).map(k=>k+':'+pc[k]).join(' '); if(tags) _ps=` <span style="font-size:9px;color:rgb(109,40,217)">(${tags})</span>`; }
+      return {name:(g.type||'—'), n:gNew, r:gRev, ps:_ps};
+    }).filter(o=>o.n+o.r>0);
+    const tn=_pn(p), tr2=_pr(p);
+    if(!gl.length && tn+tr2===0) return;
+    _idx++;
+    const nRows=Math.max(gl.length,1);
+    const pjCell=`<td rowspan="${nRows}" style="border:${CBr};border-top:${PBr};padding:4px 8px;vertical-align:top;background:rgb(244,246,250)">
+      <div style="font-weight:700;font-size:11.5px;color:${NAVY}">${_idx}. ${x(p.nameVN||p.nameJP||'—')}</div>
+      <div style="font-size:9px;color:${MUT};margin-top:1px">新 ${tn} ・ 修 ${tr2} ・ 計 ${tn+tr2}</div>
+    </td>`;
+    if(!gl.length){
+      bodyRows+=`<tr>${pjCell}<td style="border:${CBr};border-top:${PBr};padding:3px 8px;color:${MUT};font-style:italic">—</td><td style="border:${CBr};border-top:${PBr}"></td><td style="border:${CBr};border-top:${PBr}"></td></tr>`;
+    } else {
+      gl.forEach((o,gi)=>{
+        const bt=gi===0?`border-top:${PBr};`:'';
+        bodyRows+=`<tr>${gi===0?pjCell:''}
+          <td style="border:${CBr};${bt}padding:3px 8px;color:${INK}">${x(o.name)}${o.ps}</td>
+          <td style="border:${CBr};${bt}padding:3px 8px;text-align:center;font-weight:700;color:${NEWC}">${o.n||'–'}</td>
+          <td style="border:${CBr};${bt}padding:3px 8px;text-align:center;font-weight:700;color:${REVC}">${o.r||'–'}</td>
+        </tr>`;
+      });
+    }
+  });
 
-    return `<div style="margin-bottom:18px;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden">
-      <div style="background:${headerColor};color:#fff;padding:8px 12px;display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <span style="font-weight:700;font-size:13px">${i+1}. ${x(p.nameVN||p.nameJP||'—')}</span>
-          ${p.nameJP&&p.nameVN?`<span style="font-size:10px;color:rgba(255,255,255,.6);margin-left:8px">${x(p.nameJP)}</span>`:''}
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span style="background:#E2EFDA;color:${newColor};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700">新 ${tn}</span>
-          <span style="background:#FFF2CC;color:${revColor};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700">修 ${tr}</span>
-          <span style="background:#FFC000;color:${headerColor};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:800">計 ${tn+tr}</span>
-        </div>
-      </div>
-      ${groupRows ? `<table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:#f5f5f5">
-          <th style="padding:6px 10px;text-align:left;font-weight:600;color:#555">Hạng mục</th>
-          <th style="padding:6px 10px;text-align:center;font-weight:600;color:${newColor}">作成 Mới</th>
-          <th style="padding:6px 10px;text-align:center;font-weight:600;color:${revColor}">修正 Sửa</th>
-          <th style="padding:6px 10px;text-align:center;font-weight:600">Tổng</th>
-        </tr></thead>
-        <tbody>${groupRows}</tbody>
-      </table>` : '<div style="padding:10px;font-size:11px;color:#bbb;text-align:center">Chưa có hạng mục</div>'}
-    </div>`;
-  }).join('');
-
-  const html = `<div style="font-family:'Be Vietnam Pro',sans-serif;font-size:13px;color:#1a1a1a;max-width:800px;margin:0 auto;padding:24px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid ${headerColor}">
+  const html = `<div style="font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:12px;color:${INK};max-width:900px;margin:0 auto;padding:20px;background:rgb(255,255,255)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;padding-bottom:8px;border-bottom:3px solid ${NAVY}">
       <div>
-        <div style="font-size:10px;color:#aaa;letter-spacing:.05em">Gendai Sougo Việt Nam</div>
-        <div style="font-size:22px;font-weight:700;color:${headerColor};margin-top:4px">Báo cáo ${sectionLabel} — ${ml}</div>
-        <div style="font-size:11px;color:#888;margin-top:2px">Ngày xuất: ${now}</div>
+        <div style="font-size:9px;color:${MUT};letter-spacing:.05em">Gendai Sougo Việt Nam</div>
+        <div style="font-size:17px;font-weight:700;color:${NAVY}">Báo cáo ${sectionLabel} — ${ml}</div>
+        <div style="font-size:10px;color:${MUT}">Ngày xuất: ${now}</div>
       </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;color:#555">Tổng dự án: <strong>${pjs.filter(p=>_pn(p)+_pr(p)>0).length}</strong></div>
-        <div style="font-size:12px;color:${newColor};margin-top:4px">作成 Làm mới: <strong>${sumNew}</strong></div>
-        <div style="font-size:12px;color:${revColor}">修正 Sửa lại: <strong>${sumRev}</strong></div>
-        <div style="font-size:14px;font-weight:800;color:${headerColor};margin-top:2px">Tổng: ${sumNew+sumRev} ${unitLabel}</div>
+      <div style="text-align:right;font-size:11px;color:${INK};white-space:nowrap">
+        Dự án: <b>${pjs.filter(p=>_pn(p)+_pr(p)>0).length}</b> ・
+        <span style="color:${NEWC}">作成 <b>${sumNew}</b></span> ・
+        <span style="color:${REVC}">修正 <b>${sumRev}</b></span> ・
+        Tổng <b>${sumNew+sumRev}</b> ${unitLabel}
       </div>
     </div>
-    ${pjBlocks||'<p style="color:#bbb">Không có dữ liệu</p>'}
-    <div style="margin-top:20px;padding-top:12px;border-top:1px solid #e0e0e0;display:flex;justify-content:space-between;font-size:10px;color:#aaa">
+    ${bodyRows?`<table style="width:100%;border-collapse:collapse;font-size:11px;background:rgb(255,255,255)">
+      <thead><tr>
+        <th style="border:${CBr};background:${NAVY};color:rgb(255,255,255);padding:5px 8px;text-align:left;width:34%">工事名称 Tên công trình</th>
+        <th style="border:${CBr};background:${NAVY};color:rgb(255,255,255);padding:5px 8px;text-align:left">項目 Hạng mục</th>
+        <th style="border:${CBr};background:${NAVY};color:rgb(255,255,255);padding:5px 8px;width:70px">作成 Mới</th>
+        <th style="border:${CBr};background:${NAVY};color:rgb(255,255,255);padding:5px 8px;width:70px">修正 Sửa</th>
+      </tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>`:`<p style="color:${MUT}">Không có dữ liệu</p>`}
+    <div style="margin-top:14px;padding-top:8px;border-top:${CBr};display:flex;justify-content:space-between;font-size:9px;color:${MUT}">
       <span>Gendai Sougo Việt Nam — Performance Management Software</span>
       <span>${ml} | ${now}</span>
     </div>
@@ -16759,7 +16756,7 @@ function printReport() {
   const w = window.open('','_blank','width=900,height=700');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Báo cáo Phối Cảnh Pro</title>
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Be Vietnam Pro',sans-serif;font-size:12px;color:#1a1a1a;background:var(--table-bg)}@page{size:A4;margin:15mm}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
+    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Be Vietnam Pro',sans-serif;font-size:12px;color:#1a1a1a;background:#fff}@page{size:A4;margin:15mm}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
   </head><body>${body.innerHTML}</body></html>`);
   w.document.close(); setTimeout(()=>{ w.focus(); w.print(); }, 600);
 }

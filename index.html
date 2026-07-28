@@ -1422,6 +1422,10 @@ function _rowIsLocked(r) {
   if (r.doneAt) return true;
   // 2) Carryover từ tháng cũ (flag từ doAddMonth hoặc migration)
   if (r.fromCarryover) return true;
+  // 2.4) FIX: dòng còn lịch UP ở TƯƠNG LAI theo THỜI GIAN THẬT -> vẫn đang hoạt động, KHÔNG khóa.
+  //      (Trước đây tạo dòng ở tab tháng sau nhưng ngày UP rơi vào tháng trước -> bị khóa oan "data cũ")
+  const _todayLk = localDateStr(new Date());
+  if (r.dateTo && r.dateTo >= _todayLk) return false;
   // 2.5) Dòng thuộc THÁNG QUÁ KHỨ (deadline hoặc tháng gốc < tháng đang xem) → khóa (chỉ xem lịch sử).
   //      Overdue CÙNG tháng (dateTo cùng tháng đang xem) vẫn để mở để nhắc UP.
   //      So sánh theo SỐ YYYY*12+MM để chịu mọi định dạng ('2026-07', '2026-4', ISO, dd/mm/yyyy).

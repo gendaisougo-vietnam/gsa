@@ -1432,9 +1432,13 @@ function _rowIsLocked(r) {
   const _amKey = _ymKey(D.activeMonth);
   if (_amKey != null) {
     const _omKey = _ymKey(r.originMonth);
-    if (_omKey != null && _omKey < _amKey) return true;
-    const _dtKey = _ymKey(r.dateTo);
-    if (_dtKey != null && _dtKey < _amKey) return true;
+    if (_omKey != null) {
+      // Có tháng tạo -> khóa/mở theo THÁNG TẠO (thống nhất với _rowCountsIn), không theo ngày UP
+      if (_omKey < _amKey) return true;
+    } else {
+      const _dtKey = _ymKey(r.dateTo);
+      if (_dtKey != null && _dtKey < _amKey) return true;
+    }
   }
   // 3) Data cũ: rate auto-fill (recalcStaffUpKPI sau UP) + KHÔNG có dateTo
   //    → chắc chắn đã từng UP, không phải row đang chuẩn bị UP.
@@ -1445,8 +1449,10 @@ function _rowIsLocked(r) {
 }
 // Tháng hiển thị của 1 dòng (để gộp lịch sử theo tháng): ưu tiên ngày UP, rồi tháng gốc, mặc định tháng đang xem.
 function _rowDisplayMonth(r){
-  if (r && r.doneAt) return String(r.doneAt).slice(0,7);
+  // QUY TẮC THỐNG NHẤT (khớp _rowCountsIn): dòng thuộc THÁNG TẠO (originMonth),
+  // không phụ thuộc ngày UP. Chỉ khi thiếu originMonth mới suy từ ngày UP.
   if (r && r.originMonth) return r.originMonth;
+  if (r && r.doneAt) return String(r.doneAt).slice(0,7);
   // Dòng chưa UP nhưng deadline thuộc tháng trước → gộp vào lịch sử tháng đó (không hiện như dòng hiện tại).
   if (r && r.dateTo){
     const _dtKey=_ymKey(r.dateTo), _amKey=_ymKey(D.activeMonth);
@@ -3201,10 +3207,9 @@ function _rowCountsIn(r, forMonth){
   const fm=_ymKey(forMonth); if(fm==null) return true;
   let om=_ymKey(r.originMonth);
   if(om!=null){
-    // Chống dữ liệu CŨ: công trình tải lịch sử trước đây bị gán originMonth = tháng tải về,
-    // nhưng ngày làm/UP thực tế ở tháng TRƯỚC. Lấy tháng SỚM NHẤT trong các mốc ngày làm cơ sở.
-    const cands=[_ymKey(r.doneAt),_ymKey(r.dateTo)].filter(function(v){return v!=null;});
-    if(cands.length){ const mn=Math.min.apply(null,cands); if(mn<om) om=mn; }
+    // QUY TẮC THỐNG NHẤT: số mai TẠO ở tháng nào (originMonth = tab tháng lúc tạo dòng)
+    // thì tính vào THÁNG ĐÓ — KHÔNG phụ thuộc ngày UP rơi vào tháng nào.
+    // (Công ty tổng kết 24~31 hằng tháng rồi tạo tháng mới; mọi hạng mục tạo sau đó thuộc tháng mới.)
     return om===fm;
   }
   return true;

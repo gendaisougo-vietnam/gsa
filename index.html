@@ -5505,9 +5505,13 @@ function renderProjectTimeline(pjs) {
     const allGrpRows = (p.groups||[]).filter(g => g.type || (g.rows||[]).some(r=>r.qty>0));
     // Ô "Thông tin dự án" VN cao cố định -> cần TỐI THIỂU số hàng để không kéo giãn dòng.
     // Nếu ít hạng mục hơn -> thêm hàng ĐỆM trống cho cân đối (các dòng cao bằng nhau).
+    // FIX: dự án VN có 0 hạng mục thì KHÔNG chèn dòng đệm. Trước đây vẫn chèn đủ 14 dòng
+    // trống trong khi ô Thông tin dự án lại nằm ở fallbackRow phía SAU -> ra một mảng lưới
+    // rỗng 14 dòng rồi mới tới tên dự án. Trường hợp này fallbackRow đã lo đủ 1 dòng.
+    const _hasGrp = allGrpRows.length > 0;
     const _infoMinRows = isVN ? 14 : 0;
-    const _totalRows = Math.max(allGrpRows.length, _infoMinRows);
-    const _fillerCount = Math.max(0, _totalRows - allGrpRows.length);
+    const _totalRows = _hasGrp ? Math.max(allGrpRows.length, _infoMinRows) : 1;
+    const _fillerCount = _hasGrp ? Math.max(0, _totalRows - allGrpRows.length) : 0;
     const allDone = allGrpRows.length>0 && allGrpRows.every(g=>(g.rows||[]).filter(r=>r.dateTo && !r.tentative).every(r=>r.doneAt)) && allGrpRows.some(g=>(g.rows||[]).some(r=>r.dateTo && !r.tentative));
     const rowDim = allDone ? `color:${DONE_COLOR}` : '';
     // Project-level pending check — dùng cho info panel VN (không phụ thuộc group đầu tiên)

@@ -1528,25 +1528,41 @@ async function _migrateCarryoverV1() {
 window._migrateCarryoverV1 = _migrateCarryoverV1;
 
 // Phase 2: Load toàn bộ D từ Supabase
-// PostgREST cắt 1000 dòng mặc định -> phải phân trang, nếu không mất data ngẫu nhiên
+// PostgREST cắt 1000 dòng mặc định -> phải phân trang, nếu không mất data ngẫu nhiên.
+// BẮT BUỘC có khóa phụ 'id' (duy nhất): sort_order trùng lặp hàng loạt (0,1,2... lặp lại
+// trong mỗi group) nên nếu chỉ order theo sort_order thì Postgres KHÔNG bảo đảm thứ tự ổn
+// định giữa các trang -> LIMIT/OFFSET nhay lung tung -> vua mat dong vua trung dong.
+window._sbLoadShort = [];   // bang nao tai thieu dong so voi server
 async function _sbSelectAllPaged(table, orderCol) {
   const PAGE = 1000;
-  let all = [], from = 0;
+  let all = [], seen = new Set(), from = 0, srvCount = null;
   for (;;) {
-    let q = _sb.from(table).select('*');
-    if (orderCol) q = q.order(orderCol);
-    const { data, error } = await q.range(from, from + PAGE - 1);
+    let q = _sb.from(table).select('*', { count: 'exact' });
+    if (orderCol) q = q.order(orderCol, { ascending: true });
+    q = q.order('id', { ascending: true });   // khoa phu duy nhat -> phan trang on dinh
+    const { data, error, count } = await q.range(from, from + PAGE - 1);
     if (error) return { data: all.length ? all : null, error };
+    if (srvCount == null && typeof count === 'number') srvCount = count;
     const chunk = data || [];
-    all = all.concat(chunk);
+    let dup = 0;
+    for (const r of chunk) { if (seen.has(r.id)) { dup++; continue; } seen.add(r.id); all.push(r); }
+    if (dup) console.warn('[_sbSelectAllPaged] ' + table + ': bo ' + dup + ' dong trung o trang from=' + from);
     if (chunk.length < PAGE) break;
     from += PAGE;
     if (from > 200000) { console.warn('[_sbSelectAllPaged] ' + table + ': vuot 200k dong, dung'); break; }
+  }
+  // Tu kiem tra: so dong tai duoc phai bang so dong server bao. Lech = mat data khi tai.
+  if (srvCount != null && all.length !== srvCount) {
+    console.error('[_sbSelectAllPaged] ' + table + ': TAI THIEU! server=' + srvCount + ' tai duoc=' + all.length);
+    window._sbLoadShort.push(table + ' ' + all.length + '/' + srvCount);
+  } else {
+    console.log('[_sbSelectAllPaged] ' + table + ': ' + all.length + '/' + (srvCount == null ? '?' : srvCount) + ' dong OK');
   }
   return { data: all, error: null };
 }
 
 async function sbLoadAll() {
+  window._sbLoadShort = [];
   const [
     { data: settingsRows, error: eSettings },
     { data: monthRows,   error: eMonths },
@@ -1733,7 +1749,14 @@ async function sbLoadAll() {
     );
 
     // Lọc orphaned groups: bad tlTaskId, hoặc null-id không khớp TL task, hoặc trùng lặp
+    // GUARD: dự án KHÔNG load được tl_task nào (lỗi mạng / phân trang / RLS) thì KHÔNG
+    // được coi mọi group là orphan — đó là lỗi tải, không phải data hỏng. Giữ nguyên hết.
+    if (!_hasPjTl && allMappedGroups.some(function(g){ return !!g.tlTaskId; })) {
+      console.warn('[sbLoadAll] Project', p.id, '(' + (p.name_vn||p.name_jp||'') + ') co group tro toi tl_task nhung tl_tasks rong -> GIU nguyen group, khong coi la orphan.');
+    }
     const groups = allMappedGroups.filter(function(g) {
+      if (!_hasPjTl) return true;  // không có TL task nào (JP project, hoặc tl_tasks load hụt) → keep all
+
       // Fix 2D: group có rows với data thực (staff/qty/dates/done) → luôn KEEP
       // (bảo vệ công sức user nhập, tránh mất do tl_task_id mismatch)
       const _hasRealRow = (g.rows||[]).some(function(r) {
@@ -1745,7 +1768,6 @@ async function sbLoadAll() {
         if (_pTlIdSet.has(g.tlTaskId)) return true;
         _orphanedGroupIds.push(g.id); return false;  // bad tlTaskId → orphaned
       }
-      if (!_hasPjTl) return true;  // JP project (no TL tasks) → keep all
       if (!_pTlNameSet.has(g.type)) {
         _orphanedGroupIds.push(g.id); return false;  // type không khớp TL task nào → orphaned
       }
@@ -1848,6 +1870,16 @@ async function sbLoadAll() {
   result.assignments = asgRows || [];
   result.staffById   = staffById;
   console.log('[sbLoadAll] org_units:', (orgUnitRows||[]).length, '| assignments:', (asgRows||[]).length);
+  // Tai thieu dong = MAT DATA khi hien thi. Bao that to, va chan ghi de len server.
+  if (window._sbLoadShort && window._sbLoadShort.length) {
+    window._sbLoadIncomplete = true;
+    console.error('[sbLoadAll] TAI THIEU DU LIEU:', window._sbLoadShort.join(' | '));
+    setTimeout(function(){
+      try { _showLoadShortBlocker(window._sbLoadShort); } catch(e) { alert('TAI THIEU DU LIEU: ' + window._sbLoadShort.join(' | ') + ' - KHONG sua gi, bao admin.'); }
+    }, 400);
+  } else {
+    window._sbLoadIncomplete = false;
+  }
   console.log('[sbLoadAll] Done — months:', monthCount, '| projects:', pjCount, '| activeMonth:', result.activeMonth);
   return result;
 }
@@ -1855,6 +1887,8 @@ async function sbLoadAll() {
 // sbPushAll — push toàn bộ D lên Supabase (dùng cho import backup hoặc force-sync)
 async function sbPushAll() {
   if (!window._sbReady) throw new Error('Supabase không sẵn sàng');
+  // Chan tuyet doi: dang cam data tai THIEU ma push toan bo D len -> xoa trang data that.
+  if (window._sbLoadIncomplete) throw new Error('Lan tai truoc bi THIEU du lieu — KHONG cho push toan bo. F5 lai truoc.');
   var _errs = [];
   // 1. Settings
   if (window._sbSettingsId) {
@@ -3758,8 +3792,24 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
   for (var i = 0; i < pjIdMap.length; i++) {
     var pair = pjIdMap[i];
     var _pjCopied = false;   // ít nhất 1 slot copy thành công cho project này
-    // Loop TẤT CẢ 6 slots — copy mọi ảnh đại diện + ảnh phụ
-    for (var slot = 0; slot < 6; slot++) {
+    // Hỏi Storage xem dự án này THỰC SỰ có file nào (1 request/dự án).
+    // Trước đây dò mù cả 6 slot -> slot trống bị Supabase tra ve HTTP 400 -> Console do ruc
+    // hang tram dong du khong he loi, lam lo that bi chim mat.
+    var _slots = [];
+    try {
+      var _ls = await _sb.storage.from('project-photos').list(prevMid + '/' + pair.prevId, { limit: 100 });
+      ((_ls && _ls.data) ? _ls.data : []).forEach(function(f) {
+        var _m = /^slot_(\d+)\.jpg$/.exec(f.name || '');
+        if (_m && +_m[1] < 6) _slots.push(+_m[1]);
+      });
+      _slots.sort(function(a,b){ return a-b; });
+    } catch(e) {
+      console.warn('[Photo carryover] list fail ' + pair.prevId + ' — quay ve do 6 slot |', e.message);
+      _slots = [0,1,2,3,4,5];
+    }
+    _skipCount += (6 - _slots.length);
+    for (var _si = 0; _si < _slots.length; _si++) {
+      var slot = _slots[_si];
       var srcPath = prevMid + '/' + pair.prevId + '/slot_' + slot + '.jpg';
       var dstPath = newMid + '/' + pair.newId + '/slot_' + slot + '.jpg';
       try {
@@ -4271,6 +4321,37 @@ function _showDumpFailBlocker(mid, errCount, dump, msg) {
     document.body.appendChild(box);
   } catch(e) {
     alert('THANG MOI CHUA LUU DU LEN SERVER - KHONG F5, bao admin ngay. Thang: ' + mid);
+  }
+}
+
+// Modal DO khi tai tu server bi THIEU dong (phan trang loi / mang dut / RLS).
+// Hien thi thieu = de user tuong mat data va nhap lai de len -> phai chan tay nguoi dung.
+function _showLoadShortBlocker(list) {
+  try {
+    if (document.getElementById('loadShortBlocker')) return;
+    const box = document.createElement('div');
+    box.id = 'loadShortBlocker';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:rgba(120,0,0,.88);' +
+      'display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit';
+    box.innerHTML =
+      '<div style="background:#fff;max-width:620px;width:100%;border:4px solid #c00;border-radius:10px;padding:26px 30px;box-shadow:0 10px 40px rgba(0,0,0,.5)">' +
+        '<div style="font-size:22px;font-weight:800;color:#c00;margin-bottom:14px">TAI THIEU DU LIEU TU SERVER</div>' +
+        '<div style="font-size:15px;line-height:1.7;color:#222">' +
+          'Man hinh dang hien <b>THIEU</b> so voi du lieu that tren server.<br>' +
+          '<b>KHONG nhap lai, KHONG xoa gi</b> - se ghi de len data that.<br><br>' +
+          'Bang thieu: <b>' + list.join(' &middot; ') + '</b><br><br>' +
+          'Cach xu ly: F5 lai trang. Neu van bao thieu, bao admin.' +
+        '</div>' +
+        '<div style="margin-top:20px;text-align:right">' +
+          '<button style="background:#555;color:#fff;border:0;padding:10px 18px;border-radius:6px;font-size:14px;cursor:pointer;margin-right:8px" ' +
+            'onclick="location.reload()">F5 tai lai</button>' +
+          '<button style="background:#c00;color:#fff;border:0;padding:10px 22px;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer" ' +
+            'onclick="if(confirm(\'Ban hieu la man hinh dang thieu data va se KHONG nhap/xoa gi?\'))document.getElementById(\'loadShortBlocker\').remove()">Toi da hieu</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(box);
+  } catch(e) {
+    alert('TAI THIEU DU LIEU TU SERVER: ' + list.join(' | ') + ' - KHONG nhap/xoa gi, F5 lai.');
   }
 }
 

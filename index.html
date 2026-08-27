@@ -1528,6 +1528,24 @@ async function _migrateCarryoverV1() {
 window._migrateCarryoverV1 = _migrateCarryoverV1;
 
 // Phase 2: Load toàn bộ D từ Supabase
+// PostgREST cắt 1000 dòng mặc định -> phải phân trang, nếu không mất data ngẫu nhiên
+async function _sbSelectAllPaged(table, orderCol) {
+  const PAGE = 1000;
+  let all = [], from = 0;
+  for (;;) {
+    let q = _sb.from(table).select('*');
+    if (orderCol) q = q.order(orderCol);
+    const { data, error } = await q.range(from, from + PAGE - 1);
+    if (error) return { data: all.length ? all : null, error };
+    const chunk = data || [];
+    all = all.concat(chunk);
+    if (chunk.length < PAGE) break;
+    from += PAGE;
+    if (from > 200000) { console.warn('[_sbSelectAllPaged] ' + table + ': vuot 200k dong, dung'); break; }
+  }
+  return { data: all, error: null };
+}
+
 async function sbLoadAll() {
   const [
     { data: settingsRows, error: eSettings },
@@ -1546,10 +1564,10 @@ async function sbLoadAll() {
   ] = await Promise.all([
     _sb.from('settings').select('*').single(),
     _sb.from('months').select('*'),
-    _sb.from('projects').select('*').order('sort_order'),
-    _sb.from('groups').select('*').order('sort_order'),
-    _sb.from('rows').select('*').order('sort_order'),
-    _sb.from('tl_tasks').select('*').order('sort_order'),
+    _sbSelectAllPaged('projects', 'sort_order'),
+    _sbSelectAllPaged('groups',   'sort_order'),
+    _sbSelectAllPaged('rows',     'sort_order'),
+    _sbSelectAllPaged('tl_tasks', 'sort_order'),
     _sb.from('staff').select('*').order('sort_order'),
     _sb.from('staff_leaves').select('*'),
     _sb.from('staff_late_log').select('*'),
@@ -2809,7 +2827,14 @@ let activePjId = null;
 let activePage = 'main';
 let activeSection = 'jp'; // 'jp' | 'vn'
 
-function gid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+function gid() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function')
+      return 'g' + crypto.randomUUID().replace(/-/g, '');
+  } catch(e) {}
+  gid._n = (gid._n || 0) + 1;
+  return Date.now().toString(36) + '_' + gid._n.toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
 function x(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function toast(msg, dur=2800) {
@@ -3888,6 +3913,18 @@ window._recoverMissingPhotos = async function(newMid, prevMid) {
 // Dùng cho: doAddMonth sau khi copy, hoặc _emergencyDumpMonth từ Console cho data đã có trong RAM nhưng chưa sync
 async function _sbDumpMonthEntities(mid) {
   if (!window._sbReady) throw new Error('Supabase chưa sẵn sàng');
+  // FIX 21000: loại bỏ id trùng trong CÙNG payload (ON CONFLICT DO UPDATE không cho phép
+  // 1 lô chạm cùng 1 primary key 2 lần -> Postgres hủy CẢ LÔ -> mất groups/rows)
+  const _uniqById = function(arr, label) {
+    const out = [...new Map(arr.map(r => [r.id, r])).values()];
+    if (out.length !== arr.length) {
+      console.error('[_sbDumpMonthEntities] ID TRÙNG trong ' + label + ': ' + arr.length + ' -> ' + out.length +
+                    ' (đã dedupe). Kiểm tra gid().');
+      _dupWarn++;
+    }
+    return out;
+  };
+  let _dupWarn = 0;
   const m = D.months[mid];
   if (!m) throw new Error('Tháng ' + mid + ' không có trong D');
 
@@ -3934,9 +3971,10 @@ async function _sbDumpMonthEntities(mid) {
     };
     return row;
   });
-  if (pjPayload.length) {
+  const pjPayloadU = _uniqById(pjPayload, 'projects');
+  if (pjPayloadU.length) {
     try {
-      const { error } = await _sb.from('projects').upsert(pjPayload, {onConflict:'id'});
+      const { error } = await _sb.from('projects').upsert(pjPayloadU, {onConflict:'id'});
       if (error) { _sbReport('_sbDumpMonthEntities (projects)', error, {op:'upsert', table:'projects'}); errors++; }
     } catch(e) { _sbReport('_sbDumpMonthEntities (projects)', e, {op:'upsert', table:'projects'}); errors++; }
   }
@@ -3955,11 +3993,12 @@ async function _sbDumpMonthEntities(mid) {
       });
     });
   });
-  if (grpPayload.length) {
+  const grpPayloadU = _uniqById(grpPayload, 'groups');
+  for (let i = 0; i < grpPayloadU.length; i += 100) {   // FIX: chia lô 100 — 1 lô hỏng không giết toàn bộ
     try {
-      const { error } = await _sb.from('groups').upsert(grpPayload, {onConflict:'id'});
-      if (error) { _sbReport('_sbDumpMonthEntities (groups)', error, {op:'upsert', table:'groups'}); errors++; }
-    } catch(e) { _sbReport('_sbDumpMonthEntities (groups)', e, {op:'upsert', table:'groups'}); errors++; }
+      const { error } = await _sb.from('groups').upsert(grpPayloadU.slice(i, i+100), {onConflict:'id'});
+      if (error) { _sbReport('_sbDumpMonthEntities (groups@'+i+')', error, {op:'upsert', table:'groups'}); errors++; }
+    } catch(e) { _sbReport('_sbDumpMonthEntities (groups@'+i+')', e, {op:'upsert', table:'groups'}); errors++; }
   }
 
   // 4. rows (batch 100 theo pattern sbPushAll)
@@ -3996,9 +4035,10 @@ async function _sbDumpMonthEntities(mid) {
       });
     });
   });
-  for (let i = 0; i < rowPayload.length; i += 100) {
+  const rowPayloadU = _uniqById(rowPayload, 'rows');
+  for (let i = 0; i < rowPayloadU.length; i += 100) {
     try {
-      const { error } = await _sb.from('rows').upsert(rowPayload.slice(i, i+100), {onConflict:'id'});
+      const { error } = await _sb.from('rows').upsert(rowPayloadU.slice(i, i+100), {onConflict:'id'});
       if (error) { _sbReport('_sbDumpMonthEntities (rows@'+i+')', error, {op:'upsert', table:'rows'}); errors++; }
     } catch(e) { _sbReport('_sbDumpMonthEntities (rows@'+i+')', e, {op:'upsert', table:'rows'}); errors++; }
   }
@@ -4021,15 +4061,17 @@ async function _sbDumpMonthEntities(mid) {
       });
     });
   });
-  if (tlPayload.length) {
+  const tlPayloadU = _uniqById(tlPayload, 'tl_tasks');
+  for (let i = 0; i < tlPayloadU.length; i += 100) {   // FIX: chia lô 100
     try {
-      const { error } = await _sb.from('tl_tasks').upsert(tlPayload, {onConflict:'id'});
-      if (error) { _sbReport('_sbDumpMonthEntities (tl_tasks)', error, {op:'upsert', table:'tl_tasks'}); errors++; }
-    } catch(e) { _sbReport('_sbDumpMonthEntities (tl_tasks)', e, {op:'upsert', table:'tl_tasks'}); errors++; }
+      const { error } = await _sb.from('tl_tasks').upsert(tlPayloadU.slice(i, i+100), {onConflict:'id'});
+      if (error) { _sbReport('_sbDumpMonthEntities (tl_tasks@'+i+')', error, {op:'upsert', table:'tl_tasks'}); errors++; }
+    } catch(e) { _sbReport('_sbDumpMonthEntities (tl_tasks@'+i+')', e, {op:'upsert', table:'tl_tasks'}); errors++; }
   }
 
-  console.log(`[_sbDumpMonthEntities] mid=${mid} | projects=${pjPayload.length} groups=${grpPayload.length} rows=${rowPayload.length} tl_tasks=${tlPayload.length} | errors=${errors}`);
-  return { projects: pjPayload.length, groups: grpPayload.length, rows: rowPayload.length, tlTasks: tlPayload.length, errors };
+  errors += _dupWarn;
+  console.log(`[_sbDumpMonthEntities] mid=${mid} | projects=${pjPayloadU.length} groups=${grpPayloadU.length} rows=${rowPayloadU.length} tl_tasks=${tlPayloadU.length} | dupWarn=${_dupWarn} | errors=${errors}`);
+  return { projects: pjPayloadU.length, groups: grpPayloadU.length, rows: rowPayloadU.length, tlTasks: tlPayloadU.length, dupWarn: _dupWarn, errors };
 }
 
 // Emergency utility — chạy từ Console cho data đang trong RAM chưa sync
@@ -4183,8 +4225,10 @@ async function doAddMonth(prevMid, newMid) {
     try {
       const _dump = await _sbDumpMonthEntities(newMid);
       console.log('[doAddMonth] Dumped entities:', _dump);
+      if (_dump && _dump.errors > 0) _showDumpFailBlocker(newMid, _dump.errors, _dump);
     } catch(e) {
       _sbReport('doAddMonth (dump)', e, {op:'upsert', table:'multi'});
+      _showDumpFailBlocker(newMid, -1, null, e && e.message);
     }
     _sbCopyMonthPhotos(prevMid, newMid, _pjIdMap);
   }
@@ -4192,6 +4236,42 @@ async function doAddMonth(prevMid, newMid) {
   const newPjCount = (D.months[newMid].projects.length) + (D.months[newMid].projectsVN.length);
   toast(`✓ Sang tháng ${monthLabel(newMid)} — ${newPjCount} dự án được copy`, 4000);
   setTimeout(checkStorageAndWarn, 800);
+}
+
+// Modal ĐỎ chặn màn hình khi tạo tháng mới nhưng dump lên server lỗi.
+// Trước đây chỉ console.log -> user F5 là mất sạch data tháng mới.
+function _showDumpFailBlocker(mid, errCount, dump, msg) {
+  try {
+    if (document.getElementById('dumpFailBlocker')) return;
+    const det = dump
+      ? ('projects=' + dump.projects + ' groups=' + dump.groups + ' rows=' + dump.rows + ' tl_tasks=' + dump.tlTasks)
+      : (msg || 'ngoại lệ khi ghi lên Supabase');
+    const box = document.createElement('div');
+    box.id = 'dumpFailBlocker';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(120,0,0,.88);' +
+      'display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit';
+    box.innerHTML =
+      '<div style="background:#fff;max-width:620px;width:100%;border:4px solid #c00;border-radius:10px;padding:26px 30px;box-shadow:0 10px 40px rgba(0,0,0,.5)">' +
+        '<div style="font-size:22px;font-weight:800;color:#c00;margin-bottom:14px">' +
+          'THANG MOI CHUA LUU DU LEN SERVER' +
+        '</div>' +
+        '<div style="font-size:15px;line-height:1.7;color:#222">' +
+          '<b>KHONG F5 / KHONG dong tab.</b> Bao admin ngay.<br>' +
+          'Thang: <b>' + mid + '</b><br>' +
+          'So loi: <b>' + (errCount < 0 ? 'ngoai le (toan bo)' : errCount) + '</b><br>' +
+          'Chi tiet: ' + det + '<br><br>' +
+          'Du lieu dang con trong RAM. Cach cuu: mo Console (F12) va chay<br>' +
+          '<code style="background:#f2f2f2;padding:3px 6px;border-radius:4px">_emergencyDumpMonth(\'' + mid + '\')</code>' +
+        '</div>' +
+        '<div style="margin-top:20px;text-align:right">' +
+          '<button style="background:#c00;color:#fff;border:0;padding:10px 22px;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer" ' +
+            'onclick="if(confirm(\'Ban da bao admin va hieu rui ro mat data?\'))document.getElementById(\'dumpFailBlocker\').remove()">Toi da hieu</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(box);
+  } catch(e) {
+    alert('THANG MOI CHUA LUU DU LEN SERVER - KHONG F5, bao admin ngay. Thang: ' + mid);
+  }
 }
 
 function showStorageStatus() {
@@ -7290,7 +7370,8 @@ function syncTlTaskToGroup(pjId, task) {
   // Chain rows upsert SAU groups upsert resolve OK → tránh FK violation race
   if (window._sbReady) {
     _sb.from('groups').upsert(
-      { id: grp.id, project_id: pjId, type: grp.type||'', tl_task_id: task.id, sort_order: p.groups.indexOf(grp) },
+      { id: grp.id, project_id: pjId, type: grp.type||'', tl_task_id: task.id, sort_order: p.groups.indexOf(grp),
+        dept: (grp.dept || 'studio'), manual: !!grp._manual },
       { onConflict: 'id' }
     ).then(function(res) {
       if (res.error) {

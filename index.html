@@ -1396,7 +1396,8 @@ table.detail-tl tr.staff-last > td {
 <script>
 
 const SK = 'phoicanh_v3';
-const PHOTO_RETENTION_MONTHS = 999;  // unlimited — giữ ảnh lâu dài (cleanup logic ở _sbCopyMonthPhotos effectively disabled)
+const PHOTO_RETENTION_MONTHS = 2;    // giữ ảnh 3 tháng gần nhất (tháng mới + 2 tháng trước); cũ hơn xoá file thật trên Supabase Storage
+const CACHE_MONTHS = 2;              // cache offline = cửa sổ trượt 2 tháng gần nhất (dữ liệu gốc luôn ở Supabase)
 // ── Style thống nhất cho trạng thái Đã UP / Hoàn thành ──
 const DONE_COLOR        = '#374151';  // text done — gray gần đen
 const DONE_BAR_COLOR    = '#6b7280';  // bar Gantt done — gray đậm
@@ -2778,22 +2779,70 @@ async function deleteAccount(id, code) {
 
 
 /* ── persistD: save to localStorage AND sessionStorage (file:// fallback) ── */
-function persistD() {
-  if (window._viewOnly || window._viewOnlyMode) return;
-  // Auto-backup: lưu timestamp lần backup cuối
+/* CACHE OFFLINE = CỬA SỔ TRƯỢT.
+   localStorage/sessionStorage CHỈ là bản offline — dữ liệu gốc luôn nằm trên Supabase.
+   Trước đây lưu TẤT CẢ các tháng + 7 bản backup nguyên si => 7.16MB, vỡ hạn mức ~5MB
+   của trình duyệt, và code cũ "chữa" bằng cách xoá p.photos => ảnh phối cảnh biến mất.
+   Nay: chỉ cache CACHE_MONTHS tháng gần nhất, KHÔNG cache URL ảnh (dựng lại từ bảng
+   project_photos sau sbLoadAll), KHÔNG backup vào localStorage (dùng exportToFile).
+   => dung lượng đứng yên vĩnh viễn thay vì tăng ~300KB mỗi tháng tạo mới. */
+
+// Dọn sạch backup kiểu cũ (phoicanh_backup_*) — mỗi bản là 1 bản sao đầy đủ của D.
+function _purgeLegacyBackups() {
+  var freed = 0, n = 0;
   try {
-    const now = Date.now();
-    const lastBackup = +localStorage.getItem('last_auto_backup') || 0;
-    const totalPjs = Object.values(D.months||{}).reduce((s,m)=>s+(m.projects||[]).length+(m.projectsVN||[]).length, 0);
-    // Backup mỗi 30 phút nếu có dữ liệu
-    if (totalPjs > 0 && now - lastBackup > 30 * 60 * 1000) {
-      localStorage.setItem('last_auto_backup', now);
-      localStorage.setItem('phoicanh_backup_' + new Date().toISOString().slice(0,10), JSON.stringify(D));
-      // Giữ tối đa 7 bản backup
-      const keys = Object.keys(localStorage).filter(k=>k.startsWith('phoicanh_backup_')).sort();
-      if (keys.length > 7) keys.slice(0, keys.length-7).forEach(k=>localStorage.removeItem(k));
+    Object.keys(localStorage).forEach(function(k) {
+      if (k.indexOf('phoicanh_backup_') === 0) {
+        freed += (localStorage.getItem(k) || '').length * 2;
+        localStorage.removeItem(k); n++;
+      }
+    });
+    localStorage.removeItem('phoicanh_bk_date');
+    localStorage.removeItem('last_auto_backup');
+  } catch(e) {}
+  if (n > 0) console.log('[Cache] Đã dọn ' + n + ' backup localStorage cũ, giải phóng ≈ ' + (freed / 1048576).toFixed(2) + 'MB');
+  return freed;
+}
+try { _purgeLegacyBackups(); } catch(e) {}
+
+// Tổng dung lượng localStorage THỰC TẾ (KB). localStorage lưu UTF-16 => 2 byte/ký tự.
+// Code cũ dùng length*0.75 (công thức base64) nên báo thiếu ~2.7 lần.
+function _lsUsedKB() {
+  var t = 0;
+  try {
+    for (var k in localStorage) {
+      if (!Object.prototype.hasOwnProperty.call(localStorage, k)) continue;
+      t += ((localStorage.getItem(k) || '').length + k.length) * 2;
     }
   } catch(e) {}
+  return Math.round(t / 1024);
+}
+
+// Bản JSON rút gọn để cache: chỉ nMonths tháng gần nhất, bỏ hẳn p.photos.
+function _cacheJson(nMonths) {
+  var slim = {};
+  Object.keys(D).forEach(function(k) { if (k !== 'months') slim[k] = D[k]; });
+  slim.months = {};
+  var mids = Object.keys(D.months || {}).sort();
+  mids = mids.slice(-Math.max(1, nMonths || 1));
+  mids.forEach(function(mid) {
+    var m = D.months[mid]; if (!m) return;
+    var copy = {};
+    Object.keys(m).forEach(function(k) { if (k !== 'projects' && k !== 'projectsVN') copy[k] = m[k]; });
+    ['projects', 'projectsVN'].forEach(function(key) {
+      copy[key] = (m[key] || []).map(function(p) {
+        var q = {};
+        Object.keys(p).forEach(function(k) { if (k !== 'photos') q[k] = p[k]; });
+        return q;
+      });
+    });
+    slim.months[mid] = copy;
+  });
+  return JSON.stringify(slim);
+}
+
+function persistD() {
+  if (window._viewOnly || window._viewOnlyMode) return;
   // Ensure contractEnd in all profiles
   if (D.settings && D.settings.staffProfiles) {
     Object.values(D.settings.staffProfiles).forEach(p => {
@@ -2805,7 +2854,7 @@ function persistD() {
   if (!D.settings.contactListVN) D.settings.contactListVN = ['HAN X.グエン','HAN ソン','HAN トゥアン','SGN ニャー'];
   if (!D.settings.typeListVN) D.settings.typeListVN = [];
   if (!D.settings.typeListIntl) D.settings.typeListIntl = [];
-  const json = JSON.stringify(D);
+
   // Check storage level after every save (throttled 30s)
   const now30 = Date.now();
   if (!persistD._lastCheck || now30 - persistD._lastCheck > 30000) {
@@ -2813,45 +2862,27 @@ function persistD() {
     setTimeout(checkStorageAndWarn, 500);
   }
 
+  var json = _cacheJson(CACHE_MONTHS);
   try {
     localStorage.setItem(SK, json);
   } catch(e) {
     if (e.name === 'QuotaExceededError' || e.code === 22) {
-      // Storage full — warn user and suggest cleanup
-      const kb = Math.round(json.length * 0.75 / 1024);
-      console.warn('localStorage full:', kb + 'KB');
-      // Try saving without photos to preserve data structure
-      try {
-        const noPhoto = JSON.parse(json);
-        let freed = 0;
-        Object.values(noPhoto.months||{}).forEach(m=>{
-          [...(m.projects||[]),...(m.projectsVN||[])].forEach(p=>{
-            if (p.photos?.length) { freed += p.photos.join('').length; p.photos = []; }
-          });
-        });
-        localStorage.setItem(SK, JSON.stringify(noPhoto));
-        const freedKB = Math.round(freed * 0.75 / 1024);
-        toast(`⚠ Bộ nhớ đầy! Đã tạm xóa ảnh (${freedKB}KB) để lưu dữ liệu. Vào Cài đặt → Dọn dẹp ảnh để quản lý.`, 6000);
-      } catch(e2) {
-        toast('🚨 Bộ nhớ đầy hoàn toàn! Vào Cài đặt → Dọn dẹp ảnh ngay.', 8000);
+      console.warn('[Cache] localStorage đầy — cache cần ' + Math.round(json.length * 2 / 1024) + 'KB');
+      // B1: dọn backup cũ còn sót lại rồi thử lại. TUYỆT ĐỐI KHÔNG đụng vào p.photos.
+      _purgeLegacyBackups();
+      var _ok = false;
+      try { localStorage.setItem(SK, json); _ok = true; } catch(e2) {}
+      // B2: thu hẹp cache còn 1 tháng
+      if (!_ok) { try { localStorage.setItem(SK, _cacheJson(1)); _ok = true; } catch(e3) {} }
+      if (_ok) {
+        toast('⚠ Bộ nhớ trình duyệt đầy — đã thu gọn cache offline. Dữ liệu trên server KHÔNG ảnh hưởng.', 6000);
+      } else {
+        try { localStorage.removeItem(SK); } catch(e4) {}
+        toast('🚨 Không lưu được cache offline. Dữ liệu vẫn an toàn trên Supabase — vào Cài đặt để xuất backup.', 8000);
       }
     }
   }
-  try { sessionStorage.setItem(SK+'_backup', json); } catch(e) {}
-  // Local auto-backup (silent)
-  try {
-    const totalPjs = Object.values(D.months||{}).reduce((s,m)=>s+(m.projects||[]).length+(m.projectsVN||[]).length,0);
-    if (totalPjs > 0) {
-      const dateKey = new Date().toISOString().slice(0,10);
-      const lastBk = localStorage.getItem('phoicanh_bk_date');
-      if (lastBk !== dateKey) {
-        localStorage.setItem('phoicanh_backup_' + dateKey, json);
-        localStorage.setItem('phoicanh_bk_date', dateKey);
-        const keys = Object.keys(localStorage).filter(k=>k.startsWith('phoicanh_backup_')).sort();
-        if (keys.length > 7) keys.slice(0,keys.length-7).forEach(k=>localStorage.removeItem(k));
-      }
-    }
-  } catch(e) {}
+  try { sessionStorage.setItem(SK + '_backup', json); } catch(e) {}
 }
 
 // save() - primary implementation
@@ -3784,12 +3815,41 @@ function addMonth() {
   `);
 }
 
+// ── Overlay tiến trình copy ảnh — chặn user đóng tab giữa chừng ──
+function _showPhotoCopyOverlay(done, total) {
+  var el = document.getElementById('photoCopyOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'photoCopyOverlay';
+    el.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(15,23,42,.88);display:flex;align-items:center;justify-content:center';
+    el.innerHTML = '<div style="background:#fff;border-radius:14px;padding:26px 32px;min-width:340px;text-align:center;font-family:inherit">'
+      + '<div style="font-size:34px;margin-bottom:8px">\uD83D\uDDBC</div>'
+      + '<div style="font-size:15px;font-weight:700;color:#1F3864;margin-bottom:6px">Đang copy ảnh sang tháng mới</div>'
+      + '<div id="photoCopyTxt" style="font-size:12px;color:#555;margin-bottom:12px">0 / 0 dự án</div>'
+      + '<div style="height:10px;background:#eee;border-radius:5px;overflow:hidden"><div id="photoCopyBar" style="height:100%;width:0%;background:#E67E22;border-radius:5px;transition:width .3s"></div></div>'
+      + '<div style="font-size:11px;color:#C0392B;margin-top:12px;font-weight:600">KHÔNG đóng trình duyệt cho tới khi xong</div>'
+      + '</div>';
+    document.body.appendChild(el);
+  }
+  _updatePhotoCopyOverlay(done, total);
+}
+function _updatePhotoCopyOverlay(done, total) {
+  var t = document.getElementById('photoCopyTxt'), b = document.getElementById('photoCopyBar');
+  if (t) t.textContent = done + ' / ' + total + ' dự án';
+  if (b) b.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+}
+function _hidePhotoCopyOverlay() {
+  var el = document.getElementById('photoCopyOverlay');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
 async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
   if (!window._sbReady || !pjIdMap || !pjIdMap.length) return;
   var BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/';
   console.log('[Photo carryover] Bắt đầu', pjIdMap.length, 'cặp, prevMid=', prevMid, '→ newMid=', newMid);
   var _okCount = 0, _skipCount = 0, _failCount = 0;
   for (var i = 0; i < pjIdMap.length; i++) {
+    try { _updatePhotoCopyOverlay(i, pjIdMap.length); } catch(e) {}
     var pair = pjIdMap[i];
     var _pjCopied = false;   // ít nhất 1 slot copy thành công cho project này
     // Hỏi Storage xem dự án này THỰC SỰ có file nào (1 request/dự án).
@@ -3867,7 +3927,26 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
   }
   var np = newMid.split('-'), nY = parseInt(np[0]), nM = parseInt(np[1]);
   var _delFileCount = 0, _delPjCount = 0;
+  // Quét trước danh sách tháng sắp bị xoá ảnh CỨNG trên Storage — hỏi user, không hoàn tác được.
+  var _expire = [];
+  for (var _mid0 in D.months) {
+    if (_mid0 >= prevMid) continue;
+    var _mp0 = _mid0.split('-');
+    if ((nY - parseInt(_mp0[0])) * 12 + (nM - parseInt(_mp0[1])) <= PHOTO_RETENTION_MONTHS) continue;
+    _expire.push(_mid0);
+  }
+  var _okToPurge = false;
+  if (_expire.length) {
+    _expire.sort();
+    _okToPurge = confirm(
+      'DON ANH CU TREN SERVER\n\n' +
+      'Giu lai anh ' + (PHOTO_RETENTION_MONTHS + 1) + ' thang gan nhat.\n' +
+      'Sap XOA VINH VIEN anh cua ' + _expire.length + ' thang:\n  ' + _expire.join(', ') + '\n\n' +
+      'Khong the hoan tac. Bam OK de xoa, Cancel de giu nguyen.'
+    );
+  }
   for (var mid in D.months) {
+    if (!_okToPurge) break;
     if (mid >= prevMid) continue;
     var mp = mid.split('-'), mY = parseInt(mp[0]), mM = parseInt(mp[1]);
     if ((nY - mY) * 12 + (nM - mM) <= PHOTO_RETENTION_MONTHS) continue;
@@ -4280,7 +4359,17 @@ async function doAddMonth(prevMid, newMid) {
       _sbReport('doAddMonth (dump)', e, {op:'upsert', table:'multi'});
       _showDumpFailBlocker(newMid, -1, null, e && e.message);
     }
-    _sbCopyMonthPhotos(prevMid, newMid, _pjIdMap);
+    // PHẢI await: trước đây chạy fire-and-forget nên F5 giữa chừng là mất ảnh tháng mới.
+    _showPhotoCopyOverlay(0, _pjIdMap.length);
+    window.onbeforeunload = function(){ return 'Đang copy ảnh sang tháng mới — đóng bây giờ sẽ mất ảnh.'; };
+    try {
+      await _sbCopyMonthPhotos(prevMid, newMid, _pjIdMap);
+    } catch(e) {
+      _sbReport('doAddMonth (photos)', e, {op:'copy', table:'project-photos'});
+    } finally {
+      window.onbeforeunload = null;
+      _hidePhotoCopyOverlay();
+    }
   }
 
   const newPjCount = (D.months[newMid].projects.length) + (D.months[newMid].projectsVN.length);
@@ -4357,12 +4446,10 @@ function _showLoadShortBlocker(list) {
 
 function showStorageStatus() {
   try {
-    const data = localStorage.getItem(SK) || '';
-    const kb = Math.round(data.length * 0.75 / 1024);
-    const mb = (kb / 1024).toFixed(1);
-    const pct = Math.round(kb / 51200 * 100); // 50MB estimate
-    const color = pct > 80 ? '#c00' : pct > 50 ? '#E67E22' : '#27AE60';
-    toast(`💾 Dung lượng: ${mb}MB / ~5MB (${pct}%)`, 4000);
+    const kb  = _lsUsedKB();                       // TẤT CẢ key, UTF-16 (2 byte/ký tự)
+    const mb  = (kb / 1024).toFixed(2);
+    const pct = Math.round(kb / 5120 * 100);
+    toast(`💾 Cache offline: ${mb}MB / 5MB (${pct}%)`, 4000);
   } catch(e) {}
 }
 
@@ -14733,6 +14820,20 @@ function renderSettings() {
     </div>
     <button class="btn btn-sm" onclick="openHolidaySettings()" style="background:#e8f4fd;color:#1a5276">🗓 Ngày lễ</button>
   </div>
+  <div class="card" style="margin-bottom:14px"><div class="card-hd"><span class="card-hd-title">💾 Dung lượng &amp; Ảnh</span></div>
+    <div class="card-body">
+      <div style="font-size:11px;color:var(--gray4);line-height:1.8;margin-bottom:10px">
+        Cache offline hiện tại: <strong style="color:${_lsUsedKB()>=4096?'#C0392B':_lsUsedKB()>=2560?'#E67E22':'#27AE60'}">${(_lsUsedKB()/1024).toFixed(2)}MB / 5MB</strong>
+        — chỉ lưu ${CACHE_MONTHS} tháng gần nhất, không lưu ảnh.<br>
+        ☁ Dữ liệu gốc và ảnh gốc luôn nằm trên Supabase; ảnh giữ ${PHOTO_RETENTION_MONTHS + 1} tháng gần nhất.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="exportToFile()">💾 Xuất backup ra file</button>
+        <button class="btn btn-sm" onclick="openPhotoStats()">🖼 Ảnh trên server theo tháng</button>
+        <button class="btn btn-sm" onclick="openClearPhotosModal()">🧹 Dọn cache ảnh</button>
+      </div>
+    </div>
+  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
     <div class="card"><div class="card-hd"><span class="card-hd-title">👤 Nhân sự</span></div>
       <div class="card-body"><div class="tag-cloud" id="staffTags">
@@ -16296,10 +16397,8 @@ function handleSearchKey(e) {
 
 /* ── Local backup: export data as JSON file ── */
 function exportToFile() {
-  try {
-    const dateKey = new Date().toISOString().slice(0,10);
-    localStorage.setItem('phoicanh_backup_' + dateKey, JSON.stringify(D));
-  } catch(e) {}
+  // KHÔNG ghi bản sao vào localStorage nữa (mỗi bản ~2.5MB, trước đây là thủ phạm làm vỡ hạn mức).
+  // Backup đi thẳng ra file trên máy.
   const exportBlob2 = new Blob([JSON.stringify(D, null, 2)], {type:'application/json'});
   const url2 = URL.createObjectURL(exportBlob2);
   const a2 = document.createElement('a');
@@ -16321,12 +16420,7 @@ function importFromFile() {
 }
 
 function exportBackup() {
-  // Save timestamped backup to localStorage
-  try {
-    const dateKey = new Date().toISOString().slice(0,10);
-    localStorage.setItem('phoicanh_backup_' + dateKey, JSON.stringify(D));
-  } catch(e) {}
-  // Also download as JSON file
+  // KHÔNG ghi bản sao vào localStorage nữa (mỗi bản ~2.5MB — thủ phạm làm vỡ hạn mức 5MB).
   const exportBlob = new Blob([JSON.stringify(D, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(exportBlob);
   const a = document.createElement('a');
@@ -16368,7 +16462,7 @@ function importBackup(input) {
           const sbData = await sbLoadAll();
           if (sbData) {
             D = sbData; injectSyncHashes();
-            try { localStorage.setItem(SK, JSON.stringify(D)); } catch(e2) {}
+            try { localStorage.setItem(SK, _cacheJson(CACHE_MONTHS)); } catch(e2) {}
             renderAll();
           }
           setSyncStatus('synced', '🟢 Live');
@@ -16437,8 +16531,7 @@ function renderStorageMeter() {
   const bar = document.getElementById('storageBar');
   if (!bar) return;
   try {
-    const data = localStorage.getItem(SK) || '';
-    const kb = Math.round(data.length * 0.75 / 1024);
+    const kb = _lsUsedKB();                               // TẤT CẢ key, UTF-16
     const pct = Math.min(100, Math.round(kb/5120*100));   // mốc 5MB
     const color = pct>=90 ? '#C0392B' : pct>=80 ? '#E67E22' : '#27AE60';
     bar.innerHTML = `
@@ -16454,6 +16547,44 @@ function renderStorageMeter() {
   } catch(e) {}
 }
 
+// Đếm file ảnh THẬT trên Supabase (bảng project_photos) theo tháng.
+async function openPhotoStats() {
+  if (!window._sbReady) { toast('Supabase chưa sẵn sàng', 3000); return; }
+  showModal('<h3>🖼 Ảnh trên server</h3><div style="padding:18px;text-align:center;color:#999;font-size:12px">Đang đếm…</div>');
+  var rows = [], from = 0;
+  try {
+    while (true) {
+      var res = await _sb.from('project_photos').select('month_id').range(from, from + 999);
+      if (res.error) throw res.error;
+      rows = rows.concat(res.data || []);
+      if (!res.data || res.data.length < 1000) break;
+      from += 1000;
+    }
+  } catch(e) {
+    showModal('<h3>🖼 Ảnh trên server</h3><div style="padding:14px;color:#C0392B;font-size:12px">Lỗi: ' + x(e.message || e) + '</div><div class="modal-ft"><button class="btn" onclick="closeModal()">Đóng</button></div>');
+    return;
+  }
+  var cnt = {};
+  rows.forEach(function(r) { var k = r.month_id || '(không rõ)'; cnt[k] = (cnt[k] || 0) + 1; });
+  var mids = Object.keys(cnt).sort().reverse();
+  var keepFrom = mids.length ? mids.slice(0, PHOTO_RETENTION_MONTHS + 1) : [];
+  showModal(
+    '<h3>🖼 Ảnh trên server theo tháng</h3>' +
+    '<div style="background:#f0f7ff;border:1px solid #b3d4f5;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#1a5276">' +
+      'Tổng <strong>' + rows.length + '</strong> file ảnh. Khi tạo tháng mới, hệ thống giữ <strong>' + (PHOTO_RETENTION_MONTHS + 1) + ' tháng gần nhất</strong> và hỏi trước khi xoá các tháng cũ hơn.' +
+    '</div>' +
+    (mids.length ? mids.map(function(mid) {
+      var keep = keepFrom.indexOf(mid) >= 0;
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border:1px solid #eee;border-radius:8px;margin-bottom:5px">' +
+        '<span style="font-weight:600">' + x(monthLabel(mid)) + '</span>' +
+        '<span style="font-size:11px;color:#999">' + cnt[mid] + ' ảnh</span>' +
+        '<span style="font-size:10px;font-weight:700;color:' + (keep ? '#27AE60' : '#E67E22') + '">' + (keep ? 'GIỮ' : 'sẽ dọn') + '</span>' +
+      '</div>';
+    }).join('') : '<div style="color:#bbb;text-align:center;padding:12px;font-size:12px">Chưa có ảnh nào</div>') +
+    '<div class="modal-ft"><button class="btn" onclick="closeModal()">Đóng</button></div>'
+  );
+}
+
 function openClearPhotosModal() {
   let totalPhotos = 0, totalKB = 0, months = [];
   Object.entries(D.months).forEach(([mid, m]) => {
@@ -16466,7 +16597,7 @@ function openClearPhotosModal() {
     if (cnt > 0) { months.push({mid, label: monthLabel(mid), cnt, kb}); totalPhotos += cnt; totalKB += kb; }
   });
 
-  const usedKB  = Math.round(JSON.stringify(D).length * 0.75 / 1024);
+  const usedKB  = _lsUsedKB();
 
   showModal(`
     <h3>🗑 Dọn cache ảnh — giải phóng offline cache</h3>
@@ -16520,7 +16651,7 @@ function autoCleanOldPhotos() {
 // Kiểm tra dung lượng cache offline — ngưỡng nâng lên vì ảnh đã lưu trên Supabase Storage
 function checkStorageAndWarn() {
   try {
-    const usedKB = Math.round(JSON.stringify(D).length * 0.75 / 1024);
+    const usedKB = _lsUsedKB();                           // đo localStorage THẬT, không phải D trong RAM
     const pct = usedKB / 5120 * 100;
     // CẢNH BÁO ở mốc 80% (không tự cắt tháng — dữ liệu giữ nguyên, để anh chủ động xử lý).
     if (pct >= 80) {

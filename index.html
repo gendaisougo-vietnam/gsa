@@ -1552,10 +1552,25 @@ async function _sbSelectAllPaged(table, orderCol) {
     from += PAGE;
     if (from > 200000) { console.warn('[_sbSelectAllPaged] ' + table + ': vuot 200k dong, dung'); break; }
   }
-  // Tu kiem tra: so dong tai duoc phai bang so dong server bao. Lech = mat data khi tai.
-  if (srvCount != null && all.length !== srvCount) {
-    console.error('[_sbSelectAllPaged] ' + table + ': TAI THIEU! server=' + srvCount + ' tai duoc=' + all.length);
-    window._sbLoadShort.push(table + ' ' + all.length + '/' + srvCount);
+  // Tu kiem tra. CHI bao dong khi tai duoc IT HON server.
+  // Tai duoc NHIEU HON la binh thuong: count duoc chup o trang DAU, neu co nguoi (hoac chinh
+  // doAddMonth) dang ghi them dong trong luc phan trang thi tong cuoi se lon hon count. Truoc
+  // day dung !== nen lech chieu nao cung hu coi -> bao dong gia khi vua tao thang moi.
+  if (srvCount != null && all.length < srvCount) {
+    // Doi chieu lai 1 lan nua: count cu co the da lac hau neu dang co ghi dong thoi.
+    var srv2 = srvCount;
+    try {
+      var r2 = await _sb.from(table).select('id', { count: 'exact', head: true });
+      if (typeof r2.count === 'number') srv2 = r2.count;
+    } catch(e) {}
+    if (all.length < srv2) {
+      console.error('[_sbSelectAllPaged] ' + table + ': TAI THIEU! server=' + srv2 + ' tai duoc=' + all.length);
+      window._sbLoadShort.push(table + ' ' + all.length + '/' + srv2);
+    } else {
+      console.warn('[_sbSelectAllPaged] ' + table + ': lech tam thoi do ghi dong thoi (' + all.length + '/' + srvCount + ' -> kiem lai ' + srv2 + ') - BO QUA');
+    }
+  } else if (srvCount != null && all.length > srvCount) {
+    console.warn('[_sbSelectAllPaged] ' + table + ': server duoc ghi them ' + (all.length - srvCount) + ' dong trong luc tai - binh thuong, khong phai mat data');
   } else {
     console.log('[_sbSelectAllPaged] ' + table + ': ' + all.length + '/' + (srvCount == null ? '?' : srvCount) + ' dong OK');
   }
@@ -3993,8 +4008,13 @@ window._recoverMissingPhotos = async function(newMid, prevMid) {
   prevPjs.forEach(p => { prevByKey[keyOf(p)] = p; });
 
   console.log('[Recover] Quét', newPjs.length, 'project trong', newMid, '— kiểm tra từng slot 0..5');
+  // Chặn reload giữa chừng — lần trước copy chết ở slot 3 vì trang bị F5.
+  _showPhotoCopyOverlay(0, newPjs.length);
+  window.onbeforeunload = function(){ return 'Đang khôi phục ảnh — đóng bây giờ sẽ dở dang.'; };
   let ok=0, skip=0, fail=0;
+  try {
   for (let i=0; i<newPjs.length; i++) {
+    try { _updatePhotoCopyOverlay(i, newPjs.length); } catch(e) {}
     const newP = newPjs[i];
     const prevP = prevByKey[keyOf(newP)];
     if (!prevP) {
@@ -4030,6 +4050,10 @@ window._recoverMissingPhotos = async function(newMid, prevMid) {
         ok++;
       } catch(e) { console.warn('  slot '+slot+' EXCEPTION:', e.message); fail++; }
     }
+  }
+  } finally {
+    window.onbeforeunload = null;
+    _hidePhotoCopyOverlay();
   }
   save();
   if (typeof renderAll === 'function') renderAll();

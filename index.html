@@ -1475,7 +1475,9 @@ function _rowIsLocked(r) {
   // 2.5) Dòng thuộc THÁNG QUÁ KHỨ (deadline hoặc tháng gốc < tháng đang xem) → khóa (chỉ xem lịch sử).
   //      Overdue CÙNG tháng (dateTo cùng tháng đang xem) vẫn để mở để nhắc UP.
   //      So sánh theo SỐ YYYY*12+MM để chịu mọi định dạng ('2026-07', '2026-4', ISO, dd/mm/yyyy).
-  const _amKey = _ymKey(D.activeMonth);
+  // Đang áp dụng đề xuất vừa duyệt cho CHÍNH dòng này -> bỏ qua quy tắc theo tab tháng đang xem
+  // (các quy tắc khác: đã UP, nhân sự nghỉ, carryover... vẫn giữ nguyên).
+  const _amKey = (window._approvalApply && window._approvalApply === r.id) ? null : _ymKey(D.activeMonth);
   if (_amKey != null) {
     const _omKey = _ymKey(r.originMonth);
     if (_omKey != null) {
@@ -2203,6 +2205,7 @@ async function approveChange(id) {
     refreshPendingBadge();
     var row = document.querySelector('[data-change-id="' + id + '"]');
     if (row) { row.style.background = '#d4edda'; row.innerHTML = '<td colspan="4" style="padding:8px;color:#155724;font-size:13px">✓ Đã duyệt — ' + x(c.description || '') + '</td>'; }
+    try { renderAll(); } catch(e) {}        // dòng có thể thuộc tháng khác -> vẽ lại cho khớp
     toast('✓ Đã duyệt: ' + (c.description || '').slice(0, 50));
   } catch(e) {
     if (btn) { btn.disabled = false; btn.textContent = '✓ Duyệt'; }
@@ -9384,25 +9387,52 @@ async function _applyStaffChange(c){
   var ctx = c.context || {};
   var loc = _findRowLoc(ctx.projectId, ctx.groupId, c.record_id) || _findRowById(c.record_id);
   if (!loc) throw new Error('Không tìm thấy dòng (có thể đã bị xoá)');
-  if (_rowIsLocked(loc.r)) {
-    if (ctx.kind === 'staff_done' && loc.r.doneAt) return 'already';
-    throw new Error('Dòng đã khoá (đã UP) — không áp dụng được');
-  }
-  if (ctx.kind === 'staff_edit') {
-    var f = ctx.fields || {};
-    ['status','qty','dateFrom','dateTo','staff'].filter(function(k){ return k in f; })   // 'staff' cuối cùng -> thông báo giao việc mang đủ thông tin mới
-      .forEach(function(k){ updRow(loc.p.id, loc.g.id, loc.r.id, k, k === 'qty' ? (+f[k]||0) : f[k]); });
-    _rerenderPj(loc.p.id);
-    return 'ok';
-  }
-  if (ctx.kind === 'staff_done') {
-    window._suppressRatingModal = true;      // duyệt hàng loạt không bật modal chấm điểm chồng lên bảng duyệt
-    try { await markRowDone(loc.p.id, loc.g.id, loc.r.id, ctx.doneAt, undefined, { autoOT: true }); }
-    finally { window._suppressRatingModal = false; }
-    if (loc.r.otAuto > 0) setTimeout(function(){ toast('⏱ OT tự tính cho ' + loc.r.staff + ': ' + loc.r.otAuto + 'h', 4500); }, 1400);
-    return 'ok';
-  }
-  throw new Error('Loại đề xuất không hỗ trợ: ' + ctx.kind);
+  window._approvalApply = loc.r.id;          // chỉ nới khoá cho đúng dòng này
+  try {
+    if (_rowIsLocked(loc.r)) {
+      if (ctx.kind === 'staff_done' && loc.r.doneAt) return 'already';
+      throw new Error(loc.r.doneAt ? 'Dòng này đã UP rồi'
+        : (loc.r.staff && typeof isStaffLeft === 'function' && isStaffLeft(loc.r.staff))
+          ? 'Nhân sự "' + loc.r.staff + '" đã nghỉ việc — dòng chỉ còn để xem'
+          : 'Dòng đã khoá — không áp dụng được');
+    }
+    if (ctx.kind === 'staff_edit') {
+      var f = ctx.fields || {};
+      ['status','qty','dateFrom','dateTo','staff'].filter(function(k){ return k in f; })   // 'staff' cuối cùng -> thông báo giao việc mang đủ thông tin mới
+        .forEach(function(k){ updRow(loc.p.id, loc.g.id, loc.r.id, k, k === 'qty' ? (+f[k]||0) : f[k]); });
+      _rerenderPj(loc.p.id);
+      return 'ok';
+    }
+    if (ctx.kind === 'staff_done') {
+      window._suppressRatingModal = true;    // duyệt hàng loạt không bật modal chấm điểm chồng lên bảng duyệt
+      try { await markRowDone(loc.p.id, loc.g.id, loc.r.id, ctx.doneAt, undefined, { autoOT: true }); }
+      finally { window._suppressRatingModal = false; }
+      if (loc.r.otAuto > 0) setTimeout(function(){ toast('⏱ OT tự tính cho ' + loc.r.staff + ': ' + loc.r.otAuto + 'h', 4500); }, 1400);
+      return 'ok';
+    }
+    throw new Error('Loại đề xuất không hỗ trợ: ' + ctx.kind);
+  } finally { window._approvalApply = null; }
+}
+
+// ── Nhãn giờ UP thực tế so với giờ hẹn (dùng cho cột "⚡ GIỜ UP") ──
+// Khớp đúng công thức calcUpScore: sớm >15' = SỚM, trong ±15' = ĐÚNG GIỜ, muộn >15' = MUỘN;
+// khác ngày deadline thì tính theo số ngày sớm/trễ.
+function _upTimingInfo(r){
+  if (!r || !r.doneAt) return null;
+  var doneDate = String(r.doneAt).slice(0,10), hhmm = String(r.doneAt).slice(11,16);
+  if (!r.dateTo) return { hhmm: hhmm, label: '', color: '#6b7280' };
+  var _d = function(x){ var p = String(x).split('-').map(Number); return Date.UTC(p[0], p[1]-1, p[2]); };
+  var diffDays = Math.round((_d(doneDate) - _d(r.dateTo)) / 86400000);
+  if (diffDays < 0) return { hhmm: hhmm, label: '● Sớm ' + (-diffDays) + ' ngày', color: '#16a34a' };
+  if (diffDays > 0) return { hhmm: hhmm, label: '● Muộn ' + diffDays + ' ngày', color: '#dc2626' };
+  if (!r.upTime) return { hhmm: hhmm, label: '✓ Trong ngày', color: '#2980b9' };
+  var dm = (+String(r.doneAt).slice(11,13)) * 60 + (+String(r.doneAt).slice(14,16));
+  var up = String(r.upTime).split(':'); var um = (+up[0]) * 60 + (+(up[1] || 0));
+  var diff = dm - um, mins = Math.abs(diff);
+  var txt = mins >= 60 ? (Math.floor(mins/60) + 'h' + (mins%60 ? String(mins%60).padStart(2,'0') : '')) : (mins + ' phút');
+  if (diff <= -15) return { hhmm: hhmm, label: '● Sớm ' + txt, color: '#16a34a' };
+  if (diff <=  15) return { hhmm: hhmm, label: '✓ Đúng giờ', color: '#2980b9' };
+  return { hhmm: hhmm, label: '● Muộn ' + txt, color: '#dc2626' };
 }
 
 // ── OT TỰ TÍNH (GĐ4) ──────────────────────────────────────────────────────────────
@@ -10248,7 +10278,16 @@ function renderGroups(p) {
         </td>
         <td style="text-align:center;min-width:56px;${cellDim}">
           ${rIsDone
-            ? `<span style="font-size:10px;color:${DONE_COLOR}">${r.upTime||'—'}</span>`
+            ? (function(){
+                const _ti = _upTimingInfo(r);
+                if (!_ti) return `<span style="font-size:10px;color:${DONE_COLOR}">${r.upTime||'—'}</span>`;
+                // Giờ hẹn (nhỏ, mờ) + GIỜ UP THỰC TẾ lúc bấm hoàn thành (đậm) + xếp loại (chỉ người xem được đánh giá)
+                return `<div style="line-height:1.3">
+                  <div style="font-size:9px;color:#9ca3af">hẹn ${r.upTime||'—'}</div>
+                  <div style="font-size:12px;font-weight:800;color:${_canSeeKPI()?_ti.color:DONE_COLOR}" title="Giờ nhân sự bấm hoàn thành: ${x(String(r.doneAt).slice(0,16).replace('T',' '))}">${_ti.hhmm}</div>
+                  ${(_canSeeKPI() && _ti.label) ? `<div style="font-size:8.5px;font-weight:700;color:${_ti.color}">${_ti.label}</div>` : ''}
+                </div>`;
+              })()
             : `<input type="time" class="tbl-input" value="${r.upTime||''}" ${_SM?'disabled':''}
                 title="Giờ UP đặc biệt — để trống nếu không có yêu cầu giờ cụ thể"
                 style="font-size:10px;padding:2px 4px;min-width:0;width:64px;${r.upTime?'border-color:#e74c3c;background:#fff0f0;color:#c0392b;font-weight:700':''}"

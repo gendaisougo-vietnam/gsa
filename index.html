@@ -2785,8 +2785,10 @@ async function _saveMasterPw(){
     alert('✓ Đã đổi mật khẩu "' + role + '".\n\nMật khẩu mới: ' + pw + '\n\nGhi lại ngay — phần mềm không lưu bản đọc được.');
     var el = document.getElementById('mpw-new'); if (el) el.value = '';
   } catch(e) {
-    alert(_rpcMissing(e) ? 'Chưa chạy SQL GĐ5A Bước 1 trên Supabase nên chưa đổi được mật khẩu.'
-                         : 'Lỗi đổi mật khẩu: ' + (e.message || e));
+    alert(e && e.__noToken
+      ? 'Phiên đăng nhập hiện tại chưa có mã phiên từ server.\n\nHãy bấm Đăng xuất rồi đăng nhập lại, sau đó đổi mật khẩu.'
+      : _rpcMissing(e) ? 'Chưa chạy SQL GĐ5A Bước 1 trên Supabase nên chưa đổi được mật khẩu.'
+                       : 'Lỗi đổi mật khẩu: ' + (e.message || e));
   }
 }
 async function saveAccount() {
@@ -9552,14 +9554,21 @@ function _openNotifTarget(id){
 function _authToken(){ try { return sessionStorage.getItem('splash_token') || ''; } catch(e) { return ''; } }
 async function _rpc(fn, args){
   if (!window._sbReady) throw new Error('offline');
-  var r = await _sb.rpc(fn, args || {});
+  args = args || {};
+  // Phiên cũ (đăng nhập TRƯỚC khi bật xác thực server) không có token -> đừng gửi chuỗi rỗng
+  // vào tham số kiểu uuid, Postgres sẽ báo 'invalid input syntax for type uuid'.
+  if (('p_token' in args) && !args.p_token) { var e0 = new Error('Chưa có phiên server'); e0.__noToken = true; throw e0; }
+  var r = await _sb.rpc(fn, args);
   if (r && r.error) throw r.error;
   return r ? r.data : null;
 }
-// true nếu server chưa có hàm (chưa chạy SQL Bước 1) -> cho phép dùng tạm đường cũ
+// true khi server CHƯA CÓ HÀM (chưa chạy SQL Bước 1) hoặc phiên hiện tại CHƯA CÓ TOKEN
+// (đăng nhập từ trước khi bật xác thực server) -> cho phép dùng tạm đường cũ.
 function _rpcMissing(e){
+  if (e && e.__noToken) return true;
   var m = String((e && (e.message || e.code)) || '');
-  return m.indexOf('Could not find the function') >= 0 || m.indexOf('PGRST202') >= 0 || m.indexOf('does not exist') >= 0;
+  return m.indexOf('Could not find the function') >= 0 || m.indexOf('PGRST202') >= 0
+      || m.indexOf('does not exist') >= 0 || m.indexOf('invalid input syntax for type uuid') >= 0;
 }
 function _applySession(d){
   try {
@@ -9574,6 +9583,26 @@ function _applySession(d){
     SYNC.role = d.role;
   } catch(e) {}
 }
+// Phiên đăng nhập có TRƯỚC khi bật xác thực server thì không có token -> nhắc đăng nhập lại 1 lần.
+// Sau khi chạy SQL Bước 2, phiên cũ sẽ không dùng được các chức năng quản trị nữa.
+async function _warnLegacySession(){
+  if (_authToken() || !window._sbReady) return;
+  if (['admin','edit','view','custom'].indexOf(_sessRole()) < 0) return;
+  try { await _sb.rpc('app_session', { p_token: '00000000-0000-0000-0000-000000000000' }); }
+  catch(e) { return; }                       // server chưa có hàm -> chưa cần nhắc
+  if (document.getElementById('legacySessBar')) return;
+  var bar = document.createElement('div');
+  bar.id = 'legacySessBar';
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9995;background:#92400e;color:#fff;'
+    + 'padding:9px 14px;font-size:12.5px;display:flex;gap:12px;align-items:center;justify-content:center;font-family:inherit';
+  bar.innerHTML = '🔐 Phiên đăng nhập này có từ trước khi bật bảo mật mới. '
+    + '<b>Hãy đăng xuất và đăng nhập lại</b> để nhận mã phiên.'
+    + '<button class="btn btn-sm" style="background:#fff;color:#92400e;border:none;font-weight:700" onclick="_logout()">Đăng xuất ngay</button>'
+    + '<button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5)" '
+    + 'onclick="this.parentElement.remove()">Để sau</button>';
+  document.body.appendChild(bar);
+}
+
 // Lương chỉ tải về máy admin, qua hàm server
 window._salaryLoaded = false;
 async function _loadSalaries(){
@@ -9630,6 +9659,7 @@ async function _staffAfterLoad(){
   if (_isStaffMode()) { await _loadMyPending(); try { renderContent(); } catch(e) {} }
   if (_myStaffName()) { _startMyNotifChannel(); await _loadMyNotifs(true); }
   try { await _loadSalaries(); } catch(e) {}
+  try { _warnLegacySession(); } catch(e) {}
   if (!_staffAfterLoad._t) _staffAfterLoad._t = setInterval(_revalidateAccount, 5 * 60 * 1000);
 }
 
@@ -14122,8 +14152,12 @@ async function saveStaffProfile(name, field, val) {
   if ((field === 'salaryGross' || field === 'salaryNet') && window._sbReady) {
     try { await _rpc('app_staff_set_salary', { p_token: _authToken(), p_name: name,
             p_gross: +(p.salaryGross || 0), p_net: +(p.salaryNet || 0) }); }
-    catch(e) { if (_rpcMissing(e)) { try { await _sb.from('staff').update({ [col]: val }).eq('full_name', name); } catch(e2) {} }
-               else { toast('⚠ Lưu lương lỗi: ' + (e.message || e)); } }
+    catch(e) {
+      if (_rpcMissing(e)) {
+        try { await _sb.from('staff').update({ [col]: val }).eq('full_name', name); }
+        catch(e2) { toast('⚠ Lưu lương lỗi: ' + (e2.message || e2) + ' — hãy Đăng xuất rồi đăng nhập lại.'); }
+      } else { toast('⚠ Lưu lương lỗi: ' + (e.message || e)); }
+    }
     return;
   }
   if (col && window._sbReady) {

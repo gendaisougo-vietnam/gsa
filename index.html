@@ -119,6 +119,36 @@ body{font-family:'Be Vietnam Pro','Noto Sans JP',sans-serif;font-size:13px;backg
 .hdr-user:hover{background:rgba(255,255,255,.17)}
 .hdr-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--gold),#e0a800);color:var(--navy);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0}
 body.hide-ot .tl-ot-col{display:none !important}
+/* ── Bảng thông báo: góc TRÊN bên PHẢI, ngay dưới header; thu lại thành nút chuông ── */
+#notifCenter{position:fixed;top:70px;right:16px;z-index:9992;width:360px;max-width:calc(100vw - 24px);font-family:inherit}
+#notifCenter.collapsed{width:auto}
+.nc-panel{background:#fff;border:1px solid #e5e7eb;border-top:4px solid #E67E22;border-radius:12px;
+  box-shadow:0 14px 40px rgba(0,0,0,.28);overflow:hidden;animation:ncIn .22s ease-out}
+@keyframes ncIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+.nc-hd{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff7ed;border-bottom:1px solid #fed7aa}
+.nc-hd b{font-size:13px;color:#9a3412;flex:1}
+.nc-count{background:#E67E22;color:#fff;border-radius:99px;font-size:11px;font-weight:800;padding:1px 8px}
+.nc-body{max-height:min(62vh,520px);overflow-y:auto;padding:8px}
+.nc-item{border:1px solid #e5e7eb;border-left:4px solid #9ca3af;border-radius:9px;padding:9px 11px;margin-bottom:7px;background:#fff}
+.nc-item.k-assign{border-left-color:#E67E22;background:#fffbf5}
+.nc-item.k-approved{border-left-color:#16a34a;background:#f6fef9}
+.nc-item.k-rejected{border-left-color:#dc2626;background:#fff6f6}
+.nc-title{font-size:12.5px;font-weight:800;color:#1f2937;line-height:1.45}
+.nc-time{font-size:10px;color:#9ca3af;white-space:nowrap;margin-left:8px}
+.nc-body-txt{font-size:11.5px;color:#374151;line-height:1.65;white-space:pre-line;margin:6px 0 8px;
+  background:#f9fafb;border-radius:6px;padding:6px 8px}
+.nc-acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.nc-btn{font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;cursor:pointer;border:1px solid #d1d5db;background:#fff;color:#374151;font-family:inherit}
+.nc-btn.primary{background:#E67E22;border-color:#E67E22;color:#fff}
+.nc-btn.ok{background:#16a34a;border-color:#16a34a;color:#fff}
+.nc-ft{display:flex;gap:8px;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid #f0f0f0;background:#fafafa}
+.nc-bell{position:relative;background:#E67E22;color:#fff;border:none;border-radius:99px;padding:9px 15px;font-size:13px;
+  font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(230,126,34,.45);font-family:inherit;display:flex;align-items:center;gap:7px}
+.nc-bell:hover{filter:brightness(1.07)}
+.nc-bell .dot{background:#fff;color:#E67E22;border-radius:99px;font-size:11px;font-weight:900;padding:0 7px;min-width:19px;text-align:center}
+@keyframes ncRing{0%,70%,100%{transform:rotate(0)}75%{transform:rotate(-12deg)}85%{transform:rotate(12deg)}}
+.nc-bell .ic{display:inline-block;animation:ncRing 2.2s ease-in-out infinite}
+@media(max-width:640px){#notifCenter{top:64px;right:8px;left:8px;width:auto}}
 /* ── Chế độ nhân viên: ẩn mọi nút thao tác (ngoài 5 trường đề xuất + Báo hoàn thành). Hàm cũng bị chặn ở JS. ── */
 body.staff-mode [onclick*="addRow("],body.staff-mode [onclick*="delRow("],body.staff-mode [onclick*="addGroup("],
 body.staff-mode [onclick*="delGroup("],body.staff-mode [onclick*="deletePj("],body.staff-mode [onclick*="hidePjFromDept("],
@@ -9481,45 +9511,57 @@ function _onMyNotif(n){
     if (!e.editId && !e.doneId) delete window._myPending[n.row_id];
     if (n.project_id) _rerenderPj(n.project_id);
   }
-  _renderMyNotifBadge();
-  var ic = n.kind === 'assign' ? '📌 ' : n.kind === 'approved' ? '✅ ' : n.kind === 'rejected' ? '❌ ' : '🔔 ';
-  toast(ic + (n.title || ''), 5000);
-  _showNotifCenter();
+  _showNotifCenter();   // thông báo mới -> bảng tự bung ở góc trên bên phải
 }
-function _renderMyNotifBadge(){
-  var n = (window._myNotifs || []).length, el = document.getElementById('myNotifFab');
-  if (!n) { if (el) el.remove(); return; }
-  if (!el) {
-    el = document.createElement('button'); el.id = 'myNotifFab'; el.onclick = _showNotifCenter;
-    el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:9990;background:#E67E22;color:#fff;border:none;border-radius:99px;padding:10px 16px;font-weight:800;font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,.3);cursor:pointer;font-family:inherit';
-    document.body.appendChild(el);
-  }
-  el.textContent = '📬 ' + n + ' thông báo mới';
-}
-function _showNotifCenter(){
+// Bảng thông báo góc trên bên phải. Mở sẵn khi có thông báo mới; "Xem sau" thu lại thành nút chuông.
+window._notifCollapsed = false;
+function _renderMyNotifBadge(){ _renderNotifCenter(); }
+function _notifPanelToggle(){ window._notifCollapsed = !window._notifCollapsed; _renderNotifCenter(); }
+function _notifCollapse(){ window._notifCollapsed = true; _renderNotifCenter(); }
+function _renderNotifCenter(){
   var list = window._myNotifs || [];
-  if (!list.length) { try { closeModal(); } catch(e) {} return; }
+  var el = document.getElementById('notifCenter');
+  if (!list.length) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'notifCenter'; document.body.appendChild(el); }
+
+  if (window._notifCollapsed) {
+    el.className = 'collapsed';
+    el.innerHTML = '<button class="nc-bell" onclick="_notifPanelToggle()" title="Mở bảng thông báo">'
+      + '<span class="ic">🔔</span> Thông báo <span class="dot">' + list.length + '</span></button>';
+    return;
+  }
+  el.className = '';
   var icon = { assign:'📌', approved:'✅', rejected:'❌' };
-  var col  = { assign:'#E67E22', approved:'#16a34a', rejected:'#dc2626' };
   var items = list.map(function(n){
-    var t = n.created_at ? new Date(n.created_at).toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
-    var btn = n.kind === 'assign'
-      ? '<button class="btn btn-sm btn-gold" onclick="_ackNotif(\'' + n.id + '\')">✓ Đã nhận việc</button>'
-      : '<button class="btn btn-sm" onclick="_ackNotif(\'' + n.id + '\')">Đã xem</button>';
-    var go = n.project_id ? '<button class="btn btn-sm" onclick="_openNotifTarget(\'' + n.id + '\')">Xem dự án</button>' : '';
-    return '<div style="border:1px solid #e5e7eb;border-left:4px solid ' + (col[n.kind] || '#6b7280') + ';border-radius:8px;padding:10px 12px;margin-bottom:8px">'
-      + '<div style="display:flex;justify-content:space-between;gap:8px"><b style="font-size:13px">' + (icon[n.kind] || '🔔') + ' ' + x(n.title || '') + '</b>'
-      + '<span style="font-size:10px;color:#999;white-space:nowrap">' + t + '</span></div>'
-      + (n.body ? '<div style="font-size:12px;color:#444;margin:6px 0 8px;line-height:1.6;white-space:pre-line">' + x(n.body) + '</div>' : '')
-      + '<div style="display:flex;gap:6px;justify-content:flex-end">' + go + btn + '</div></div>';
+    var t = n.created_at ? new Date(n.created_at).toLocaleString('vi-VN',
+            { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+    var isAssign = n.kind === 'assign';
+    return '<div class="nc-item k-' + x(n.kind || '') + '">'
+      + '<div style="display:flex;align-items:flex-start">'
+        + '<div class="nc-title">' + (icon[n.kind] || '🔔') + ' ' + x(n.title || '') + '</div>'
+        + '<div class="nc-time">' + t + '</div>'
+      + '</div>'
+      + (n.body ? '<div class="nc-body-txt">' + x(n.body) + '</div>' : '')
+      + '<div class="nc-acts">'
+        + (n.project_id ? '<button class="nc-btn" onclick="_openNotifTarget(\'' + n.id + '\')">Xem dự án</button>' : '')
+        + '<button class="nc-btn ' + (isAssign ? 'ok' : 'primary') + '" onclick="_ackNotif(\'' + n.id + '\')">'
+          + (isAssign ? '✓ Đã nhận việc' : '✓ Đã xem') + '</button>'
+      + '</div></div>';
   }).join('');
   var nAssign = list.filter(function(n){ return n.kind === 'assign'; }).length;
-  showModal('<h3 style="margin-bottom:10px">📬 Thông báo của bạn (' + list.length + ')</h3>'
-    + '<div style="max-height:420px;overflow-y:auto">' + items + '</div>'
-    + '<div class="modal-ft"><button class="btn" onclick="closeModal()">Để sau</button>'
-    + (list.length > 1 ? '<button class="btn btn-gold" onclick="_ackAllNotifs()">✓ Xác nhận tất cả' + (nAssign ? ' (' + nAssign + ' việc)' : '') + '</button>' : '')
-    + '</div>');
+  el.innerHTML = '<div class="nc-panel">'
+    + '<div class="nc-hd"><span style="font-size:15px">🔔</span><b>Thông báo của bạn</b>'
+      + '<span class="nc-count">' + list.length + '</span>'
+      + '<button class="nc-btn" style="padding:2px 8px" onclick="_notifCollapse()" title="Thu nhỏ">✕</button></div>'
+    + '<div class="nc-body">' + items + '</div>'
+    + '<div class="nc-ft">'
+      + '<button class="nc-btn" onclick="_notifCollapse()">Xem sau</button>'
+      + (list.length > 1 ? '<button class="nc-btn ok" onclick="_ackAllNotifs()">✓ Xác nhận tất cả'
+          + (nAssign ? ' (' + nAssign + ' việc)' : '') + '</button>' : '')
+    + '</div></div>';
 }
+// Mở bảng (dùng khi có thông báo mới tới, hoặc bấm nút chuông)
+function _showNotifCenter(){ window._notifCollapsed = false; _renderNotifCenter(); }
 async function _ackNotif(id, silent){
   var n = (window._myNotifs || []).find(function(q){ return q.id === id; }); if (!n) return;
   var now = new Date().toISOString(), me = _myStaffName();
@@ -9533,16 +9575,16 @@ async function _ackNotif(id, silent){
   } catch(e) { console.warn('[ack]', e.message); }
   _renderMyNotifBadge();
   try { if (n.project_id) _rerenderPj(n.project_id); } catch(e) {}
-  if (!silent) { if (window._myNotifs.length) _showNotifCenter(); else { closeModal(); toast('✓ Đã xác nhận'); } }
+  if (!silent) { _renderNotifCenter(); if (!window._myNotifs.length) toast('✓ Đã xác nhận'); }
 }
 async function _ackAllNotifs(){
   var ids = (window._myNotifs || []).map(function(n){ return n.id; });
   for (var i = 0; i < ids.length; i++) await _ackNotif(ids[i], true);
-  closeModal(); toast('✓ Đã xác nhận ' + ids.length + ' thông báo');
+  _renderNotifCenter(); toast('✓ Đã xác nhận ' + ids.length + ' thông báo');
 }
 function _openNotifTarget(id){
   var n = (window._myNotifs || []).find(function(q){ return q.id === id; }); if (!n) return;
-  closeModal();
+  _notifCollapse();
   try { if (n.month_id && D.months[n.month_id] && D.activeMonth !== n.month_id) switchMonth(n.month_id); } catch(e) {}
   try { showPage('main'); } catch(e) {}
   try { selectPj(n.project_id); } catch(e) {}

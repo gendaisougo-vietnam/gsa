@@ -2753,6 +2753,18 @@ async function openAccountsPanel() {
 }
 // Đóng MỌI modal đang mở (tránh trùng id khi xếp chồng)
 function _closeAllModals(){ try { document.querySelectorAll('#activeModal').forEach(function(m){ m.remove(); }); } catch(e){} }
+// Trạng thái mật khẩu của 1 tài khoản (admin nhìn là biết đã đổi hay còn dùng mật khẩu tạm)
+function _pwStateHtml(a) {
+  if (a.must_change_pw) return '<span style="color:#b45309;font-weight:700">⏳ MK tạm</span>'
+    + '<div style="font-size:9px;color:#9ca3af">chưa đổi</div>';
+  if (a.pw_changed_at) {
+    var d = String(a.pw_changed_at);
+    return '<span style="color:#15803d;font-weight:700">✓ Đã đổi</span>'
+      + '<div style="font-size:9px;color:#9ca3af">' + d.slice(8,10) + '/' + d.slice(5,7) + '/' + d.slice(0,4) + '</div>';
+  }
+  if (a.pass_plain) return '<span style="font-family:monospace;color:#0f766e;font-weight:700">' + x(a.pass_plain) + '</span>';
+  return '<span style="color:#9ca3af">(ẩn)</span>';
+}
 function _accountsPanelHtml(accs, editAcc) {
   var _sel = 'width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box';
   var newCode = editAcc ? '' : _gen6();   // mã 6 số nội bộ tự tạo cho tài khoản mới
@@ -2767,10 +2779,11 @@ function _accountsPanelHtml(accs, editAcc) {
     return '<tr style="border-bottom:1px solid #eee">'
       + '<td style="padding:6px 8px;font-weight:600">'+x(a.code)+(a.is_active?'':' <span style="color:#dc2626;font-size:10px">(đã tắt)</span>')+'</td>'
       + '<td style="padding:6px 8px;font-size:11px;color:#555">'+x(a.display_name||'')+'</td>'
-      + '<td style="padding:6px 8px;font-size:12px;font-family:monospace;color:#0f766e;font-weight:700">'+(a.pass_plain?x(a.pass_plain):'<span style="color:#9ca3af;font-weight:400;font-family:inherit">(ẩn)</span>')+'</td>'
+      + '<td style="padding:6px 8px;font-size:11px">'+_pwStateHtml(a)+'</td>'
       + '<td style="padding:6px 8px;font-size:10px;color:#6d28d9">'+x(permTxt)+'</td>'
       + '<td style="padding:6px 8px;white-space:nowrap;text-align:right">'
         + '<button onclick="editAccount(\''+a.id+'\')" style="font-size:11px;padding:2px 8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:4px;cursor:pointer;margin-right:3px">Sửa</button>'
+        + '<button onclick="resetAccountPw(\''+a.id+'\',\''+x(a.code)+'\')" title="Người dùng quên mật khẩu: cấp mật khẩu tạm mới để gửi lại" style="font-size:11px;padding:2px 8px;border:1px solid #fcd34d;background:#fffbeb;color:#b45309;border-radius:4px;cursor:pointer;margin-right:3px">Cấp lại MK</button>'
         + '<button onclick="toggleAccountActive(\''+a.id+'\','+(!a.is_active)+')" style="font-size:11px;padding:2px 8px;border:1px solid #d1d5db;background:#fff;border-radius:4px;cursor:pointer;margin-right:3px">'+(a.is_active?'Tắt':'Bật')+'</button>'
         + '<button onclick="deleteAccount(\''+a.id+'\',\''+x(a.code)+'\')" style="font-size:11px;padding:2px 8px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:4px;cursor:pointer">Xoá</button>'
       + '</td></tr>';
@@ -2778,16 +2791,19 @@ function _accountsPanelHtml(accs, editAcc) {
   return '<div style="max-width:640px">'
     + '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">🔑 Quản lý tài khoản truy cập</div>'
     + '<div style="font-size:11px;color:#6b7280;margin-bottom:10px">Tạo tài khoản, cấp quyền xem từng chức năng, bật/tắt hoặc xoá. (Admin gốc luôn đăng nhập được.)</div>'
+    + (editAcc ? '<div style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:#5b21b6;display:flex;gap:8px;justify-content:space-between;align-items:center">'
+        + '<span>✏ Đang sửa tài khoản <b>'+x(editAcc.code)+'</b>'+(editAcc.display_name?' — '+x(editAcc.display_name):'')+' <span style="color:#7c3aed">(biểu mẫu ở ngay bên dưới bảng)</span></span>'
+        + '<button class="btn btn-sm" style="white-space:nowrap" onclick="openAccountsPanel()">Huỷ sửa</button></div>' : '')
     + '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">'
       + '<thead><tr style="background:var(--navy);color:#fff"><th style="padding:6px 8px;text-align:left">Mã ĐN</th><th style="padding:6px 8px;text-align:left">Tên</th><th style="padding:6px 8px;text-align:left">Mật khẩu</th><th style="padding:6px 8px;text-align:left">Quyền xem</th><th style="padding:6px 8px"></th></tr></thead>'
       + '<tbody>'+rows+'</tbody></table>'
-    + '<div style="border-top:1px dashed #ddd;padding-top:12px">'
+    + '<div id="acc-edit-box" style="border-top:1px dashed #ddd;padding-top:12px;border-radius:10px'+(editAcc?';background:#faf5ff;border:1px solid #c4b5fd;padding:12px':'')+'">'
       + '<div style="font-weight:700;font-size:13px;color:#6d28d9;margin-bottom:8px">'+(editAcc?'✏ Sửa tài khoản: '+x(editAcc.code):'➕ Thêm tài khoản mới')+'</div>'
       + '<input type="hidden" id="acc-id" value="'+(editAcc?editAcc.id:'')+'">'
       + '<input type="hidden" id="acc-code" value="'+(editAcc?x(editAcc.code):newCode)+'">'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
         + '<label style="font-size:11px;color:#374151">Tên người dùng <span style="color:#9ca3af">(chọn từ nhân sự)</span><select id="acc-name" style="'+_sel+'">'+_accNameOpts+'</select></label>'
-        + '<label style="font-size:11px;color:#374151">Mật khẩu '+(editAcc?'<span style="color:#9ca3af">(trống = giữ nguyên)</span>':'')+'<div style="display:flex;gap:5px;margin-top:2px"><input id="acc-pw" type="text" value="'+(editAcc?'':newCode)+'" placeholder="'+(editAcc?'••••••':'Mật khẩu')+'" style="'+_sel+'"><button type="button" title="Tạo mật khẩu khác" onclick="document.getElementById(\'acc-pw\').value=_gen6()" style="flex-shrink:0;padding:0 10px;border:1px solid #c4b5fd;background:#f5f3ff;border-radius:6px;cursor:pointer">🔄</button></div></label>'
+        + '<label style="font-size:11px;color:#374151">Mật khẩu tạm '+(editAcc?'<span style="color:#9ca3af">(trống = giữ nguyên)</span>':'<span style="color:#9ca3af">(người dùng phải đổi khi đăng nhập)</span>')+'<div style="display:flex;gap:5px;margin-top:2px"><input id="acc-pw" type="text" value="'+(editAcc?'':newCode)+'" placeholder="'+(editAcc?'••••••':'Mật khẩu')+'" style="'+_sel+'"><button type="button" title="Tạo mật khẩu khác" onclick="document.getElementById(\'acc-pw\').value=_gen6()" style="flex-shrink:0;padding:0 10px;border:1px solid #c4b5fd;background:#f5f3ff;border-radius:6px;cursor:pointer">🔄</button></div></label>'
       + '</div>'
       + '<div style="font-size:11px;color:#374151;margin-bottom:5px;font-weight:600">Cho phép xem chức năng:</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">'+permBoxes+'</div>'
@@ -2858,17 +2874,18 @@ async function saveAccount() {
   } catch(e) { alert('Lỗi lưu tài khoản: ' + (e.message||e)); }
 }
 // Hiện thông tin đăng nhập để admin copy gửi cho người dùng
-function _showAccountShare(code, pw, name) {
+function _showAccountShare(code, pw, name, isReset) {
   // Link mang sẵn mã tài khoản -> mở ra đã hiện đúng tên người, chỉ cần nhập mật khẩu
   var url = 'https://gendaisougo-vietnam.github.io/gsa/?acc=' + encodeURIComponent(code);
-  var share = '🔑 Tài khoản phần mềm GS — ' + (name||'') + '\n'
-    + '👉 Bấm link rồi nhập mật khẩu là vào (đã hiện sẵn tên):\n'
+  var share = (isReset ? '🔁 Cấp lại mật khẩu phần mềm GS — ' : '🔑 Tài khoản phần mềm GS — ') + (name||'') + '\n'
+    + '👉 Bấm link rồi nhập mật khẩu tạm (đã hiện sẵn tên):\n'
     + '🔗 ' + url + '\n'
-    + '🔒 Mật khẩu: ' + pw;
+    + '🔒 Mật khẩu tạm: ' + pw + '\n'
+    + '⚠ Đăng nhập xong phần mềm sẽ yêu cầu đặt mật khẩu riêng — mật khẩu tạm này hết tác dụng sau đó.';
   _closeAllModals();
   showModal(
     '<div style="max-width:460px">'
-    + '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">✅ Đã tạo tài khoản</div>'
+    + '<div style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px">'+(isReset?'🔁 Đã cấp lại mật khẩu tạm':'✅ Đã tạo tài khoản')+'</div>'
     + '<div style="font-size:11px;color:#6b7280;margin-bottom:10px">Copy thông tin dưới đây gửi cho người dùng:</div>'
     + '<textarea id="acc-share-txt" readonly style="width:100%;height:108px;font-size:13px;font-family:monospace;padding:10px;border:1px solid #c4b5fd;border-radius:8px;background:#faf5ff;box-sizing:border-box;resize:none">'+x(share)+'</textarea>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
@@ -2886,7 +2903,38 @@ function _copyAccountShare() {
     else { ta.select(); document.execCommand('copy'); done(); }
   } catch(e) { ta.select(); try { document.execCommand('copy'); done(); } catch(e2){} }
 }
-function editAccount(id) { var a = (window._accCache||[]).find(function(x){ return x.id===id; }); if (a) { _closeAllModals(); showModal(_accountsPanelHtml(window._accCache, a)); } }
+function editAccount(id) {
+  var a = (window._accCache||[]).find(function(y){ return y.id===id; });
+  if (!a) { try { toast('Không tìm thấy tài khoản để sửa — hãy mở lại bảng Tài khoản'); } catch(e) { alert('Không tìm thấy tài khoản để sửa.'); } return; }
+  _closeAllModals(); showModal(_accountsPanelHtml(window._accCache, a));
+  setTimeout(function(){                      // biểu mẫu nằm dưới đáy -> cuộn tới + nháy khung cho dễ thấy
+    var box = document.getElementById('acc-edit-box');
+    if (box) {
+      try { box.scrollIntoView({ block:'center', behavior:'smooth' }); } catch(e) { try { box.scrollIntoView(); } catch(e2){} }
+      box.style.transition = 'box-shadow .3s';
+      box.style.boxShadow = '0 0 0 3px #a78bfa';
+      setTimeout(function(){ box.style.boxShadow = 'none'; }, 1800);
+    }
+    var n = document.getElementById('acc-name'); if (n) { try { n.focus(); } catch(e){} }
+  }, 80);
+}
+// Admin cấp lại MẬT KHẨU TẠM khi người dùng quên -> người đó đăng nhập xong phải đổi ngay
+async function resetAccountPw(id, code) {
+  var a = (window._accCache||[]).find(function(y){ return y.id===id; }) || {};
+  if (!confirm('Cấp lại mật khẩu TẠM cho tài khoản "' + code + '"?\n\n• Mật khẩu cũ mất hiệu lực ngay.\n• Người dùng đăng nhập bằng mật khẩu tạm rồi BẮT BUỘC đặt mật khẩu mới.')) return;
+  var pw = _gen6();
+  try {
+    try { await _rpc('app_account_reset_pw', { p_token:_authToken(), p_id:id, p_newpw:pw }); }
+    catch(eR) {
+      if (!_rpcMissing(eR)) throw eR;
+      var u = await _sb.from('accounts').update({ pass_hash: await hashPw(pw), pass_plain:null,
+        must_change_pw:true, pw_changed_at:null, updated_at:new Date().toISOString() }).eq('id', id);
+      if (u.error) throw u.error;
+    }
+    try { toast('✓ Đã cấp lại mật khẩu tạm: ' + code); } catch(e){}
+    _showAccountShare(code, pw, a.display_name || '', true);
+  } catch(e) { alert('Lỗi cấp lại mật khẩu: ' + (e.message || e)); }
+}
 async function toggleAccountActive(id, active) {
   try { try { await _rpc('app_account_set_active', { p_token:_authToken(), p_id:id, p_active:active }); }
         catch(eR) { if (!_rpcMissing(eR)) throw eR;
@@ -9642,7 +9690,69 @@ function _rpcMissing(e){
   return m.indexOf('Could not find the function') >= 0 || m.indexOf('PGRST202') >= 0
       || m.indexOf('does not exist') >= 0 || m.indexOf('invalid input syntax for type uuid') >= 0;
 }
+// ── MẬT KHẨU TẠM: bắt buộc đổi trước khi vào phần mềm ──────────────────────
+// Admin cấp mật khẩu tạm (lúc tạo tài khoản hoặc khi "Cấp lại MK").
+// Người dùng đăng nhập -> màn này chặn lại, đổi xong mới vào được, và admin
+// nhìn bảng Tài khoản thấy ngay "✓ Đã đổi" kèm ngày.
+async function _doChangeMyPw(newPw) {
+  try {
+    var r = await _rpc('app_change_my_password', { p_token:_authToken(), p_new:newPw });
+    if (r && r.ok === false) throw new Error(r.message || 'Không đổi được mật khẩu');
+    return;
+  } catch(e) { if (!_rpcMissing(e)) throw e; }
+  var code = '';
+  try { code = sessionStorage.getItem('splash_acc_code') || ''; } catch(e) {}
+  if (!code || !window._sbReady) throw new Error('Chưa chạy SQL "mật khẩu tạm" trên Supabase nên chưa đổi được. Báo quản lý.');
+  var u = await _sb.from('accounts').update({ pass_hash: await hashPw(newPw), pass_plain:null,
+    must_change_pw:false, pw_changed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('code', code);
+  if (u.error) throw u.error;
+}
+function _promptForcePwChange(opts) {
+  opts = opts || {};
+  return new Promise(function(resolve){
+    try { var old = document.getElementById('pwGate'); if (old) old.remove(); } catch(e) {}
+    var who = ''; try { who = sessionStorage.getItem('splash_acc_name') || ''; } catch(e) {}
+    var inp = 'width:100%;padding:9px 11px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;box-sizing:border-box;margin-bottom:8px';
+    var g = document.createElement('div');
+    g.id = 'pwGate';
+    g.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(10,20,40,.94);display:flex;'
+      + 'align-items:center;justify-content:center;padding:18px;font-family:inherit';
+    g.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;padding:22px 20px;box-shadow:0 18px 50px rgba(0,0,0,.45)">'
+      + '<div style="font-size:17px;font-weight:800;color:#0f2a4d;margin-bottom:6px">🔐 Đặt mật khẩu của bạn</div>'
+      + '<div style="font-size:12.5px;color:#4b5563;line-height:1.55;margin-bottom:14px">'
+        + (who ? '<b>' + x(who) + '</b> — mật' : 'Mật') + ' khẩu đang dùng là <b>mật khẩu tạm</b> do quản lý cấp. '
+        + 'Hãy đặt mật khẩu riêng để tiếp tục. Lần sau đăng nhập bằng mật khẩu mới này.</div>'
+      + '<input id="pwg1" type="password" autocomplete="new-password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)" style="' + inp + '">'
+      + '<input id="pwg2" type="password" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới" style="' + inp + '">'
+      + '<div id="pwgErr" style="font-size:12px;color:#dc2626;min-height:17px;margin-bottom:6px"></div>'
+      + '<button id="pwgOk" style="width:100%;padding:10px;border:none;border-radius:8px;background:#b8860b;color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">Đổi mật khẩu và vào phần mềm</button>'
+      + '<button id="pwgOut" style="width:100%;margin-top:8px;padding:7px;border:none;background:transparent;color:#6b7280;font-size:12px;cursor:pointer;font-family:inherit">Đăng xuất</button>'
+      + '</div>';
+    document.body.appendChild(g);
+    var e1 = g.querySelector('#pwg1'), e2 = g.querySelector('#pwg2');
+    var err = g.querySelector('#pwgErr'), btn = g.querySelector('#pwgOk');
+    function fail(m){ err.textContent = m; }
+    async function go(){
+      var a = (e1.value || '').trim(), b = (e2.value || '').trim();
+      if (a.length < 6) return fail('Mật khẩu mới phải từ 6 ký tự trở lên.');
+      if (a !== b)      return fail('Hai ô mật khẩu chưa giống nhau.');
+      if (opts.oldPw && a === opts.oldPw) return fail('Mật khẩu mới phải khác mật khẩu tạm.');
+      fail(''); btn.disabled = true; btn.textContent = 'Đang đổi…';
+      try { await _doChangeMyPw(a); }
+      catch(e) { btn.disabled = false; btn.textContent = 'Đổi mật khẩu và vào phần mềm'; return fail(String(e.message || e)); }
+      window.__mustChangePw = false;
+      try { g.remove(); } catch(e) {}
+      try { toast('✓ Đã đổi mật khẩu — lần sau đăng nhập bằng mật khẩu mới'); } catch(e) {}
+      resolve(true);
+    }
+    btn.onclick = go;
+    e2.onkeydown = function(ev){ if (ev.key === 'Enter') go(); };
+    g.querySelector('#pwgOut').onclick = function(){ try { g.remove(); } catch(e) {} resolve(false); try { _forceLogout(); } catch(e) {} };
+    setTimeout(function(){ try { e1.focus(); } catch(e) {} }, 60);
+  });
+}
 function _applySession(d){
+  try { window.__mustChangePw = !!d.must_change_pw; } catch(e) {}
   try {
     sessionStorage.setItem('splash_role', d.role);
     if (d.token) sessionStorage.setItem('splash_token', d.token);
@@ -9717,6 +9827,10 @@ async function _revalidateAccount(){
       sessionStorage.setItem('splash_perms', JSON.stringify(d.perms || {}));
       sessionStorage.setItem('splash_acc_name', d.display_name || d.code || '');
       sessionStorage.setItem('splash_staff_name', d.display_name || '');
+    }
+    if (d.must_change_pw) {                     // F5 cũng không lách được: vẫn phải đặt mật khẩu riêng
+      window.__mustChangePw = true;
+      if (!document.getElementById('pwGate')) _promptForcePwChange();
     }
     if (d.role !== _sessRole()) { sessionStorage.setItem('splash_role', d.role); SYNC.role = d.role; }
     if (oldPerms !== JSON.stringify(d.perms || {})) { try { applyRoleUI(d.role); renderAll(); } catch(e) {} }
@@ -18081,6 +18195,7 @@ window.addEventListener('beforeunload', function() {
                 role = 'custom';
                 try { sessionStorage.setItem('splash_perms', JSON.stringify(acc.permissions||{})); } catch(e){}
               }
+              window.__mustChangePw = !!acc.must_change_pw;
               try { sessionStorage.setItem('splash_acc_name', acc.display_name||acc.code||''); } catch(e){}
               try { sessionStorage.setItem('splash_acc_code', acc.code||''); } catch(e){}
               try { sessionStorage.setItem('splash_staff_name', acc.display_name||''); } catch(e){}
@@ -18095,6 +18210,11 @@ window.addEventListener('beforeunload', function() {
         const inp = document.getElementById('splashPwInput');
         if(inp) { inp.value = ''; inp.focus(); }
         return;
+      }
+      // Mật khẩu tạm -> phải đặt mật khẩu riêng rồi mới vào phần mềm
+      if (window.__mustChangePw) {
+        var _pwOk = await _promptForcePwChange({ oldPw: pw });
+        if (!_pwOk) return;
       }
       try { sessionStorage.setItem('splash_role', role); } catch(e) {}
       try { SYNC.role = role; } catch(e) {}

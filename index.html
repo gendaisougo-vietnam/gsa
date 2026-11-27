@@ -6373,6 +6373,7 @@ function _qpOpenPj(pjId){ _closeQuickPeek(); try { selectPj(pjId); } catch(e) {}
 
 function _quickPeek(pjId, rowId, ev, pjNum) {
   try { if (ev) { ev.stopPropagation(); ev.preventDefault(); } } catch(e) {}
+  try { var _sel = window.getSelection && window.getSelection(); if (_sel) _sel.removeAllRanges(); } catch(e) {}
   _closeQuickPeek();
   var p = null;
   try { p = (typeof getPjGlobal === 'function' && getPjGlobal(pjId)) || getPj(pjId); } catch(e) {}
@@ -6626,7 +6627,7 @@ function renderMonthGantt(pjs) {
       : 'inherit';
     const prefix = isTrip ? '✈' : `[${r.pjNum||'?'}]`;
     const _compact = (isActuallyDone || isDoneByDate) && !isTodayUp && !isUrgent;  // đã UP xong/qua hạn -> thu gọn
-    return `<td ${r.pjId?`onclick="_quickPeek('${r.pjId}','${String(r.id||'').replace(/'/g,'')}',event,'${r.pjNum||''}')"`:''} title="${r.pjId?'Xem nhanh công trình (bấm)':''}" style="padding:${_compact?'0 6px':'2px 6px'};border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
+    return `<td ${r.pjId?`ondblclick="_quickPeek('${r.pjId}','${String(r.id||'').replace(/'/g,'')}',event,'${r.pjNum||''}')"`:''} title="${r.pjId?'Bấm đúp để xem nhanh công trình':''}" style="padding:${_compact?'0 6px':'2px 6px'};border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
       <div class="grp-name-text" style="font-size:${_compact?'8.5px':'11px'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:${_compact?'11px':'18px'}">
         <span style="font-weight:800;color:${numColor}">${prefix}</span> ${typeName}${isTodayUp?' 🔴':''}${isUrgent?' ⚡':''}${isActuallyDone?' <span style="color:#27ae60;font-size:9px">✓</span>':''}
       </div>
@@ -6697,7 +6698,7 @@ function renderMonthGantt(pjs) {
         }
       }
       const _qpClick = (task && task.pjId)
-        ? ` onclick="_quickPeek('${task.pjId}','${String(task.id||'').replace(/'/g,'')}',event,'${task.pjNum||''}')" title="Xem nhanh công trình (bấm)"`
+        ? ` ondblclick="_quickPeek('${task.pjId}','${String(task.id||'').replace(/'/g,'')}',event,'${task.pjNum||''}')" title="Bấm đúp để xem nhanh công trình"`
         : '';
       return `<td${_qpClick} style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible;vertical-align:middle${task && task.pjId ? ';cursor:pointer' : ''}"><div style="height:${_cellH}px;position:relative;overflow:visible">${inner}</div></td>`;
     }).join('');

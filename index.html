@@ -4052,6 +4052,14 @@ function _hidePhotoCopyOverlay() {
   if (el && el.parentNode) el.parentNode.removeChild(el);
 }
 
+// Mọi lời gọi mạng trong lúc copy ảnh đều phải có hạn giờ: treo 1 cái là chết cả vòng.
+function _withTimeout(p, ms, what) {
+  return Promise.race([ p, new Promise(function(_, rej) {
+    setTimeout(function(){ rej(new Error('qua ' + Math.round(ms/1000) + 's khong phan hoi (' + what + ')')); }, ms);
+  }) ]);
+}
+window._PHOTO_STEP_TIMEOUT = window._PHOTO_STEP_TIMEOUT || 30000;   // test/khan cap co the chinh
+
 async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
   if (!window._sbReady || !pjIdMap || !pjIdMap.length) return;
   var BASE = 'https://kefwrfxeneropihedght.supabase.co/storage/v1/object/public/project-photos/';
@@ -4066,9 +4074,10 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
     // hang tram dong du khong he loi, lam lo that bi chim mat.
     var _slots = [];
     try {
-      var _ls = await _sb.storage.from('project-photos').list(prevMid + '/' + pair.prevId, { limit: 100 });
-      if (_ls && _ls.error) throw _ls.error;   // lỗi quyền/mạng -> rơi xuống catch dò đủ 6 slot,
-                                               // trước đây coi như "thư mục rỗng" rồi bỏ qua im lặng
+      var _ls = await _withTimeout(
+        _sb.storage.from('project-photos').list(prevMid + '/' + pair.prevId, { limit: 100 }),
+        window._PHOTO_STEP_TIMEOUT, 'list ' + pair.prevId);
+      if (_ls && _ls.error) throw _ls.error;   // lỗi quyền/mạng -> rơi xuống catch dò đủ 6 slot
       ((_ls && _ls.data) ? _ls.data : []).forEach(function(f) {
         var _m = /^slot_(\d+)\.jpg$/.exec(f.name || '');
         if (_m && +_m[1] < 6) _slots.push(+_m[1]);
@@ -4076,31 +4085,37 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
       _slots.sort(function(a,b){ return a-b; });
     } catch(e) {
       console.warn('[Photo carryover] list fail ' + pair.prevId + ' — quay ve do 6 slot |', e.message);
-      _slots = [0,1,2,3,4,5];
     }
+    // Danh sách rỗng cũng KHÔNG tin (thiếu quyền list thì Supabase trả mảng rỗng mà không báo lỗi)
+    // -> dò thẳng 6 slot, thà tốn vài request còn hơn bỏ sót ảnh trong im lặng.
+    if (!_slots.length) _slots = [0, 1, 2, 3, 4, 5];
     _skipCount += (6 - _slots.length);
     for (var _si = 0; _si < _slots.length; _si++) {
       var slot = _slots[_si];
       var srcPath = prevMid + '/' + pair.prevId + '/slot_' + slot + '.jpg';
       var dstPath = newMid + '/' + pair.newId + '/slot_' + slot + '.jpg';
       try {
-        var dlRes = await _sb.storage.from('project-photos').download(srcPath);
+        var dlRes = await _withTimeout(_sb.storage.from('project-photos').download(srcPath),
+                                       window._PHOTO_STEP_TIMEOUT, 'tai ' + srcPath);
         if (dlRes.error || !dlRes.data) {
           // Slot này không có file ở tháng cũ — bình thường, skip im lặng
           _skipCount++;
           continue;
         }
-        var upRes = await _sb.storage.from('project-photos').upload(dstPath, dlRes.data, { contentType: 'image/jpeg', upsert: true });
+        var upRes = await _withTimeout(
+          _sb.storage.from('project-photos').upload(dstPath, dlRes.data, { contentType: 'image/jpeg', upsert: true }),
+          window._PHOTO_STEP_TIMEOUT, 'up ' + dstPath);
         if (upRes.error) {
           console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'][slot '+slot+'] UPLOAD FAIL', pair.newId, '|', upRes.error.message || upRes.error);
           _sbReport('_sbCopyMonthPhotos (upload)', upRes.error, {op:'upload', table:'project-photos'});
           _failCount++;
           continue;
         }
-        var dbRes = await _sb.from('project_photos').upsert(
-          { project_id: pair.newId, slot: slot, storage_path: dstPath, month_id: newMid },
-          { onConflict: 'project_id,slot' }
-        );
+        var dbRes = await _withTimeout(
+          _sb.from('project_photos').upsert(
+            { project_id: pair.newId, slot: slot, storage_path: dstPath, month_id: newMid },
+            { onConflict: 'project_id,slot' }),
+          window._PHOTO_STEP_TIMEOUT, 'ghi project_photos ' + dstPath);
         if (dbRes.error) {
           console.warn('[Photo carryover] ['+(i+1)+'/'+pjIdMap.length+'][slot '+slot+'] DB UPSERT FAIL', pair.newId, '|', dbRes.error.message || dbRes.error);
           _sbReport('_sbCopyMonthPhotos (db)', dbRes.error, {op:'upsert', table:'project_photos'});
@@ -9907,7 +9922,42 @@ async function _staffAfterLoad(){
   if (_myStaffName()) { _startMyNotifChannel(); await _loadMyNotifs(true); }
   try { await _loadSalaries(); } catch(e) {}
   try { _warnLegacySession(); } catch(e) {}
+  try { setTimeout(_warnMonthPhotosMissing, 1500); } catch(e) {}
   if (!_staffAfterLoad._t) _staffAfterLoad._t = setInterval(_revalidateAccount, 5 * 60 * 1000);
+}
+
+// Tháng đang xem có dự án nhưng KHÔNG dự án nào có ảnh, trong khi tháng liền trước có
+// -> gần như chắc chắn lần tạo tháng copy ảnh bị dở dang. Hiện băng mời copy lại,
+// thay vì để user tự phát hiện rồi báo "tự nhiên mất ảnh".
+function _photoCoverage(mid) {
+  var m = (D.months || {})[mid] || {};
+  var pjs = (m.projects || []).concat(m.projectsVN || []);
+  var P = window._sbPhotosByProjectId || {}, n = 0;
+  pjs.forEach(function(p){ if (P[p.id] && Object.keys(P[p.id]).length) n++; });
+  return { pj: pjs.length, has: n };
+}
+function _warnMonthPhotosMissing() {
+  try {
+    if (!window._sbReady || typeof _isAdmin !== 'function' || !_isAdmin()) return;
+    if (document.getElementById('photoMissBar')) return;
+    var mids = Object.keys(D.months || {}).sort();
+    var cur = D.activeMonth, i = mids.indexOf(cur);
+    if (i < 1) return;
+    var prev = mids[i - 1];
+    var c = _photoCoverage(cur), p = _photoCoverage(prev);
+    if (c.pj === 0 || c.has > 0 || p.has === 0) return;
+    var bar = document.createElement('div');
+    bar.id = 'photoMissBar';
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9993;background:#1d4ed8;color:#fff;'
+      + 'padding:9px 14px;font-size:12.5px;display:flex;gap:12px;align-items:center;justify-content:center;font-family:inherit';
+    bar.innerHTML = '🖼 Tháng <b>' + x(cur) + '</b> chưa có ảnh phối cảnh nào (' + c.pj + ' dự án), '
+      + 'trong khi tháng ' + x(prev) + ' có ' + p.has + ' dự án có ảnh — lần tạo tháng copy ảnh bị dở dang.'
+      + '<button class="btn btn-sm" style="background:#fff;color:#1d4ed8;border:none;font-weight:700;white-space:nowrap" '
+      + 'onclick="this.parentElement.remove(); _recoverMissingPhotos(\'' + x(cur) + '\',\'' + x(prev) + '\')">Copy ảnh sang tháng này</button>'
+      + '<button class="btn btn-sm" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5);white-space:nowrap" '
+      + 'onclick="this.parentElement.remove()">Để sau</button>';
+    document.body.appendChild(bar);
+  } catch(e) { console.warn('[photoMissBar]', e && e.message); }
 }
 
 // ── Realtime: dòng MỚI và thay đổi NHÓM (trước đây bị bỏ qua -> phải F5 mới thấy việc được giao) ──

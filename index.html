@@ -488,6 +488,31 @@ body.night .kj-tbl td[style*="background:#dbeafe"]{ background:#1c2f4a !importan
 /* hover dịu, không chói (thay #fff8e1) */
 body.night .kj-it-row:hover td{ background:rgba(255,255,255,.07) !important; }
 body.night .rtbl tbody tr:hover td, body.night .sum-tbl tr:hover td{ background:rgba(255,255,255,.07) !important; }
+/* Thẻ XEM NHANH công trình (bấm hạng mục / dòng timeline ở bảng 担当者別工程表) */
+#quickPeek{position:fixed;z-index:100001;width:400px;max-width:94vw;max-height:78vh;overflow:auto;
+  background:var(--card-bg,#fff);color:var(--dark,#222);border:1px solid var(--gray2,#dde3ec);
+  border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.38);font-family:inherit;
+  animation:modalPop .18s cubic-bezier(.2,.9,.25,1.05)}
+body.night #quickPeek{background:#141d30;color:#cdd6e6;border-color:#27344d}
+#quickPeek .qp-hd{display:flex;gap:8px;align-items:flex-start;padding:11px 12px 9px;
+  border-bottom:1px solid var(--gray2,#e6ebf2);position:sticky;top:0;background:inherit;z-index:2}
+body.night #quickPeek .qp-hd{border-color:#27344d}
+#quickPeek .qp-x{flex-shrink:0;border:none;background:transparent;color:inherit;opacity:.55;
+  font-size:16px;line-height:1;cursor:pointer;padding:2px 4px}
+#quickPeek .qp-x:hover{opacity:1}
+#quickPeek .qp-ph{display:flex;gap:5px;padding:9px 12px 4px}
+#quickPeek .qp-ph img{flex:1 1 0;min-width:0;height:78px;object-fit:cover;border-radius:7px;
+  border:1px solid var(--gray2,#e6ebf2);cursor:zoom-in;transition:transform .15s}
+#quickPeek .qp-ph img:hover{transform:scale(1.045)}
+#quickPeek .qp-sec{padding:8px 12px 3px;font-size:10.5px;font-weight:700;letter-spacing:.02em;opacity:.62}
+#quickPeek .qp-it{padding:5px 12px;border-bottom:1px dashed var(--gray2,#eef1f6);font-size:11.5px;line-height:1.45}
+body.night #quickPeek .qp-it{border-color:#223049}
+#quickPeek .qp-it.on{background:rgba(184,134,11,.16);border-left:3px solid var(--gold,#b8860b);padding-left:9px}
+#quickPeek .qp-ft{display:flex;gap:8px;justify-content:space-between;align-items:center;padding:10px 12px}
+#qpZoom{position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.86);display:flex;
+  align-items:center;justify-content:center;cursor:zoom-out;padding:24px}
+#qpZoom img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+
 /* 担当者別工程表 (#monthGanttCard) — lưới + chữ tối */
 body.night #monthGanttCard td, body.night #monthGanttCard th{ border-color:#2b3a58 !important; }
 body.night #monthGanttCard th{ color:#cdd6e6 !important; }
@@ -6309,6 +6334,148 @@ function getHolidays() {
   ];
 }
 
+// ── XEM NHANH công trình ngay trên bảng 担当者別工程表 ───────────────────────
+// Trước đây bấm vào hạng mục là NHẢY sang tab dự án, muốn xem người khác phải back.
+// Nay mở thẻ nhỏ tại chỗ: tên công trình + ảnh phối cảnh + toàn bộ hạng mục kèm
+// người làm / 作成-修正 / lịch UP -> xem để phân việc mà không rời bảng.
+function _qpPhotos(p, n) {
+  var sb = (window._sbPhotosByProjectId || {})[p.id] || {}, out = [];
+  for (var i = 0; i < 6 && out.length < (n || 3); i++) {
+    var u = sb[i] || (p.photos || [])[i];
+    if (u) out.push(u);
+  }
+  return out;
+}
+function _qpDM(d){ d = String(d || ''); return d.length >= 10 ? d.slice(8,10) + '/' + d.slice(5,7) : ''; }
+function _qpDiffDays(a, b){
+  function u(v){ var t = String(v).split('-').map(Number); return Date.UTC(t[0], t[1]-1, t[2]); }
+  try { return Math.round((u(a) - u(b)) / 86400000); } catch(e) { return 0; }
+}
+function _qpEsc(e){ if (e.key === 'Escape') { if (document.getElementById('qpZoom')) return; e.stopPropagation(); _closeQuickPeek(); } }
+function _qpOutside(e){
+  if (document.getElementById('qpZoom')) return;
+  var el = document.getElementById('quickPeek');
+  if (el && !el.contains(e.target)) _closeQuickPeek();
+}
+function _closeQuickPeek(){
+  var el = document.getElementById('quickPeek'); if (el) el.remove();
+  document.removeEventListener('keydown', _qpEsc, true);
+  document.removeEventListener('mousedown', _qpOutside, true);
+}
+function _qpZoom(url){
+  var o = document.createElement('div');
+  o.id = 'qpZoom';
+  o.innerHTML = '<img src="' + x(url) + '" alt="">';
+  o.onclick = function(){ o.remove(); };
+  document.body.appendChild(o);
+}
+function _qpOpenPj(pjId){ _closeQuickPeek(); try { selectPj(pjId); } catch(e) {} }
+
+function _quickPeek(pjId, rowId, ev, pjNum) {
+  try { if (ev) { ev.stopPropagation(); ev.preventDefault(); } } catch(e) {}
+  _closeQuickPeek();
+  var p = null;
+  try { p = (typeof getPjGlobal === 'function' && getPjGlobal(pjId)) || getPj(pjId); } catch(e) {}
+  if (!p) { try { toast('Không tìm thấy công trình này'); } catch(e) {} return; }
+
+  var todayStr = localDateStr(new Date());
+  var name = p.nameVN || p.nameJP || '—';
+  var sub  = [p.office, p.mainStaff ? '担当 ' + p.mainStaff : '', p.contact].filter(Boolean).join(' · ');
+
+  // Gom hạng mục: chưa UP (gần hạn trước) rồi mới tới đã UP
+  var items = [];
+  (p.groups || []).forEach(function(g){
+    (g.rows || []).forEach(function(r){
+      if (!r.staff && !r.dateFrom && !r.dateTo) return;
+      items.push({ g: g, r: r });
+    });
+  });
+  items.sort(function(a, b){
+    var ad = !!a.r.doneAt, bd = !!b.r.doneAt;
+    if (ad !== bd) return ad ? 1 : -1;
+    return String(a.r.dateTo || '9999').localeCompare(String(b.r.dateTo || '9999'));
+  });
+  var nRun = items.filter(function(i){ return !i.r.doneAt; }).length;
+  var nDone = items.length - nRun;
+
+  var photos = _qpPhotos(p, 3);
+  var phHtml = photos.length
+    ? '<div class="qp-ph">' + photos.map(function(u){
+        return '<img src="' + x(u) + '" loading="lazy" alt="" title="Bấm để xem to"'
+             + ' onerror="this.style.display=\'none\'"'
+             + ' onclick="_qpZoom(\'' + x(u).replace(/'/g, '%27') + '\')">';
+      }).join('') + '</div>'
+    : '<div style="padding:9px 12px 2px;font-size:11px;opacity:.55">🖼 Công trình này chưa có ảnh phối cảnh</div>';
+
+  var itHtml = items.length ? items.map(function(it){
+    var r = it.r, g = it.g;
+    var isNew = r.status === 'new';
+    var tag = isNew ? '作成' : '修正';
+    var tagCol = isNew ? '#15803d' : '#b45309';
+    var state;
+    if (r.doneAt) {
+      state = '<span style="color:#16a34a;font-weight:700">✓ đã UP ' + _qpDM(r.doneAt)
+            + (String(r.doneAt).length >= 16 ? ' ' + String(r.doneAt).slice(11,16) : '') + '</span>';
+    } else if (!r.dateTo) {
+      state = '<span style="opacity:.5">chưa có lịch</span>';
+    } else {
+      var dl = _qpDiffDays(r.dateTo, todayStr);
+      state = dl < 0  ? '<span style="color:#dc2626;font-weight:800">quá hạn ' + (-dl) + ' ngày</span>'
+            : dl === 0 ? '<span style="color:#dc2626;font-weight:800">🔴 UP hôm nay</span>'
+            : dl <= 3  ? '<span style="color:#ea580c;font-weight:800">⚡ còn ' + dl + ' ngày</span>'
+            :            '<span style="opacity:.65">còn ' + dl + ' ngày</span>';
+    }
+    var sched = (r.dateFrom ? _qpDM(r.dateFrom) + ' → ' : '') + (r.dateTo ? _qpDM(r.dateTo) : '—')
+              + (r.upTime ? ' <span style="opacity:.6">' + x(r.upTime) + '</span>' : '');
+    var on = (rowId && String(r.id) === String(rowId)) ? ' on' : '';
+    return '<div class="qp-it' + on + '">'
+      + '<div style="display:flex;gap:6px;align-items:baseline">'
+        + '<span style="font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + x(g.type || '—') + '</span>'
+        + '<span style="font-size:10px;font-weight:800;color:' + tagCol + '">' + tag + (r.qty ? ' ×' + r.qty : '') + '</span>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px;align-items:baseline;font-size:10.5px">'
+        + '<span style="opacity:.8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          + (r.staff ? '👤 ' + x(r.staff) : '<span style="opacity:.5">chưa giao</span>') + '</span>'
+        + '<span style="opacity:.75;white-space:nowrap">' + sched + '</span>'
+      + '</div>'
+      + '<div style="font-size:10px;margin-top:1px">' + state + '</div>'
+      + '</div>';
+  }).join('') : '<div style="padding:10px 12px;font-size:11.5px;opacity:.6">Chưa có hạng mục nào</div>';
+
+  var el = document.createElement('div');
+  el.id = 'quickPeek';
+  el.innerHTML =
+      '<div class="qp-hd">'
+        + '<div style="flex:1;min-width:0">'
+          + '<div style="font-size:13.5px;font-weight:800;line-height:1.3;word-break:break-word">'
+            + (pjNum ? '<span style="color:var(--gold,#b8860b)">[' + x(pjNum) + ']</span> ' : '') + x(name) + '</div>'
+          + (sub ? '<div style="font-size:10.5px;opacity:.65;margin-top:2px">' + x(sub) + '</div>' : '')
+        + '</div>'
+        + '<button class="qp-x" onclick="_closeQuickPeek()" title="Đóng (Esc)">✕</button>'
+      + '</div>'
+      + phHtml
+      + '<div class="qp-sec">Hạng mục — đang chạy ' + nRun + ' · đã UP ' + nDone + '</div>'
+      + itHtml
+      + '<div class="qp-ft">'
+        + '<span style="font-size:10px;opacity:.5">Esc để đóng</span>'
+        + '<button class="btn btn-sm" onclick="_qpOpenPj(\'' + x(p.id) + '\')" '
+          + 'style="white-space:nowrap;background:var(--gold,#c9a227);color:#1F3864;border:none;font-weight:700">Mở dự án đầy đủ →</button>'
+      + '</div>';
+  document.body.appendChild(el);
+
+  // Đặt cạnh chỗ bấm, không tràn khỏi màn hình
+  var vw = window.innerWidth, vh = window.innerHeight;
+  var rw = el.offsetWidth || 400, rh = el.offsetHeight || 320;
+  var cx = ev && ev.clientX != null ? ev.clientX : vw / 2;
+  var cy = ev && ev.clientY != null ? ev.clientY : vh / 3;
+  var left = cx + 16 + rw > vw - 8 ? cx - rw - 16 : cx + 16;
+  el.style.left = Math.max(8, Math.min(left, vw - rw - 8)) + 'px';
+  el.style.top  = Math.max(8, Math.min(cy - 30, vh - rh - 8)) + 'px';
+
+  document.addEventListener('keydown', _qpEsc, true);
+  document.addEventListener('mousedown', _qpOutside, true);
+}
+
 function renderMonthGantt(pjs) {
   // Window: JP/International (担当者別工程表) dùng CHUNG cửa sổ với bảng 実施設計工程表
   //   (_kouteiScreenWindow: từ đầu cửa sổ -> HẾT tháng tiếp theo) để 2 bảng khớp số ngày, dễ đối chiếu.
@@ -6459,7 +6626,7 @@ function renderMonthGantt(pjs) {
       : 'inherit';
     const prefix = isTrip ? '✈' : `[${r.pjNum||'?'}]`;
     const _compact = (isActuallyDone || isDoneByDate) && !isTodayUp && !isUrgent;  // đã UP xong/qua hạn -> thu gọn
-    return `<td ${r.pjId?`onclick="selectPj('${r.pjId}')"`:''} title="${r.pjId?'Mở dự án':''}" style="padding:${_compact?'0 6px':'2px 6px'};border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
+    return `<td ${r.pjId?`onclick="_quickPeek('${r.pjId}','${String(r.id||'').replace(/'/g,'')}',event,'${r.pjNum||''}')"`:''} title="${r.pjId?'Xem nhanh công trình (bấm)':''}" style="padding:${_compact?'0 6px':'2px 6px'};border-bottom:1px solid #eee;border-right:1px solid #ddd;background:var(--table-bg);vertical-align:middle;min-width:140px;max-width:180px;${r.pjId?'cursor:pointer':''}">
       <div class="grp-name-text" style="font-size:${_compact?'8.5px':'11px'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:${_compact?'11px':'18px'}">
         <span style="font-weight:800;color:${numColor}">${prefix}</span> ${typeName}${isTodayUp?' 🔴':''}${isUrgent?' ⚡':''}${isActuallyDone?' <span style="color:#27ae60;font-size:9px">✓</span>':''}
       </div>
@@ -6529,7 +6696,10 @@ function renderMonthGantt(pjs) {
           inner = `${bar}${upHtml}`;
         }
       }
-      return `<td style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible;vertical-align:middle"><div style="height:${_cellH}px;position:relative;overflow:visible">${inner}</div></td>`;
+      const _qpClick = (task && task.pjId)
+        ? ` onclick="_quickPeek('${task.pjId}','${String(task.id||'').replace(/'/g,'')}',event,'${task.pjNum||''}')" title="Xem nhanh công trình (bấm)"`
+        : '';
+      return `<td${_qpClick} style="background:${bg};border-left:${borderL};border-bottom:1px solid #ddd;padding:0;position:relative;overflow:visible;vertical-align:middle${task && task.pjId ? ';cursor:pointer' : ''}"><div style="height:${_cellH}px;position:relative;overflow:visible">${inner}</div></td>`;
     }).join('');
   }
 

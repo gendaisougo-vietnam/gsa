@@ -1581,6 +1581,34 @@ window._migrateCarryoverV1 = _migrateCarryoverV1;
 // trong mỗi group) nên nếu chỉ order theo sort_order thì Postgres KHÔNG bảo đảm thứ tự ổn
 // định giữa các trang -> LIMIT/OFFSET nhay lung tung -> vua mat dong vua trung dong.
 window._sbLoadShort = [];   // bang nao tai thieu dong so voi server
+// project_photos không chắc có cột id -> phân trang theo (project_id, slot),
+// chống trùng bằng chính cặp khoá đó. KHÔNG dùng _sbSelectAllPaged (nó cần cột id).
+async function _sbSelectPhotosPaged() {
+  const PAGE = 1000;
+  let all = [], seen = new Set(), from = 0, srvCount = null;
+  for (;;) {
+    const { data, error, count } = await _sb.from('project_photos')
+      .select('*', { count: 'exact' })
+      .order('project_id', { ascending: true })
+      .order('slot',       { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return { data: all.length ? all : null, error };
+    if (srvCount == null && typeof count === 'number') srvCount = count;
+    const chunk = data || [];
+    for (const r of chunk) {
+      const k = String(r.project_id) + '|' + String(r.slot);
+      if (seen.has(k)) continue;
+      seen.add(k); all.push(r);
+    }
+    if (chunk.length < PAGE) break;
+    from += PAGE;
+    if (from > 200000) { console.warn('[project_photos] vuot 200k dong, dung'); break; }
+  }
+  console.log('[project_photos] tai ' + all.length + '/' + (srvCount == null ? '?' : srvCount) + ' dong');
+  if (srvCount != null && all.length < srvCount)
+    console.warn('[project_photos] it hon server (' + all.length + '/' + srvCount + ') - co the co dong trung (project_id,slot)');
+  return { data: all, error: null };
+}
 async function _sbSelectAllPaged(table, orderCol) {
   const PAGE = 1000;
   let all = [], seen = new Set(), from = 0, srvCount = null;
@@ -1651,7 +1679,7 @@ async function sbLoadAll() {
     _sb.from('staff_leaves').select('*'),
     _sb.from('staff_late_log').select('*'),
     _sb.from('business_trips').select('*'),
-    _sb.from('project_photos').select('*'),
+    _sbSelectPhotosPaged(),
     _sb.from('org_units').select('*'),
     _sb.from('assignments').select('*'),
   ]);
@@ -4039,6 +4067,8 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
     var _slots = [];
     try {
       var _ls = await _sb.storage.from('project-photos').list(prevMid + '/' + pair.prevId, { limit: 100 });
+      if (_ls && _ls.error) throw _ls.error;   // lỗi quyền/mạng -> rơi xuống catch dò đủ 6 slot,
+                                               // trước đây coi như "thư mục rỗng" rồi bỏ qua im lặng
       ((_ls && _ls.data) ? _ls.data : []).forEach(function(f) {
         var _m = /^slot_(\d+)\.jpg$/.exec(f.name || '');
         if (_m && +_m[1] < 6) _slots.push(+_m[1]);
@@ -4106,6 +4136,21 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
   if (typeof toast === 'function' && (_okCount + _failCount) > 0) {
     toast('🖼 Ảnh carryover: ' + _okCount + ' slot OK, ' + _skipCount + ' skip, ' + _failCount + ' fail', 4500);
   }
+  // Tháng cũ CÓ ảnh mà copy được 0 slot => chắc chắn hỏng, hỏi copy lại ngay
+  // (trước đây chỉ ghi console, user không thấy nên tưởng "tự nhiên mất ảnh").
+  try {
+    var _prevHad = 0, _pm = window._sbPhotosByProjectId || {};
+    for (var _q = 0; _q < pjIdMap.length; _q++)
+      if (_pm[pjIdMap[_q].prevId] && Object.keys(_pm[pjIdMap[_q].prevId]).length) _prevHad++;
+    if (_okCount === 0 && _prevHad > 0) {
+      console.error('[Photo carryover] KHONG copy duoc anh nao, du thang cu co ' + _prevHad + ' du an co anh');
+      if (confirm('Khong copy duoc anh nao sang thang moi (' + _prevHad + ' du an thang truoc co anh).\n\n'
+                + 'Bam OK de thu copy lai ngay bay gio.')) {
+        await window._recoverMissingPhotos(newMid, prevMid);
+      }
+    }
+  } catch(e) { console.warn('[Photo carryover] canh bao 0 anh loi:', e && e.message); }
+
   var np = newMid.split('-'), nY = parseInt(np[0]), nM = parseInt(np[1]);
   var _delFileCount = 0, _delPjCount = 0;
   // Quét trước danh sách tháng sắp bị xoá ảnh CỨNG trên Storage — hỏi user, không hoàn tác được.
@@ -4152,6 +4197,22 @@ async function _sbCopyMonthPhotos(prevMid, newMid, pjIdMap) {
     try { toast('🧹 Đã dọn ' + _delFileCount + ' ảnh của ' + _delPjCount + ' dự án quá ' + PHOTO_RETENTION_MONTHS + ' tháng', 4000); } catch(e) {}
   }
 }
+
+// Đếm ảnh từng tháng trên server — chạy ở Console: _photoAudit()
+window._photoAudit = async function() {
+  if (!window._sbReady) { console.error('Supabase chua san sang'); return; }
+  var mids = Object.keys(D.months).sort(), out = [];
+  for (var i = 0; i < mids.length; i++) {
+    var r = await _sb.from('project_photos').select('project_id', { count:'exact', head:true }).eq('month_id', mids[i]);
+    var pjs = (D.months[mids[i]].projects||[]).concat(D.months[mids[i]].projectsVN||[]);
+    var inApp = 0; for (var k = 0; k < pjs.length; k++) inApp += (pjs[k].photos||[]).filter(Boolean).length;
+    out.push({ thang: mids[i], anh_tren_server: (r.count == null ? '?' : r.count), anh_app_dang_thay: inApp, so_du_an: pjs.length });
+  }
+  var t = await _sb.from('project_photos').select('project_id', { count:'exact', head:true });
+  console.table(out);
+  console.log('TONG anh tren server:', t.count, '| neu > 1000 va ban dang dung ban CU thi day chinh la nguyen nhan mat anh');
+  return out;
+};
 
 // Recovery utility: tìm cặp project (newMid ↔ prevMid) theo name match
 // Copy ảnh từ prev → new + upsert project_photos. Chạy từ Console.
